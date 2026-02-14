@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tale of Two Kingdoms</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="menu" class="card">
+        <h1>Tale of Two Kingdoms</h1>
+        <p class="sub">Preparing room and QR code...</p>
+      </section>
+
+      <section id="lobby" class="card hidden">
+        <h2>Room <span id="roomCode"></span></h2>
+        <p>Scan to join as controller:</p>
+        <img id="qrImage" alt="Join QR" />
+        <p><a id="joinLink" target="_blank" rel="noreferrer"></a></p>
+        <p id="lobbyMsg" class="msg">Waiting for 2 controllers...</p>
+      </section>
+
+      <section id="controllerPanel" class="card hidden">
+        <h2>Controller</h2>
+        <p id="controllerMsg" class="sub">Join a room to control your archer.</p>
+        <div id="controllerJoin">
+          <div class="row">
+            <input id="roomInput" type="text" maxlength="4" placeholder="CODE" />
+            <button id="joinBtn">Join</button>
+          </div>
+        </div>
+        <section id="controls" class="controls hidden">
+          <p class="sub">Aim direction and power (auto shoots every 1s)</p>
+          <canvas id="pullPad" width="320" height="220"></canvas>
+        </section>
+      </section>
+
+      <section id="hud" class="hud hidden">
+        <div id="leftHud"></div>
+        <div id="centerHud"></div>
+        <div id="rightHud"></div>
+      </section>
+
+      <canvas id="game" class="hidden" width="1600" height="900"></canvas>
+
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
