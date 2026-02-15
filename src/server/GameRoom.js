@@ -55,6 +55,7 @@ function makeSideState() {
     bountyLevel: 1,
     explosiveLevel: 1,
     powerLevel: 1,
+    dragonLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: 140,
@@ -301,28 +302,29 @@ class GameRoom {
         if (minion.side === a.side) continue;
         const hitR = minion.r + a.r;
         if (dist2(a, minion) <= hitR * hitR) {
-          this.queueHitSfx('minion', minion.x, minion.y, a.side);
+          let damage = a.dmg;
+          const core = this.dragonHeartCore(minion);
+          if (core) {
+            const coreHitR = core.r + a.r;
+            if (dist2(a, core) <= coreHitR * coreHitR) {
+              damage *= 2.85;
+              this.queueHitSfx('dragon', core.x, core.y, a.side);
+            } else {
+              this.queueHitSfx('minion', minion.x, minion.y, a.side);
+            }
+          } else {
+            this.queueHitSfx('minion', minion.x, minion.y, a.side);
+          }
           consumed = a.pierce <= 0;
           if (a.pierce > 0) a.pierce -= 1;
 
           if (minion.explosive) {
-            const exX = minion.x;
-            const exY = minion.y;
-            const exId = minion.id;
-            const exLevel = minion.explosiveLevel || 1;
-            if (a.side === 'left') this.left.gold += this.goldFromMinionKill(this.left);
-            else this.right.gold += this.goldFromMinionKill(this.right);
-            this.minions.splice(m, 1);
-            this.explodeMinion(exId, exX, exY, a.side, exLevel, a.dmg);
+            this.killMinion(m, a.side, { triggerExplosion: true, impactDamage: a.dmg });
             continue;
           }
 
-          minion.hp -= a.dmg;
-          if (minion.hp <= 0) {
-            if (a.side === 'left') this.left.gold += this.goldFromMinionKill(this.left);
-            else this.right.gold += this.goldFromMinionKill(this.right);
-            this.minions.splice(m, 1);
-          }
+          minion.hp -= damage;
+          if (minion.hp <= 0) this.killMinion(m, a.side);
         }
       }
 
@@ -373,6 +375,15 @@ class GameRoom {
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
       const m = this.minions[i];
       m.atkCd = Math.max(0, m.atkCd - dt);
+      if (m.dragonBreathTtl > 0) m.dragonBreathTtl = Math.max(0, m.dragonBreathTtl - dt);
+      if (m.gunFlashTtl > 0) m.gunFlashTtl = Math.max(0, m.gunFlashTtl - dt);
+      if (m.flying) {
+        if (!Number.isFinite(m.flyBaseY)) m.flyBaseY = m.y;
+        if (!Number.isFinite(m.flyPhase)) m.flyPhase = Math.random() * Math.PI * 2;
+        m.flyPhase += dt * (1.45 + Math.min(1.1, m.speed / 130));
+        const amp = 12 + m.r * 0.22;
+        m.y = clamp(m.flyBaseY + Math.sin(m.flyPhase) * amp, TOWER_Y - 220, TOWER_Y + 150);
+      }
       const enemySide = m.side === 'left' ? this.right : this.left;
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
@@ -381,8 +392,11 @@ class GameRoom {
       let best = Infinity;
       for (const other of this.minions) {
         if (other.side === m.side) continue;
-        const d = Math.abs(other.x - m.x) + Math.abs(other.y - m.y);
-        if (d < best && d < m.r + other.r + 24) {
+        const dx = other.x - m.x;
+        const dy = other.y - m.y;
+        const d = Math.hypot(dx, dy);
+        const reach = m.dragon ? 170 : (m.gunner ? (m.gunRange || 220) : m.r + other.r + 24);
+        if (d < best && d < reach) {
           target = other;
           best = d;
         }
@@ -390,21 +404,55 @@ class GameRoom {
 
       if (target) {
         if (m.atkCd === 0) {
-          target.hp -= m.dmg;
-          m.atkCd = 0.8;
+          if (m.dragon) {
+            this.dragonBreath(m, target);
+            m.atkCd = 1.05;
+          } else if (m.gunner) {
+            this.gunnerShot(m, target);
+            m.atkCd = 0.66;
+          } else {
+            target.hp -= m.dmg;
+            m.atkCd = 0.8;
+          }
         }
-      } else if (Math.abs(m.x - enemyX) < m.r + 20) {
+      } else if (Math.abs(m.x - enemyX) < m.r + 20 + (m.flying ? 34 : 0) + (m.dragon ? 50 : 0) + (m.gunner ? Math.max(0, (m.gunRange || 0) - 40) : 0)) {
         if (m.atkCd === 0) {
-          enemySide.towerHp -= m.dmg;
-          m.atkCd = 0.65;
+          if (m.dragon) {
+            enemySide.towerHp -= m.dmg * 1.24;
+            const mouthX = m.x + dir * (m.r * 0.95);
+            const mouthY = m.y - m.r * 0.24;
+            const impactX = enemyX;
+            const impactY = TOWER_Y - 26;
+            m.dragonBreathTtl = 0.24;
+            m.dragonBreathToX = impactX;
+            m.dragonBreathToY = impactY;
+            this.queueHitSfx('dragonfire', mouthX, mouthY, m.side);
+            this.queueHitSfx('dragonfire', impactX, impactY, m.side);
+            m.atkCd = 0.92;
+          } else if (m.gunner) {
+            enemySide.towerHp -= m.dmg * 0.72;
+            const muzzleX = m.x + dir * (m.r + 7);
+            const muzzleY = m.y - 2;
+            m.gunFlashTtl = 0.12;
+            this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
+            this.queueHitSfx('gunhit', enemyX, TOWER_Y - 24, m.side);
+            m.atkCd = 0.72;
+          } else {
+            enemySide.towerHp -= m.dmg;
+            m.atkCd = 0.65;
+          }
         }
       } else {
         m.x += dir * m.speed * dt;
+        if (m.flying) {
+          const desiredY = TOWER_Y - 120 + (m.side === 'left' ? -16 : 16);
+          m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 2.2);
+        }
       }
     }
 
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
-      if (this.minions[i].hp <= 0) this.minions.splice(i, 1);
+      if (this.minions[i].hp <= 0) this.killMinion(i, null);
     }
   }
 
@@ -428,9 +476,148 @@ class GameRoom {
     return Math.max(0.65, 2.2 - side.spawnLevel * 0.09);
   }
 
+  statDragonEvery(side) {
+    if (side.dragonLevel <= 0) return Infinity;
+    return Math.max(12, 28 - side.dragonLevel * 3);
+  }
+
+  statGunnerEvery(side) {
+    const tech = Math.floor((side.unitLevel + side.arrowLevel + side.economyLevel) / 6);
+    return Math.max(9, 13 - tech);
+  }
+
+  statNecroEvery() {
+    return 8;
+  }
+
   statSuperEvery(side) {
     if (side.superMinionLevel <= 0) return Infinity;
     return Math.max(3, 11 - side.superMinionLevel * 2);
+  }
+
+  dragonHeartCore(minion) {
+    if (!minion.dragon) return null;
+    const dir = minion.side === 'left' ? 1 : -1;
+    return {
+      x: minion.x + dir * (minion.r * 0.34),
+      y: minion.y - minion.r * 0.14,
+      r: Math.max(7, minion.r * 0.3),
+    };
+  }
+
+  dragonBreath(dragon, target) {
+    const base = dragon.dmg * 1.22;
+    const splash = base * 0.44;
+    const splashR2 = 72 * 72;
+    const dir = dragon.side === 'left' ? 1 : -1;
+    const mouthX = dragon.x + dir * (dragon.r * 0.95);
+    const mouthY = dragon.y - dragon.r * 0.24;
+    target.hp -= base;
+    dragon.dragonBreathTtl = 0.24;
+    dragon.dragonBreathToX = target.x;
+    dragon.dragonBreathToY = target.y;
+    this.queueHitSfx('dragonfire', mouthX, mouthY, dragon.side);
+    this.queueHitSfx('dragonfire', target.x, target.y, dragon.side);
+
+    for (const other of this.minions) {
+      if (other.id === target.id || other.side === dragon.side) continue;
+      const dx = other.x - target.x;
+      const dy = other.y - target.y;
+      if (dx * dx + dy * dy <= splashR2) other.hp -= splash;
+    }
+  }
+
+  gunnerShot(gunner, target) {
+    const dir = gunner.side === 'left' ? 1 : -1;
+    const muzzleX = gunner.x + dir * (gunner.r + 7);
+    const muzzleY = gunner.y - 2;
+    const dragonMul = Number.isFinite(gunner.gunDragonMul) ? gunner.gunDragonMul : 2;
+    const damage = gunner.dmg * (target.dragon ? dragonMul : 1.06);
+    const splash = damage * 0.2;
+    const splashR2 = 42 * 42;
+
+    target.hp -= damage;
+    gunner.gunFlashTtl = 0.14;
+    this.queueHitSfx('gunhit', muzzleX, muzzleY, gunner.side);
+    this.queueHitSfx('gunhit', target.x, target.y, gunner.side);
+
+    for (const other of this.minions) {
+      if (other.id === target.id || other.side === gunner.side) continue;
+      const dx = other.x - target.x;
+      const dy = other.y - target.y;
+      if (dx * dx + dy * dy <= splashR2) other.hp -= splash;
+    }
+  }
+
+  awardMinionKillGold(killerSide, scalar = 1) {
+    if (killerSide === 'left') this.left.gold += this.goldFromMinionKill(this.left, scalar);
+    else if (killerSide === 'right') this.right.gold += this.goldFromMinionKill(this.right, scalar);
+  }
+
+  killMinion(index, killerSide = null, options = {}) {
+    const minion = this.minions[index];
+    if (!minion) return;
+
+    const {
+      goldScalar = 1,
+      triggerExplosion = false,
+      impactDamage = null,
+    } = options;
+
+    this.awardMinionKillGold(killerSide, goldScalar);
+    this.minions.splice(index, 1);
+
+    if (triggerExplosion && minion.explosive) {
+      this.explodeMinion(minion.id, minion.x, minion.y, killerSide, minion.explosiveLevel || 1, impactDamage);
+    }
+
+    if (minion.necrominion) this.raiseNecroServants(minion);
+  }
+
+  raiseNecroServants(minion) {
+    const servantCount = minion.super ? 6 : 4;
+    const ring = minion.r + 22;
+    const baseHp = Math.max(30, minion.maxHp * 0.38);
+    const baseDmg = Math.max(7, minion.dmg * 0.42);
+    const speed = Math.max(56, minion.speed * 1.14);
+    const radius = Math.max(10, minion.r * 0.52);
+    const tier = Math.max(0, Math.min(2, (minion.tier || 0) - 1));
+    const level = Math.max(1, Math.floor((minion.level || 1) * 0.55));
+
+    this.queueHitSfx('powerup', minion.x, minion.y, minion.side);
+
+    for (let i = 0; i < servantCount; i += 1) {
+      const angle = (Math.PI * 2 * i) / servantCount + Math.random() * 0.45;
+      const radial = ring + (Math.random() * 14 - 7);
+      const x = clamp(minion.x + Math.cos(angle) * radial, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+      const y = clamp(minion.y + Math.sin(angle) * Math.min(28, ring * 0.55), TOWER_Y - 170, TOWER_Y + 170);
+
+      this.minions.push({
+        id: this.seq++,
+        side: minion.side,
+        x,
+        y,
+        hp: baseHp,
+        maxHp: baseHp,
+        dmg: baseDmg,
+        speed,
+        atkCd: Math.random() * 0.18,
+        r: radius,
+        tier,
+        level,
+        super: false,
+        explosive: false,
+        explosiveLevel: 1,
+        necrominion: false,
+        summoned: true,
+        dragon: false,
+        flying: false,
+        gunner: false,
+        gunRange: 0,
+        gunDragonMul: 1,
+        gunFlashTtl: 0,
+      });
+    }
   }
 
   normalizePull(sideName, x, y) {
@@ -535,12 +722,19 @@ class GameRoom {
     let speed = 54 + side.unitLevel * 1.5 + side.economyLevel * 0.6;
     const power = side.unitLevel + side.unitHpLevel + side.economyLevel;
     let tier = Math.min(3, Math.floor(power / 8));
+    const dragonEvery = this.statDragonEvery(side);
+    const isDragon = Number.isFinite(dragonEvery) && side.spawnCount % dragonEvery === 0;
+    const necroEvery = this.statNecroEvery(side);
+    const isNecrominion = !isDragon && side.spawnCount % necroEvery === 0;
+    const gunnerEvery = this.statGunnerEvery(side);
+    const isGunner = !isDragon && !isNecrominion && side.spawnCount % gunnerEvery === 0;
     const explosiveEvery = Math.max(3, 6 - (side.explosiveLevel - 1));
-    const explosive = side.spawnCount % explosiveEvery === 0;
+    const explosive = !isDragon && !isNecrominion && !isGunner && side.spawnCount % explosiveEvery === 0;
     const superEvery = this.statSuperEvery(side);
-    const isSuper = Number.isFinite(superEvery) && side.spawnCount % superEvery === 0;
+    const isSuper = !isDragon && !isGunner && Number.isFinite(superEvery) && side.spawnCount % superEvery === 0;
     let radius = 16;
     let visualPower = power;
+    let spawnY = TOWER_Y + (Math.random() * 110 - 55);
 
     if (isSuper) {
       const levelBoost = Math.max(1, side.superMinionLevel);
@@ -552,11 +746,40 @@ class GameRoom {
       visualPower = power + 8 + levelBoost * 3;
     }
 
+    if (isNecrominion) {
+      hp *= 1.26;
+      dmg *= 0.92;
+      speed *= 0.9;
+      radius = Math.max(radius, 20);
+      tier = Math.min(3, tier + 1);
+      visualPower += 6;
+    }
+
+    if (isGunner) {
+      const gunScale = 1 + (side.arrowLevel - 1) * 0.08;
+      hp *= 0.82;
+      dmg *= 1.22 * gunScale;
+      speed *= 0.94;
+      radius = Math.max(14, radius - 1);
+      visualPower += 6 + Math.floor(gunScale * 2);
+    }
+
+    if (isDragon) {
+      const dragonBoost = Math.max(1, side.dragonLevel);
+      hp *= 1.9 + dragonBoost * 0.32;
+      dmg *= 1.45 + dragonBoost * 0.16;
+      speed *= 1.18 + Math.min(0.22, dragonBoost * 0.04);
+      radius = Math.max(radius, 26);
+      tier = Math.min(3, tier + 1);
+      visualPower += 11 + dragonBoost * 2;
+      spawnY = TOWER_Y - 124 + (Math.random() * 70 - 35);
+    }
+
     this.minions.push({
       id: this.seq++,
       side: sideName,
       x,
-      y: TOWER_Y + (Math.random() * 110 - 55),
+      y: spawnY,
       hp,
       maxHp: hp,
       dmg,
@@ -568,6 +791,19 @@ class GameRoom {
       super: isSuper,
       explosive,
       explosiveLevel: side.explosiveLevel,
+      necrominion: isNecrominion,
+      summoned: false,
+      dragon: isDragon,
+      flying: isDragon,
+      flyBaseY: isDragon ? spawnY : null,
+      flyPhase: isDragon ? Math.random() * Math.PI * 2 : null,
+      dragonBreathTtl: 0,
+      dragonBreathToX: null,
+      dragonBreathToY: null,
+      gunner: isGunner,
+      gunRange: isGunner ? 198 + side.arrowLevel * 10 + side.unitLevel * 6 : 0,
+      gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
+      gunFlashTtl: 0,
     });
   }
 
@@ -583,11 +819,7 @@ class GameRoom {
       const dy = m.y - y;
       if (dx * dx + dy * dy > radius * radius) continue;
       m.hp -= damage;
-      if (m.hp <= 0) {
-        if (killerSide === 'left') this.left.gold += this.goldFromMinionKill(this.left, 0.75);
-        else this.right.gold += this.goldFromMinionKill(this.right, 0.75);
-        this.minions.splice(i, 1);
-      }
+      if (m.hp <= 0) this.killMinion(i, killerSide, { goldScalar: 0.75 });
     }
   }
 

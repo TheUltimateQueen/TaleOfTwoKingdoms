@@ -124,6 +124,24 @@ export class GameRenderer {
       speed = 300;
       life = 0.56;
       gravity = 520;
+    } else if (type === 'dragon') {
+      count = 24;
+      colors = ['#ffd76e', '#ff9955', '#fff1b8', '#99f7ff'];
+      speed = 320;
+      life = 0.48;
+      gravity = 540;
+    } else if (type === 'dragonfire') {
+      count = 30;
+      colors = ['#ffc44c', '#ff8d47', '#ff5f35', '#ffe3a1'];
+      speed = 330;
+      life = 0.5;
+      gravity = 520;
+    } else if (type === 'gunhit') {
+      count = 22;
+      colors = ['#ffd58a', '#ff955f', '#ff6b4c', '#f2f6ff'];
+      speed = 290;
+      life = 0.42;
+      gravity = 560;
     }
 
     for (let i = 0; i < count; i += 1) {
@@ -314,26 +332,29 @@ export class GameRenderer {
 
   drawUpgradeChargeBar(side, x, y, bw, bh, current, max) {
     const { ctx } = this;
-    const palette = TEAM_COLORS[side];
     const pct = Math.max(0, Math.min(1, current / Math.max(1, max)));
     const fillH = bh * pct;
 
-    ctx.fillStyle = '#0e1829d0';
+    ctx.fillStyle = '#1f1a10d6';
     ctx.fillRect(x, y, bw, bh);
-    ctx.strokeStyle = '#4e6288';
+    ctx.strokeStyle = '#9a7a20';
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, bw, bh);
 
-    ctx.fillStyle = palette.primary;
+    const goldGrad = ctx.createLinearGradient(0, y + bh, 0, y);
+    goldGrad.addColorStop(0, '#c98d2d');
+    goldGrad.addColorStop(0.55, '#f4c95d');
+    goldGrad.addColorStop(1, '#fff4bf');
+    ctx.fillStyle = goldGrad;
     ctx.fillRect(x + 2, y + bh - fillH + 1, bw - 4, Math.max(0, fillH - 2));
 
     if (pct >= 1) {
-      ctx.strokeStyle = '#fff4b2';
+      ctx.strokeStyle = '#fff4bf';
       ctx.lineWidth = 2;
       ctx.strokeRect(x - 2, y - 2, bw + 4, bh + 4);
     }
 
-    ctx.fillStyle = '#c7d8f3';
+    ctx.fillStyle = '#f6e6b8';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('UPG', x + bw / 2, y - 8);
@@ -361,19 +382,21 @@ export class GameRenderer {
 
   drawUpgradeCard(card) {
     const { ctx } = this;
-    const tint = card.side === 'left' ? '#3e6fa8' : '#8a4a4a';
-    const bg = '#253753';
+    const tint = card.side === 'left' ? '#cfab52' : '#c58f3b';
+    const bg = '#3a3020';
     ctx.fillStyle = bg;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
+    ctx.fillStyle = '#f4d5852b';
+    ctx.fillRect(card.x - card.w / 2 + 1, card.y - card.h / 2 + 1, card.w - 2, card.h - 2);
     ctx.strokeStyle = tint;
     ctx.lineWidth = 2;
     ctx.strokeRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
 
-    ctx.fillStyle = '#e9f1ff';
+    ctx.fillStyle = '#fff1c8';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(UPGRADE_LABELS[card.type] || 'Upgrade', card.x, card.y - 2);
-    ctx.fillStyle = '#a8bad9';
+    ctx.fillStyle = '#d4b67e';
     ctx.font = '10px sans-serif';
     ctx.fillText('shoot to take', card.x, card.y + 12);
   }
@@ -430,8 +453,16 @@ export class GameRenderer {
   }
 
   drawMinionSprite(minion) {
+    if (minion.dragon) {
+      this.drawDragonSprite(minion);
+      return;
+    }
+
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
+    const isNecro = Boolean(minion.necrominion);
+    const isSummoned = Boolean(minion.summoned);
+    const isGunner = Boolean(minion.gunner);
     const t = Math.max(0, Math.min(3, minion.tier || 0));
     const stage = Math.max(0, Math.min(5, Math.floor((minion.level || 0) / 4)));
     const scale = minion.super ? 2 : 1;
@@ -457,6 +488,14 @@ export class GameRenderer {
       ctx.stroke();
     }
 
+    if (isNecro) {
+      ctx.strokeStyle = '#6ff8bf80';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, bodyR * scale + 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(scale, scale);
@@ -476,6 +515,14 @@ export class GameRenderer {
     ctx.strokeStyle = palette.dark;
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    if (isSummoned) {
+      ctx.strokeStyle = '#88ffc680';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, bodyR - 1, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.fillStyle = armor;
     ctx.fillRect(-plateW / 2, -10 - t - stage * 0.2, plateW, plateH);
@@ -502,25 +549,70 @@ export class GameRenderer {
       ctx.fill();
     }
 
+    if (isNecro) {
+      ctx.strokeStyle = '#97ffd2';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(0, -2, 4.8, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-3, 2);
+      ctx.lineTo(3, 2);
+      ctx.stroke();
+    }
+
     const handX = dir * (bodyR - 1);
     const handY = 2;
 
     if (!minion.explosive) {
-      ctx.strokeStyle = '#d4dde8';
-      ctx.lineWidth = minion.super ? 3.6 : 2.5;
-      ctx.beginPath();
-      ctx.moveTo(handX, handY);
-      ctx.lineTo(handX + dir * weaponLen, handY - 2);
-      ctx.stroke();
+      if (isGunner) {
+        const gunLen = weaponLen + 7;
+        const muzzleX = handX + dir * (gunLen + 2);
+        const muzzleY = handY - 2;
+        const bodyStart = handX + dir * 1;
+        const bodyEnd = handX + dir * (gunLen * 0.58);
 
-      if (stage >= 3 || minion.super) {
-        ctx.strokeStyle = '#f3f7ff';
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = '#d9e5fb';
+        ctx.lineWidth = minion.super ? 4 : 3.1;
         ctx.beginPath();
-        ctx.moveTo(handX + dir * (weaponLen - 1), handY - 4);
-        ctx.lineTo(handX + dir * (weaponLen + 4), handY - 2);
-        ctx.lineTo(handX + dir * (weaponLen - 1), handY);
+        ctx.moveTo(handX, handY);
+        ctx.lineTo(handX + dir * gunLen, handY - 2);
         ctx.stroke();
+
+        ctx.fillStyle = '#455977';
+        ctx.fillRect(Math.min(bodyStart, bodyEnd), handY - 3.2, Math.abs(bodyEnd - bodyStart), 6.4);
+        ctx.fillStyle = '#1f2736';
+        ctx.fillRect(Math.min(handX, handX + dir * 4), handY + 1, Math.abs(dir * 4), 3.5);
+
+        const flash = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
+        if (flash > 0) {
+          const flashR = 2 + flash * 5;
+          ctx.fillStyle = '#fff2b0';
+          ctx.beginPath();
+          ctx.arc(muzzleX, muzzleY, flashR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ff9f5f';
+          ctx.beginPath();
+          ctx.arc(muzzleX + dir * 2, muzzleY, flashR * 0.65, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        ctx.strokeStyle = '#d4dde8';
+        ctx.lineWidth = minion.super ? 3.6 : 2.5;
+        ctx.beginPath();
+        ctx.moveTo(handX, handY);
+        ctx.lineTo(handX + dir * weaponLen, handY - 2);
+        ctx.stroke();
+
+        if (stage >= 3 || minion.super) {
+          ctx.strokeStyle = '#f3f7ff';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(handX + dir * (weaponLen - 1), handY - 4);
+          ctx.lineTo(handX + dir * (weaponLen + 4), handY - 2);
+          ctx.lineTo(handX + dir * (weaponLen - 1), handY);
+          ctx.stroke();
+        }
       }
     }
 
@@ -573,6 +665,20 @@ export class GameRenderer {
       ctx.fillText('SUPER', x, y - bodyR * scale - 18);
     }
 
+    if (isNecro) {
+      ctx.fillStyle = '#a9ffe0';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('NECRO', x, y - bodyR * scale - (minion.super ? 34 : 20));
+    }
+
+    if (isGunner) {
+      ctx.fillStyle = '#ffd6a1';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('GUNNER', x, y - bodyR * scale - (minion.super ? 34 : 20));
+    }
+
     const hpPct = Math.max(0, minion.hp / minion.maxHp);
     const hpW = 36 * scale;
     const hpX = x - hpW / 2;
@@ -581,6 +687,167 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+  }
+
+  dragonHeartCore(minion) {
+    const dir = minion.side === 'left' ? 1 : -1;
+    return {
+      x: minion.x + dir * (minion.r * 0.34),
+      y: minion.y - minion.r * 0.14,
+      r: Math.max(7, minion.r * 0.3),
+    };
+  }
+
+  drawDragonSprite(minion) {
+    const { ctx } = this;
+    const palette = TEAM_COLORS[minion.side];
+    const dir = minion.side === 'left' ? 1 : -1;
+    const x = minion.x;
+    const y = minion.y;
+    const scale = minion.super ? 1.22 : 1;
+    const bodyW = minion.r * 1.42 * scale;
+    const bodyH = minion.r * 0.82 * scale;
+    const wingSpan = minion.r * 2.4 * scale;
+    const wingLift = 0.35 + (Math.sin((minion.flyPhase || 0) * 2) + 1) * 0.27;
+    const mouthX = x + dir * (minion.r * 0.95);
+    const mouthY = y - minion.r * 0.24;
+
+    ctx.fillStyle = '#00000026';
+    ctx.beginPath();
+    ctx.ellipse(x, y + bodyH + 14, bodyW * 0.95, 8 + bodyH * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    ctx.fillStyle = '#263850';
+    ctx.beginPath();
+    ctx.moveTo(-dir * 8, -4);
+    ctx.lineTo(-dir * (wingSpan * 0.55), -bodyH * (0.8 + wingLift));
+    ctx.lineTo(-dir * (wingSpan * 0.95), -bodyH * (0.15 + wingLift * 0.3));
+    ctx.lineTo(-dir * (wingSpan * 0.2), bodyH * 0.3);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#2f4664';
+    ctx.beginPath();
+    ctx.moveTo(dir * 4, -2);
+    ctx.lineTo(dir * (wingSpan * 0.5), -bodyH * (0.75 + wingLift * 0.9));
+    ctx.lineTo(dir * (wingSpan * 0.92), -bodyH * (0.08 + wingLift * 0.25));
+    ctx.lineTo(dir * (wingSpan * 0.18), bodyH * 0.3);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#395579';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, bodyW, bodyH, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1a2a40';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#8cbcff88';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-dir * (bodyW * 0.5), 2);
+    ctx.lineTo(dir * (bodyW * 0.45), 2);
+    ctx.stroke();
+
+    const headX = dir * (bodyW * 0.82);
+    const headY = -bodyH * 0.28;
+    ctx.fillStyle = '#45648c';
+    ctx.beginPath();
+    ctx.arc(headX, headY, bodyH * 0.68, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1a2a40';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#adc9ea';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(headX + dir * 2, headY - bodyH * 0.95);
+    ctx.lineTo(headX + dir * 7, headY - bodyH * 1.4);
+    ctx.moveTo(headX - dir * 1, headY - bodyH * 0.88);
+    ctx.lineTo(headX + dir * 2, headY - bodyH * 1.36);
+    ctx.stroke();
+
+    ctx.fillStyle = '#f8fbff';
+    ctx.beginPath();
+    ctx.arc(headX + dir * 4.5, headY - 1, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#5e7ea6';
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(-dir * (bodyW * 0.8), bodyH * 0.05);
+    ctx.quadraticCurveTo(-dir * (bodyW * 1.2), bodyH * 0.2, -dir * (bodyW * 1.45), bodyH * 0.65);
+    ctx.stroke();
+
+    const heart = this.dragonHeartCore(minion);
+    const heartGradient = ctx.createRadialGradient(heart.x - x, heart.y - y, 1, heart.x - x, heart.y - y, heart.r + 4);
+    heartGradient.addColorStop(0, '#fff5d4');
+    heartGradient.addColorStop(0.45, '#ff7f4b');
+    heartGradient.addColorStop(1, '#ff3a2e');
+    ctx.fillStyle = heartGradient;
+    ctx.beginPath();
+    ctx.arc(heart.x - x, heart.y - y, heart.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffdcb0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(heart.x - x, heart.y - y, heart.r + 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+
+    ctx.fillStyle = '#ffc78d';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('DRAGON', x, y - bodyH - 18);
+
+    if ((minion.dragonBreathTtl || 0) > 0) {
+      const toX = Number.isFinite(minion.dragonBreathToX) ? minion.dragonBreathToX : mouthX + dir * 120;
+      const toY = Number.isFinite(minion.dragonBreathToY) ? minion.dragonBreathToY : mouthY + 10;
+      const flameLife = Math.max(0, Math.min(1, minion.dragonBreathTtl / 0.24));
+
+      ctx.save();
+      ctx.globalAlpha = 0.35 + flameLife * 0.55;
+      const flameGradient = ctx.createLinearGradient(mouthX, mouthY, toX, toY);
+      flameGradient.addColorStop(0, '#fff1b2');
+      flameGradient.addColorStop(0.35, '#ffb648');
+      flameGradient.addColorStop(0.75, '#ff7a33');
+      flameGradient.addColorStop(1, '#ff4c2c');
+      ctx.strokeStyle = flameGradient;
+      ctx.lineWidth = 6 + flameLife * 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(mouthX, mouthY);
+      ctx.quadraticCurveTo(
+        (mouthX + toX) * 0.5 + Math.sin((minion.flyPhase || 0) * 5) * 10,
+        (mouthY + toY) * 0.5 - 8,
+        toX,
+        toY
+      );
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.6 + flameLife * 0.35;
+      ctx.fillStyle = '#ffe7a0';
+      ctx.beginPath();
+      ctx.arc(mouthX, mouthY, 3.2 + flameLife * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const hpPct = Math.max(0, minion.hp / minion.maxHp);
+    const hpW = 48 * scale;
+    const hpX = x - hpW / 2;
+    const hpY = y - (bodyH + 12);
+    ctx.fillStyle = '#101420cc';
+    ctx.fillRect(hpX, hpY, hpW, 6);
+    ctx.fillStyle = '#6bff95';
+    ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
   }
 
   drawArrow(arrow) {

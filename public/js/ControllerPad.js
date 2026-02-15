@@ -50,9 +50,10 @@ export class ControllerPad {
     const sx = ((clientX - rect.left) / rect.width) * this.canvas.width;
     const sy = ((clientY - rect.top) / rect.height) * this.canvas.height;
 
-    const cx = this.canvas.width / 2;
-    const cy = this.canvas.height - 22;
-    const radius = Math.min(this.canvas.width * 0.4, this.canvas.height * 0.7);
+    const inset = 22;
+    const cx = this.side === 'left' ? inset : this.canvas.width - inset;
+    const cy = this.canvas.height - inset;
+    const radius = Math.max(20, Math.min(this.canvas.width - inset * 2, this.canvas.height - inset * 2));
 
     let vx = (sx - cx) / radius;
     let vy = (sy - cy) / radius;
@@ -81,39 +82,46 @@ export class ControllerPad {
 
     const w = canvas.width;
     const h = canvas.height;
-    const cx = w / 2;
-    const cy = h - 22;
-    const radius = Math.min(w * 0.4, h * 0.7);
+    const inset = 22;
+    const cx = this.side === 'left' ? inset : w - inset;
+    const cy = h - inset;
+    const radius = Math.max(20, Math.min(w - inset * 2, h - inset * 2));
+    const startAngle = this.side === 'left' ? Math.PI * 1.5 : Math.PI;
+    const endAngle = this.side === 'left' ? Math.PI * 2 : Math.PI * 1.5;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0f1727';
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0a1322');
+    bg.addColorStop(1, '#0f1a2f');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = '#3f547a';
-    ctx.lineWidth = 2;
+    const fill = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius);
+    fill.addColorStop(0, '#29406288');
+    fill.addColorStop(1, '#1a2a4380');
+    ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.arc(cx, cy, radius, Math.PI, 0);
-    ctx.stroke();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+    ctx.closePath();
+    ctx.fill();
 
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - radius);
-    ctx.lineTo(cx, cy);
-    ctx.stroke();
-
-    ctx.fillStyle = '#3d4a6828';
-    if (this.side === 'left') {
+    for (let i = 1; i <= 3; i += 1) {
+      ctx.strokeStyle = i === 3 ? '#6284bfcc' : '#4b638a88';
+      ctx.lineWidth = i === 3 ? 2.2 : 1.2;
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius, Math.PI * 1.5, Math.PI * 2, false);
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, radius, Math.PI, Math.PI * 1.5, false);
-      ctx.closePath();
-      ctx.fill();
+      ctx.arc(cx, cy, (radius * i) / 3, startAngle, endAngle, false);
+      ctx.stroke();
     }
+
+    ctx.strokeStyle = '#7a95c1bb';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + (this.side === 'left' ? 1 : -1) * radius, cy);
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx, cy - radius);
+    ctx.stroke();
 
     const dx = -this.pull.x * radius;
     const dy = this.pull.y * radius;
@@ -123,30 +131,28 @@ export class ControllerPad {
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(px, py);
-    ctx.strokeStyle = '#d0dcff88';
+    ctx.strokeStyle = '#e7f0ffcc';
+    ctx.lineWidth = 2.4;
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(px, py, 9, 0, Math.PI * 2);
-    ctx.fillStyle = '#f4c95d';
+    ctx.arc(px, py, 12, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd36c';
     ctx.fill();
+    ctx.strokeStyle = '#3a2f17';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
 
     const powerPct = Math.round(Math.min(1, Math.hypot(this.pull.x, this.pull.y)) * 100);
 
+    const labelX = this.side === 'left' ? w * 0.52 : w * 0.48;
     ctx.fillStyle = '#afc7ef';
-    ctx.font = '13px sans-serif';
+    ctx.font = '14px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Aim direction + power', cx, 18);
-
-    ctx.font = '12px sans-serif';
-    if (this.side === 'left') ctx.fillText('Aim arc', cx + radius * 0.56, cy - radius * 0.62);
-    else ctx.fillText('Aim arc', cx - radius * 0.56, cy - radius * 0.62);
-
+    ctx.fillText('Drag in the cone to aim + power', labelX, 24);
     ctx.fillStyle = '#d8e5ff';
-    if (this.side === 'left') ctx.fillText('Fire ->', cx + radius * 0.56, cy - radius * 0.44);
-    else ctx.fillText('<- Fire', cx - radius * 0.56, cy - radius * 0.44);
-    ctx.fillText('Up', cx, cy - radius - 8);
-    ctx.fillText('Farther = stronger', cx, cy - radius + 10);
-    ctx.fillText(`Power ${powerPct}%`, cx, cy - 6);
+    ctx.font = '13px sans-serif';
+    ctx.fillText(this.side === 'left' ? 'Fire ->' : '<- Fire', labelX, 44);
+    ctx.fillText(`Power ${powerPct}%`, labelX, 64);
   }
 }

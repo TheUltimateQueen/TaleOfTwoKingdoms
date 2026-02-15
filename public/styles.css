@@ -169,7 +169,7 @@ button:hover {
 }
 
 .controls {
-  width: min(520px, 100%);
+  width: min(760px, 100%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -178,7 +178,9 @@ button:hover {
 
 #pullPad {
   width: 100%;
-  max-width: 420px;
+  max-width: 700px;
+  aspect-ratio: 1 / 1;
+  height: auto;
   border: 1px solid var(--edge);
   border-radius: 12px;
   background: #101b2ddd;
@@ -207,8 +209,15 @@ button:hover {
     padding: 10px;
   }
 
+  body.controller-mode #controls {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    justify-content: center;
+  }
+
   #pullPad {
     max-width: 100%;
-    max-height: min(52dvh, 320px);
+    max-height: min(74dvh, 640px);
   }
 }

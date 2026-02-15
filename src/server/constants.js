@@ -20,6 +20,7 @@ module.exports = {
     'bountyLevel',
     'explosiveLevel',
     'powerLevel',
+    'dragonLevel',
     'superMinionLevel',
   ],
   SHOT_POWER_TYPES: ['multiShot', 'ultraShot', 'pierceShot', 'heavyShot'],

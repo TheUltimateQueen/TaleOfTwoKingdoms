@@ -10,6 +10,7 @@ export const UPGRADE_LABELS = {
   bountyLevel: 'Bounty+',
   explosiveLevel: 'Bombs+',
   powerLevel: 'Power+',
+  dragonLevel: 'Dragon+',
   superMinionLevel: 'Super+',
 };
 
