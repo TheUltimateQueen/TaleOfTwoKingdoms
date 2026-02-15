@@ -14,6 +14,7 @@ module.exports = {
     'arrowLevel',
     'unitLevel',
     'multiShotLevel',
+    'volleyLevel',
     'spawnLevel',
     'unitHpLevel',
     'resourceLevel',

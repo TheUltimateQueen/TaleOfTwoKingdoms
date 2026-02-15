@@ -1,17 +1,33 @@
 export const SHOT_INTERVAL = 1;
 
 export const UPGRADE_LABELS = {
-  arrowLevel: 'Arrow+',
-  unitLevel: 'Unit+',
-  multiShotLevel: 'Multi+',
-  spawnLevel: 'Spawn+',
-  unitHpLevel: 'Armor+',
-  resourceLevel: 'Harvest+',
-  bountyLevel: 'Bounty+',
-  explosiveLevel: 'Bombs+',
-  powerLevel: 'Power+',
-  dragonLevel: 'Dragon+',
-  superMinionLevel: 'Super+',
+  arrowLevel: 'Arrow Dmg+',
+  unitLevel: 'Unit Dmg+',
+  multiShotLevel: 'Arrow Count+',
+  volleyLevel: 'Volley+',
+  spawnLevel: 'Spawn Speed+',
+  unitHpLevel: 'Unit HP+',
+  resourceLevel: 'Resource Gold+',
+  bountyLevel: 'Kill Gold+',
+  explosiveLevel: 'Bomb Rate+',
+  powerLevel: 'Power Shot+',
+  dragonLevel: 'Dragon Rate+',
+  superMinionLevel: 'Super Rate+',
+};
+
+export const UPGRADE_HINTS = {
+  arrowLevel: '+arrow damage',
+  unitLevel: '+unit damage',
+  multiShotLevel: '+shot arrows',
+  volleyLevel: '+volley arrows',
+  spawnLevel: '+spawn speed',
+  unitHpLevel: '+unit hp',
+  resourceLevel: '+resource gold',
+  bountyLevel: '+kill gold',
+  explosiveLevel: '+bomb spawn rate',
+  powerLevel: '+power shot scale',
+  dragonLevel: '+dragon spawn rate',
+  superMinionLevel: '+super spawn rate',
 };
 
 export const SHOT_POWER_LABELS = {

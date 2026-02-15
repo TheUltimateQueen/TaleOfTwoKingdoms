@@ -45,6 +45,10 @@ class GameServer {
         if (room.started) {
           const sfxEvents = room.consumeSfxEvents();
           if (sfxEvents.length) this.io.to(room.id).emit('hit_sfx', sfxEvents);
+          const damageEvents = room.consumeDamageEvents();
+          if (damageEvents.length) this.io.to(room.id).emit('damage_text', damageEvents);
+          const lineEvents = room.consumeLineEvents();
+          if (lineEvents.length) this.io.to(room.id).emit('hero_line', lineEvents);
           this.broadcastRoom(room);
         }
       }

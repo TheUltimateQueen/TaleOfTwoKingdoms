@@ -15,6 +15,33 @@ function powerStatus(power, shots) {
   return `${power} x${shots}`;
 }
 
+function arrowHitRate(sideState) {
+  const fired = Math.max(0, sideState?.arrowsFired || 0);
+  const hits = Math.max(0, sideState?.arrowHits || 0);
+  if (!fired) return 0;
+  return Math.round((hits / fired) * 100);
+}
+
+function comboTier(sideState) {
+  const combo = Math.max(0, Math.min(10, sideState?.comboHitStreak || 0));
+  if (combo >= 10) return 4;
+  if (combo >= 7) return 3;
+  if (combo >= 4) return 2;
+  return 1;
+}
+
+function comboStatus(sideState) {
+  const streak = Math.max(0, Math.min(10, sideState?.comboHitStreak || 0));
+  const tier = comboTier(sideState);
+  if (streak >= 10) return `x${tier} MAX (AOE)`;
+  return `x${tier} (${streak}/10)`;
+}
+
+function killGoldMultiplier(sideState) {
+  const level = Math.max(1, sideState?.bountyLevel || 1);
+  return (1 + (level - 1) * 0.2).toFixed(2);
+}
+
 export class GameClient {
   constructor(socket, isController) {
     this.socket = socket;
@@ -127,6 +154,20 @@ export class GameClient {
         this.renderer.emitHitParticles(e.type, e.x, e.y, e.side);
       }
     });
+
+    this.socket.on('damage_text', (events) => {
+      if (this.isController || !Array.isArray(events)) return;
+      for (const e of events) {
+        this.renderer.emitDamageNumber(e.amount, e.x, e.y);
+      }
+    });
+
+    this.socket.on('hero_line', (events) => {
+      if (this.isController || !Array.isArray(events)) return;
+      for (const e of events) {
+        this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
+      }
+    });
   }
 
   setupAudio() {
@@ -205,7 +246,7 @@ export class GameClient {
     if (!this.state.side) return;
 
     const me = snapshot[this.state.side];
-    this.controllerMsg.textContent = `${sideLabel(this.state.side)} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)}`;
+    this.controllerMsg.textContent = `${sideLabel(this.state.side)} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
 
     if (snapshot.gameOver) {
       this.controllerMsg.textContent = snapshot.winner === this.state.side
@@ -237,7 +278,12 @@ export class GameClient {
     this.lobby.classList.toggle('hidden', mode !== 'lobby');
     this.canvas.classList.toggle('hidden', mode !== 'game');
     this.hud.classList.toggle('hidden', mode !== 'game');
-    if (!this.isController) this.setKeepAwake(mode === 'game');
+    if (!this.isController) {
+      const inGame = mode === 'game';
+      document.documentElement.classList.toggle('display-game-mode', inGame);
+      document.body.classList.toggle('display-game-mode', inGame);
+      this.setKeepAwake(inGame);
+    }
   }
 
   setControllerMode(joined) {
@@ -253,10 +299,14 @@ export class GameClient {
   }
 
   updateHud(s) {
-    const lp = Math.round((s.left.upgradeCharge / Math.max(1, s.left.upgradeChargeMax)) * 100);
-    const rp = Math.round((s.right.upgradeCharge / Math.max(1, s.right.upgradeChargeMax)) * 100);
-    this.leftHud.textContent = `${s.players.left?.name || 'West'} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${lp}% | Eco ${s.left.economyLevel} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)}`;
-    this.rightHud.textContent = `${s.players.right?.name || 'East'} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rp}% | Eco ${s.right.economyLevel} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)}`;
+    const lp = Math.round(Math.max(0, Math.min(1, s.left.upgradeCharge / Math.max(1, s.left.upgradeChargeMax))) * 100);
+    const rp = Math.round(Math.max(0, Math.min(1, s.right.upgradeCharge / Math.max(1, s.right.upgradeChargeMax))) * 100);
+    const leftDebt = Math.max(0, Math.ceil(s.left.upgradeChargeMax - s.left.upgradeCharge));
+    const rightDebt = Math.max(0, Math.ceil(s.right.upgradeChargeMax - s.right.upgradeCharge));
+    const leftUpg = leftDebt > 0 ? `Debt ${leftDebt} (${lp}%)` : 'READY';
+    const rightUpg = rightDebt > 0 ? `Debt ${rightDebt} (${rp}%)` : 'READY';
+    this.leftHud.textContent = `${s.players.left?.name || 'West'} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
+    this.rightHud.textContent = `${s.players.right?.name || 'East'} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
     this.centerHud.textContent = `Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
   }
 
@@ -276,6 +326,8 @@ export class GameClient {
     } else {
       document.documentElement.classList.remove('controller-mode');
       document.body.classList.remove('controller-mode');
+      document.documentElement.classList.add('display-mode');
+      document.body.classList.add('display-mode');
       this.controllerPanel.classList.add('hidden');
       this.setDisplayMode('menu');
       this.socket.emit('create_room', {
