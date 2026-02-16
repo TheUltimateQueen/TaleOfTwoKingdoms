@@ -404,6 +404,7 @@ class GameRoom {
           }
 
           this.dealDamageToMinion(minion, damage);
+          this.applyFlameArrowImpact(a, minion, damage);
           this.applyMaxComboSplash(a, minion, damage);
           if (minion.hp <= 0) this.killMinion(m, a.side);
         }
@@ -676,6 +677,35 @@ class GameRoom {
       const victim = this.minions[idx];
       this.dealDamageToMinion(victim, splash);
       if (victim.hp <= 0) this.killMinion(idx, arrow.side, { goldScalar: 0.75 });
+    }
+  }
+
+  applyFlameArrowImpact(arrow, target, baseDamage) {
+    if (!arrow || arrow.powerType !== 'flameShot' || !target) return;
+
+    const burnDamage = Math.max(1, baseDamage * (Number(arrow.flameBurn) || 0.18));
+    this.dealDamageToMinion(target, burnDamage);
+
+    const splashDamage = Math.max(1, baseDamage * (Number(arrow.flameSplash) || 0.24));
+    const splashR2 = 68 * 68;
+    const victims = [];
+    this.queueHitSfx('dragonfire', target.x, target.y, arrow.side);
+
+    for (const other of this.minions) {
+      if (other.side === arrow.side || other.id === target.id) continue;
+      const dx = other.x - target.x;
+      const dy = other.y - target.y;
+      if (dx * dx + dy * dy <= splashR2) victims.push(other.id);
+    }
+
+    if (!victims.length) return;
+
+    for (const id of victims) {
+      const idx = this.minions.findIndex((m) => m.id === id);
+      if (idx < 0) continue;
+      const victim = this.minions[idx];
+      this.dealDamageToMinion(victim, splashDamage);
+      if (victim.hp <= 0) this.killMinion(idx, arrow.side, { goldScalar: 0.8 });
     }
   }
 
@@ -1247,6 +1277,8 @@ class GameRoom {
     let dmgMul = 1;
     let radius = 4;
     let pierce = 0;
+    let flameSplash = 0;
+    let flameBurn = 0;
     let gravity = 980 - launch.strength * 220;
     let powerType = null;
     const powerScale = 1 + (side.powerLevel - 1) * 0.18;
@@ -1266,12 +1298,12 @@ class GameRoom {
       pierce = 2 + Math.floor(powerScale * 2);
       speed += 50 + powerScale * 25;
       powerType = 'pierceShot';
-    } else if (activePower === 'heavyShot') {
-      dmgMul = 1.6 + powerScale * 0.5;
-      speed *= 0.82;
-      radius = 7 + Math.floor(powerScale * 0.8);
-      gravity += 180;
-      powerType = 'heavyShot';
+    } else if (activePower === 'flameShot') {
+      dmgMul = 1.32 + powerScale * 0.44;
+      radius = 5 + Math.floor(powerScale * 0.45);
+      flameSplash = 0.2 + powerScale * 0.07;
+      flameBurn = 0.16 + powerScale * 0.06;
+      powerType = 'flameShot';
     }
     count = Math.min(29, count);
     if (count > 1 && count % 2 === 0) count += 1;
@@ -1305,6 +1337,8 @@ class GameRoom {
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
         powerType,
+        flameSplash,
+        flameBurn,
         gravity,
         mainArrow: isMainArrow,
       });

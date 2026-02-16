@@ -856,12 +856,24 @@ export class GameRenderer {
   drawShotPower(power) {
     const { ctx } = this;
     const palette = TEAM_COLORS[power.side];
-    ctx.fillStyle = '#ffffff22';
+    let aura = '#ffffff22';
+    let fill = '#1f2338';
+    let border = palette.primary;
+    let text = '#fff3b2';
+
+    if (power.type === 'flameShot') {
+      aura = '#ff9a3a2a';
+      fill = '#3c2017';
+      border = '#ff9a4a';
+      text = '#ffe3b0';
+    }
+
+    ctx.fillStyle = aura;
     ctx.beginPath();
     ctx.arc(power.x, power.y, power.r + 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#1f2338';
+    ctx.fillStyle = fill;
     ctx.beginPath();
     ctx.moveTo(power.x, power.y - power.r);
     ctx.lineTo(power.x + power.r, power.y);
@@ -869,11 +881,11 @@ export class GameRenderer {
     ctx.lineTo(power.x - power.r, power.y);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = palette.primary;
+    ctx.strokeStyle = border;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    ctx.fillStyle = '#fff3b2';
+    ctx.fillStyle = text;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(SHOT_POWER_LABELS[power.type] || 'Power', power.x, power.y + 3);
@@ -2107,9 +2119,9 @@ export class GameRenderer {
     } else if (arrow.powerType === 'pierceShot') {
       body = '#9af7ff';
       glow = '#c2fcff';
-    } else if (arrow.powerType === 'heavyShot') {
-      body = '#ffb56d';
-      glow = '#ffd2a3';
+    } else if (arrow.powerType === 'flameShot') {
+      body = '#ff8f52';
+      glow = '#ffd098';
     } else if (arrow.powerType === 'multiShot') {
       body = '#d2a4ff';
       glow = '#e6ccff';
@@ -2133,6 +2145,18 @@ export class GameRenderer {
     ctx.moveTo(-len * 0.55, 0);
     ctx.lineTo(len * 0.45, 0);
     ctx.stroke();
+    if (arrow.powerType === 'flameShot') {
+      const flameGradient = ctx.createLinearGradient(-len * 0.5, 0, len * 0.2, 0);
+      flameGradient.addColorStop(0, '#ffe09a');
+      flameGradient.addColorStop(0.45, '#ff9c55');
+      flameGradient.addColorStop(1, '#ff5f39');
+      ctx.strokeStyle = flameGradient;
+      ctx.lineWidth = Math.max(1.2, arrow.r * 0.35) * (isMainArrow ? 1.18 : 1);
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.5, 0);
+      ctx.lineTo(len * 0.26, 0);
+      ctx.stroke();
+    }
     if (isMainArrow) {
       ctx.strokeStyle = '#ffffffdd';
       ctx.lineWidth = Math.max(1, arrow.r * 0.28);

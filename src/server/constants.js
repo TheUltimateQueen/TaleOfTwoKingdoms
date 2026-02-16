@@ -24,5 +24,5 @@ module.exports = {
     'dragonLevel',
     'superMinionLevel',
   ],
-  SHOT_POWER_TYPES: ['multiShot', 'ultraShot', 'pierceShot', 'heavyShot'],
+  SHOT_POWER_TYPES: ['multiShot', 'ultraShot', 'pierceShot', 'flameShot'],
 };

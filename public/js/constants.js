@@ -34,7 +34,7 @@ export const SHOT_POWER_LABELS = {
   multiShot: 'Multi',
   ultraShot: 'Ultra',
   pierceShot: 'Pierce',
-  heavyShot: 'Heavy',
+  flameShot: 'Flame',
 };
 
 export const TEAM_COLORS = {

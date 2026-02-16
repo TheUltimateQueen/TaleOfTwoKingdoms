@@ -1,6 +1,7 @@
 import { GameRenderer } from './GameRenderer.js';
 import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
+import { SHOT_POWER_LABELS } from './constants.js';
 
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
@@ -12,7 +13,7 @@ function sideLabel(side) {
 
 function powerStatus(power, shots) {
   if (!power || !shots) return 'none';
-  return `${power} x${shots}`;
+  return `${SHOT_POWER_LABELS[power] || power} x${shots}`;
 }
 
 function arrowHitRate(sideState) {
