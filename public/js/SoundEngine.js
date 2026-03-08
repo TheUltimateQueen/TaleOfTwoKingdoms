@@ -9,6 +9,7 @@ export class SoundEngine {
       powerup: 0,
       upgrade: 0,
       explosion: 0,
+      candlehit: 0,
       dragon: 0,
       dragonfire: 0,
       gunhit: 0,
@@ -41,6 +42,7 @@ export class SoundEngine {
     else if (type === 'powerup') this.playPowerupHit();
     else if (type === 'upgrade') this.playUpgradeHit();
     else if (type === 'explosion') this.playExplosionHit();
+    else if (type === 'candlehit') this.playCandleHit();
     else if (type === 'dragon') this.playDragonHurt();
     else if (type === 'dragonfire') this.playDragonFire();
     else if (type === 'gunhit') this.playGunHit();
@@ -99,6 +101,16 @@ export class SoundEngine {
     const g = this.envGain(t, 0.24, 0.26);
     const o = this.osc('sawtooth', 180, t, 0.28, g);
     o.frequency.exponentialRampToValueAtTime(90, t + 0.22);
+  }
+
+  playCandleHit() {
+    const t = this.ctx.currentTime;
+    const g1 = this.envGain(t, 0.22, 0.2);
+    const g2 = this.envGain(t + 0.02, 0.14, 0.16);
+    const o1 = this.osc('sawtooth', 240, t, 0.22, g1);
+    const o2 = this.osc('triangle', 460, t + 0.02, 0.17, g2);
+    o1.frequency.exponentialRampToValueAtTime(130, t + 0.18);
+    o2.frequency.exponentialRampToValueAtTime(220, t + 0.16);
   }
 
   playDragonHurt() {

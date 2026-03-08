@@ -104,7 +104,15 @@ export class GameRenderer {
     for (const res of snapshot.resources) this.drawResourceNode(res);
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
     for (const card of snapshot.upgradeCards) this.drawUpgradeCard(card);
+    const candleScorches = Array.isArray(snapshot.candleScorches)
+      ? snapshot.candleScorches
+      : (snapshot.candleScorch ? [snapshot.candleScorch] : []);
+    for (const scorch of candleScorches) this.drawCandleScorch(scorch);
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
+    const candles = Array.isArray(snapshot.candles)
+      ? snapshot.candles
+      : (snapshot.candle ? [snapshot.candle] : []);
+    for (const candle of candles) this.drawCandle(candle);
     this.updateParticles(dt);
     this.drawParticles();
     for (const arrow of snapshot.arrows) this.drawArrow(arrow);
@@ -134,6 +142,58 @@ export class GameRenderer {
 
   emitHitParticles(type, x, y, side) {
     const palette = TEAM_COLORS[side] || TEAM_COLORS.left;
+    if (type === 'candlehit') {
+      // Fire burst centered on the flame hit.
+      for (let i = 0; i < 30; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 120 + Math.random() * 250;
+        this.particles.push({
+          x: x + (Math.random() * 4 - 2),
+          y: y + (Math.random() * 3 - 1.5),
+          vx: Math.cos(ang) * mag,
+          vy: Math.sin(ang) * mag - 45,
+          life: 0.34 + Math.random() * 0.16,
+          maxLife: 0.48,
+          size: 2.2 + Math.random() * 2.8,
+          color: ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'][Math.floor(Math.random() * 4)],
+          gravity: 540,
+        });
+      }
+      // Stem plume so wax/embers clearly eject from the candle body.
+      for (let i = 0; i < 14; i += 1) {
+        const ang = -Math.PI / 2 + (Math.random() * 0.85 - 0.425);
+        const mag = 200 + Math.random() * 170;
+        this.particles.push({
+          x: x + (Math.random() * 8 - 4),
+          y: y + 8 + (Math.random() * 3 - 1.5),
+          vx: Math.cos(ang) * mag * 0.46,
+          vy: Math.sin(ang) * mag - 35,
+          life: 0.42 + Math.random() * 0.16,
+          maxLife: 0.58,
+          size: 2 + Math.random() * 2.2,
+          color: ['#ff5f35', '#ffb24c', '#ffe7b1'][Math.floor(Math.random() * 3)],
+          gravity: 560,
+        });
+      }
+      // Wax chunks spraying outward from the stem.
+      for (let i = 0; i < 22; i += 1) {
+        const ang = -Math.PI / 2 + (Math.random() * 1.8 - 0.9);
+        const mag = 110 + Math.random() * 180;
+        this.particles.push({
+          x: x + (Math.random() * 8 - 4),
+          y: y + 10 + (Math.random() * 5 - 2.5),
+          vx: Math.cos(ang) * mag,
+          vy: Math.sin(ang) * mag - 10,
+          life: 0.64 + Math.random() * 0.3,
+          maxLife: 0.92,
+          size: 1.9 + Math.random() * 2.4,
+          color: ['#fff4d8', '#f7e6bf', '#e6cfa4'][Math.floor(Math.random() * 3)],
+          gravity: 660,
+        });
+      }
+      return;
+    }
+
     let count = 8;
     let colors = [palette.soft, '#ffffff'];
     let speed = 180;
@@ -418,6 +478,8 @@ export class GameRenderer {
   }
 
   barracksRows(sideState) {
+    const candleCd = Math.max(0, Number(sideState?.candleCd) || 0);
+    const candleActive = Boolean(sideState?.candleActive);
     const levelOf = {
       militia: Math.max(1, Number(sideState?.unitLevel) || 1),
       necro: Math.max(1, Number(sideState?.unitLevel) || 1),
@@ -430,6 +492,7 @@ export class GameRenderer {
       bomber: Math.max(1, Number(sideState?.explosiveLevel) || 1),
       dragon: Math.max(0, Number(sideState?.dragonLevel) || 0),
       super: Math.max(0, Number(sideState?.superMinionLevel) || 0),
+      candle: candleActive ? 1 : 0,
     };
     const rows = [
       { type: 'militia', label: 'Militia', color: '#d8dde6', unlockHint: '' },
@@ -443,12 +506,27 @@ export class GameRenderer {
       { type: 'bomber', label: 'Bomber', color: '#ffb07d', unlockHint: '' },
       { type: 'dragon', label: 'Dragon', color: '#ff9c7b', unlockHint: 'need DR1' },
       { type: 'super', label: 'Super', color: '#fff2aa', unlockHint: 'need SU1' },
+      { type: 'candle', label: 'Candle', color: '#ffd7a2', unlockHint: '' },
     ];
 
     const spawnEvery = this.spawnEveryForSide(sideState);
     const minionCd = Math.max(0, Number(sideState?.minionCd) || 0);
 
     return rows.map((row) => {
+      if (row.type === 'candle') {
+        const etaSec = candleActive ? 0 : candleCd;
+        const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / 90));
+        return {
+          ...row,
+          level: levelOf[row.type],
+          unlocked: true,
+          every: 1,
+          inSpawns: 1,
+          progress,
+          etaSec,
+          candleActive,
+        };
+      }
       const every = this.trainingEveryForType(sideState, row.type);
       const unlocked = Number.isFinite(every);
       const inSpawns = unlocked ? this.trainingInSpawns(sideState, every) : Infinity;
@@ -474,7 +552,7 @@ export class GameRenderer {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const panelW = 250;
-    const panelH = 236;
+    const panelH = 254;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
     const bx = side === 'left' ? 220 : world.w - 220;
@@ -555,7 +633,15 @@ export class GameRenderer {
       ctx.fillRect(barX, barY, barW * row.progress, barH);
 
       ctx.textAlign = 'right';
-      if (!row.unlocked) {
+      if (row.type === 'candle') {
+        if (row.candleActive) {
+          ctx.fillStyle = '#ffe8a6';
+          ctx.fillText('escort active', px + panelW - 10, ry + 1);
+        } else {
+          ctx.fillStyle = '#b8c8e2';
+          ctx.fillText(`training ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
+        }
+      } else if (!row.unlocked) {
         ctx.fillStyle = '#9da8ba';
         ctx.fillText(row.unlockHint || 'locked', px + panelW - 10, ry + 1);
       } else if (row.every <= 1) {
@@ -914,6 +1000,257 @@ export class GameRenderer {
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(`+${res.value}`, res.x, res.y + 4);
+  }
+
+  drawCandleScorch(scorch) {
+    if (!scorch) return;
+    const { ctx } = this;
+    const t = performance.now() * 0.001;
+    const pulse = 0.75 + Math.sin(t * 6.5) * 0.25;
+    const towerBlaze = scorch.towerSide === 'left' || scorch.towerSide === 'right';
+    const alpha = Math.max(0.2, Math.min(1, (Number(scorch.ttl) || 0) / 4.2));
+    const r = Math.max(36, Number(scorch.r) || 90);
+    const x = Number(scorch.x) || 0;
+    const y = Number(scorch.y) || 0;
+
+    ctx.save();
+    ctx.globalAlpha = 0.35 + alpha * (towerBlaze ? 0.62 : 0.45);
+    const burn = ctx.createRadialGradient(x, y, 8, x, y, r);
+    burn.addColorStop(0, '#ffb26788');
+    burn.addColorStop(0.3, towerBlaze ? '#ff7b3f88' : '#e36a3d66');
+    burn.addColorStop(0.72, '#4e231f99');
+    burn.addColorStop(1, '#00000000');
+    ctx.fillStyle = burn;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.3 + alpha * 0.5;
+    ctx.fillStyle = '#1a0b08c9';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, r * 0.8, r * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const tongues = towerBlaze ? 8 : 5;
+    for (let i = 0; i < tongues; i += 1) {
+      const phase = t * (5.8 + i * 0.7) + i * 1.5;
+      const fx = x + Math.cos((Math.PI * 2 * i) / tongues + t * 0.5) * (r * 0.36);
+      const fy = y - (towerBlaze ? 10 : 5) + Math.sin(phase * 0.8) * 2.2;
+      const h = (towerBlaze ? 20 : 12) + pulse * (towerBlaze ? 11 : 7) + Math.sin(phase) * 3;
+      const w = 5 + Math.cos(phase * 1.1) * 1.4;
+
+      const flame = ctx.createLinearGradient(fx, fy + 8, fx, fy - h);
+      flame.addColorStop(0, '#ff5f35');
+      flame.addColorStop(0.48, '#ffaf52');
+      flame.addColorStop(1, '#fff1bd');
+      ctx.fillStyle = flame;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy - h);
+      ctx.bezierCurveTo(fx + w, fy - h * 0.5, fx + w * 0.7, fy + h * 0.14, fx, fy + h * 0.45);
+      ctx.bezierCurveTo(fx - w * 0.7, fy + h * 0.14, fx - w, fy - h * 0.5, fx, fy - h);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  drawCandle(candle) {
+    if (!candle) return;
+    const { ctx } = this;
+    const x = Number(candle.x) || 0;
+    const y = Number(candle.y) || 0;
+    const wax = Math.max(0, Number(candle.wax) || 0);
+    const waxMax = Math.max(1, Number(candle.waxMax) || 1);
+    const waxPct = Math.max(0, Math.min(1, wax / waxMax));
+    const time = performance.now() * 0.001;
+    const cartHalf = Math.max(28, Number(candle.cartHalfW) || 34);
+    const pulse = Number(candle.flamePulse) || 0;
+    const flicker = Math.sin(time * 7.8 + pulse) * 0.45
+      + Math.sin(time * 12.2 + pulse * 0.6) * 0.22;
+    ctx.save();
+
+    if (candle.destroyed) {
+      const ember = ctx.createRadialGradient(x, y - 7, 2, x, y - 7, 24);
+      ember.addColorStop(0, '#ffd29f');
+      ember.addColorStop(0.45, '#ff7b4d');
+      ember.addColorStop(1, '#00000000');
+      ctx.fillStyle = ember;
+      ctx.beginPath();
+      ctx.arc(x, y - 7, 24, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#3d302a';
+      ctx.fillRect(x - 10, y - 6, 20, 18);
+      ctx.fillStyle = '#1f1a17';
+      ctx.fillRect(x - 3, y - 14, 6, 8);
+
+      const cd = Math.max(0, Math.ceil(Number(candle.respawnCd) || 0));
+      if (cd > 0) {
+        ctx.fillStyle = '#f7d8a8';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Relight ${cd}s`, x, y - 20);
+      }
+      ctx.restore();
+      return;
+    }
+
+    // Cart shadow
+    ctx.globalAlpha = 0.32;
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 28, cartHalf + 20, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    const wheelY = y + 20;
+    const wheelR = 9;
+    for (const wx of [x - cartHalf + 7, x + cartHalf - 7]) {
+      ctx.fillStyle = '#2c241f';
+      ctx.beginPath();
+      ctx.arc(wx, wheelY, wheelR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#8f7656';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.strokeStyle = '#c6a77b';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(wx - wheelR + 2, wheelY);
+      ctx.lineTo(wx + wheelR - 2, wheelY);
+      ctx.moveTo(wx, wheelY - wheelR + 2);
+      ctx.lineTo(wx, wheelY + wheelR - 2);
+      ctx.stroke();
+    }
+
+    const cartGrad = ctx.createLinearGradient(x - cartHalf, y, x + cartHalf, y);
+    cartGrad.addColorStop(0, '#6a5238');
+    cartGrad.addColorStop(0.5, '#8c6a45');
+    cartGrad.addColorStop(1, '#6a5238');
+    ctx.fillStyle = cartGrad;
+    ctx.fillRect(x - cartHalf, y + 7, cartHalf * 2, 10);
+    ctx.strokeStyle = '#d2b180';
+    ctx.lineWidth = 1.6;
+    ctx.strokeRect(x - cartHalf, y + 7, cartHalf * 2, 10);
+
+    ctx.fillStyle = '#4f3f31';
+    ctx.fillRect(x - cartHalf + 5, y + 2, cartHalf * 2 - 10, 6);
+    ctx.strokeStyle = '#b69266';
+    ctx.strokeRect(x - cartHalf + 5, y + 2, cartHalf * 2 - 10, 6);
+
+    // Pull/push handles so carrier spacing reads clearly.
+    ctx.strokeStyle = '#c7a879';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + cartHalf, y + 9);
+    ctx.lineTo(x + cartHalf + 18, y + 2);
+    ctx.moveTo(x - cartHalf, y + 9);
+    ctx.lineTo(x - cartHalf - 18, y + 2);
+    ctx.stroke();
+
+    const bodyH = 18 + waxPct * 34;
+    const bodyW = 18;
+    const deckY = y + 5;
+    const topY = deckY - bodyH;
+    const waxGrad = ctx.createLinearGradient(x, topY, x, deckY + 2);
+    waxGrad.addColorStop(0, '#fff6df');
+    waxGrad.addColorStop(0.42, '#fee9c8');
+    waxGrad.addColorStop(1, '#d9c29a');
+    ctx.fillStyle = waxGrad;
+    ctx.beginPath();
+    ctx.moveTo(x - bodyW * 0.5, deckY + 2);
+    ctx.lineTo(x - bodyW * 0.5, topY + 8);
+    ctx.quadraticCurveTo(x - bodyW * 0.45, topY, x - bodyW * 0.3, topY);
+    ctx.lineTo(x + bodyW * 0.3, topY);
+    ctx.quadraticCurveTo(x + bodyW * 0.45, topY, x + bodyW * 0.5, topY + 8);
+    ctx.lineTo(x + bodyW * 0.5, deckY + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#ceb58a';
+    ctx.lineWidth = 1.7;
+    ctx.stroke();
+
+    ctx.fillStyle = '#f7e7c4';
+    ctx.beginPath();
+    ctx.arc(x, topY + 3, bodyW * 0.46, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ecddbe';
+    ctx.fillRect(x - 6, topY + 7, 3.5, 11 + (1 - waxPct) * 5);
+    ctx.fillRect(x + 2.5, topY + 6, 2.8, 9 + (1 - waxPct) * 4);
+
+    const wickY = topY - 2;
+    ctx.strokeStyle = '#2e241d';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, wickY + 7);
+    ctx.lineTo(x, wickY - 2);
+    ctx.stroke();
+
+    const flameH = 28 + flicker * 2.1;
+    const flameW = 11 + Math.max(0, flicker) * 1.25;
+    const flameX = x + Math.sin(time * 6.2 + pulse) * 1.1;
+    const flameY = wickY - flameH * 0.28;
+
+    const outerGlow = ctx.createRadialGradient(flameX, flameY, 2, flameX, flameY, flameH * 1.2);
+    outerGlow.addColorStop(0, 'rgba(255, 243, 176, 0.45)');
+    outerGlow.addColorStop(0.4, 'rgba(255, 164, 74, 0.26)');
+    outerGlow.addColorStop(1, 'rgba(255, 90, 40, 0)');
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(flameX, flameY, flameH * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    const outerFlame = ctx.createLinearGradient(flameX, flameY + flameH * 0.56, flameX, flameY - flameH);
+    outerFlame.addColorStop(0, '#ff5d33');
+    outerFlame.addColorStop(0.48, '#ffb34f');
+    outerFlame.addColorStop(1, '#fff7cb');
+    ctx.fillStyle = outerFlame;
+    ctx.beginPath();
+    ctx.moveTo(flameX, flameY - flameH);
+    ctx.bezierCurveTo(
+      flameX + flameW,
+      flameY - flameH * 0.36,
+      flameX + flameW * 0.74,
+      flameY + flameH * 0.2,
+      flameX,
+      flameY + flameH * 0.56
+    );
+    ctx.bezierCurveTo(
+      flameX - flameW * 0.74,
+      flameY + flameH * 0.2,
+      flameX - flameW,
+      flameY - flameH * 0.36,
+      flameX,
+      flameY - flameH
+    );
+    ctx.fill();
+
+    const innerFlame = ctx.createLinearGradient(flameX, flameY + flameH * 0.26, flameX, flameY - flameH * 0.56);
+    innerFlame.addColorStop(0, '#ffb347');
+    innerFlame.addColorStop(0.58, '#fff8d0');
+    innerFlame.addColorStop(1, '#ffffff');
+    ctx.fillStyle = innerFlame;
+    ctx.beginPath();
+    ctx.moveTo(flameX, flameY - flameH * 0.58);
+    ctx.bezierCurveTo(
+      flameX + flameW * 0.45,
+      flameY - flameH * 0.2,
+      flameX + flameW * 0.3,
+      flameY + flameH * 0.08,
+      flameX,
+      flameY + flameH * 0.3
+    );
+    ctx.bezierCurveTo(
+      flameX - flameW * 0.3,
+      flameY + flameH * 0.08,
+      flameX - flameW * 0.45,
+      flameY - flameH * 0.2,
+      flameX,
+      flameY - flameH * 0.58
+    );
+    ctx.fill();
+
+    ctx.restore();
   }
 
   drawMinionHpBar(minion, x, y, scale = 1) {

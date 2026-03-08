@@ -1,11 +1,13 @@
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
 const { GameRoom } = require('./GameRoom');
 const { PORT, TICK_MS } = require('./constants');
+const AUDIO_FILE_RE = /\.(m4a|mp3|wav|ogg)$/i;
 
 function createRoomId() {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -32,10 +34,43 @@ class GameServer {
     this.httpServer = http.createServer(this.app);
     this.io = new Server(this.httpServer);
 
+    this.setupApiRoutes();
     this.app.use(express.static(path.join(process.cwd(), 'public')));
 
     this.setupSocketHandlers();
     this.setupTicker();
+  }
+
+  setupApiRoutes() {
+    this.app.get('/api/audio/hero-voices', (_req, res) => {
+      const folder = path.join(process.cwd(), 'public', 'Sounds', 'HeroVoice');
+      try {
+        const clips = fs.readdirSync(folder, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && AUDIO_FILE_RE.test(entry.name))
+          .map((entry) => entry.name)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+          .map((name) => `/Sounds/HeroVoice/${encodeURIComponent(name)}`);
+        res.set('Cache-Control', 'no-store');
+        res.json({ clips });
+      } catch {
+        res.status(500).json({ clips: [] });
+      }
+    });
+
+    this.app.get('/api/audio/president-voices', (_req, res) => {
+      const folder = path.join(process.cwd(), 'public', 'Sounds', 'PresidentVoice');
+      try {
+        const clips = fs.readdirSync(folder, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && AUDIO_FILE_RE.test(entry.name))
+          .map((entry) => entry.name)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+          .map((name) => `/Sounds/PresidentVoice/${encodeURIComponent(name)}`);
+        res.set('Cache-Control', 'no-store');
+        res.json({ clips });
+      } catch {
+        res.status(500).json({ clips: [] });
+      }
+    });
   }
 
   setupTicker() {

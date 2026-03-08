@@ -13,6 +13,7 @@ const {
 } = require('./constants');
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const SHOT_INTERVAL = 1;
+const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
   arrowLevel: { base: 130, growth: 18, start: 1 },
   unitLevel: { base: 138, growth: 18, start: 1 },
@@ -43,6 +44,19 @@ const PRESIDENT_LINES = [
   'We came here to win this battlefield!',
   'Stay strong, stay sharp, stay united!',
 ];
+const CANDLE_WAX_MAX = 180;
+const CANDLE_MAX_HOLDERS = 8;
+const CANDLE_FAST_HOLDERS = 6;
+const CANDLE_PICKUP_RANGE = 28;
+const CANDLE_RECRUIT_RANGE = 210;
+const CANDLE_SPAWN_OFFSET = 56;
+const CANDLE_CART_HALF_W = 34;
+const CANDLE_RARE_CD_MIN = 52;
+const CANDLE_RARE_CD_MAX = 92;
+const CANDLE_DELIVER_FUSE = 1.1;
+const CANDLE_FLEE_TTL = 2.2;
+const CANDLE_FLEE_SPEED_MUL = 1.42;
+const CANDLE_RETREAT_WAIT_DIST = 168;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -73,7 +87,7 @@ function launchFromPull(sideName, pullX, pullY) {
 
 function makeSideState() {
   return {
-    towerHp: 6000,
+    towerHp: TOWER_MAX_HP,
     gold: 0,
     economyLevel: 0,
     nextEcoCost: 120,
@@ -103,6 +117,8 @@ function makeSideState() {
     comboHitStreak: 0,
     minionCd: 0,
     spawnCount: 0,
+    candleCd: 0,
+    candleActive: false,
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
   };
@@ -139,6 +155,15 @@ class GameRoom {
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
     this.seq = 1;
+    this.candles = {
+      left: null,
+      right: null,
+    };
+    this.candleScorches = [];
+    this.left.candleCd = this.candleRareCooldown('left');
+    this.right.candleCd = this.candleRareCooldown('right');
+    this.left.candleActive = false;
+    this.right.candleActive = false;
 
     this.seedUpgradeCards();
   }
@@ -162,6 +187,8 @@ class GameRoom {
       right: this.right,
       arrows: this.arrows,
       minions: this.minions,
+      candles: [this.candles.left, this.candles.right],
+      candleScorches: this.candleScorches,
       resources: this.resources,
       shotPowers: this.shotPowers,
       upgradeCards: this.upgradeCards,
@@ -312,6 +339,7 @@ class GameRoom {
     this.tickShotPowers(dt);
     this.tickArrows(dt);
     this.tickMinions(dt);
+    this.tickCandle(dt);
 
     this.processEconomy(this.left);
     this.processEconomy(this.right);
@@ -327,6 +355,451 @@ class GameRoom {
       const p = this.shotPowers[i];
       p.y += p.vy * dt;
       if (p.y >= GROUND_Y) this.shotPowers.splice(i, 1);
+    }
+  }
+
+  candleSpawnX(sideName) {
+    return sideName === 'right' ? (TOWER_X_RIGHT - CANDLE_SPAWN_OFFSET) : (TOWER_X_LEFT + CANDLE_SPAWN_OFFSET);
+  }
+
+  candleSpawnY() {
+    return TOWER_Y + (Math.random() * 80 - 40);
+  }
+
+  candleRetrainSeconds(sideName, delivered = false) {
+    void delivered;
+    return this.candleRareCooldown(sideName);
+  }
+
+  candleRareCooldown(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const spawnLevel = Math.max(1, Number(this[side]?.spawnLevel) || 1);
+    const range = Math.max(10, CANDLE_RARE_CD_MAX - CANDLE_RARE_CD_MIN);
+    const roll = CANDLE_RARE_CD_MIN + Math.random() * range;
+    const spawnReduction = Math.min(10, (spawnLevel - 1) * 0.8);
+    return Math.max(35, roll - spawnReduction);
+  }
+
+  createCandle(sideName = 'left') {
+    const spawnSide = sideName === 'right' ? 'right' : 'left';
+    const spawnX = this.candleSpawnX(spawnSide);
+    const spawnY = this.candleSpawnY();
+    return {
+      id: this.seq++,
+      x: spawnX,
+      y: spawnY,
+      r: 24,
+      wax: CANDLE_WAX_MAX,
+      waxMax: CANDLE_WAX_MAX,
+      flameSpeed: 0.95,
+      flameBoost: 0,
+      flameBurstTtl: 0,
+      flamePulse: Math.random() * Math.PI * 2,
+      cartHalfW: CANDLE_CART_HALF_W,
+      claimedBy: null,
+      holderIds: [],
+      spawnSide,
+      spawnX,
+      spawnY,
+      delivering: false,
+      deliverEnemySide: null,
+      deliverExplodeTtl: 0,
+      destroyed: false,
+      respawnCd: 0,
+    };
+  }
+
+  resetCandle(sideName = 'left') {
+    const spawnSide = sideName === 'right' ? 'right' : 'left';
+    for (const m of this.minions) {
+      if (m.candleCarrier && m.candleCarrierSide === spawnSide) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+      }
+    }
+    this.candles[spawnSide] = this.createCandle(spawnSide);
+    this[spawnSide].candleActive = true;
+    this[spawnSide].candleCd = 0;
+  }
+
+  spawnCandleUnit(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    if (this.candles[side]) return this.candles[side];
+    this.resetCandle(side);
+    const c = this.candles[side];
+    if (c) this.queueHitSfx('upgrade', c.x, c.y - 8, side);
+    return c;
+  }
+
+  isCandleCarrierEligible(minion) {
+    if (!minion) return false;
+    if (minion.summoned || minion.super) return false;
+    if (minion.dragon || minion.flying) return false;
+    if (minion.explosive || minion.necrominion) return false;
+    if (minion.gunner || minion.rider || minion.digger) return false;
+    if (minion.monk || minion.hero || minion.president) return false;
+    return true;
+  }
+
+  countCandleCarriers(candleSide) {
+    let n = 0;
+    for (const m of this.minions) {
+      if (!m || !m.candleCarrier) continue;
+      if ((Number(m.hp) || 0) <= 0) continue;
+      if (m.candleCarrierSide !== candleSide) continue;
+      n += 1;
+    }
+    return n;
+  }
+
+  igniteMinion(minion, duration = 1.6) {
+    if (!minion) return;
+    minion.candleBurnTtl = Math.max(Number(minion.candleBurnTtl) || 0, duration);
+    const tick = Number(minion.candleBurnTick);
+    if (!Number.isFinite(tick) || tick > 0.1) minion.candleBurnTick = 0.1;
+  }
+
+  tickCandleBurnOnMinion(minion, dt) {
+    if (!minion) return;
+    let ttl = Number(minion.candleBurnTtl) || 0;
+    if (ttl <= 0) return;
+
+    ttl = Math.max(0, ttl - dt);
+    minion.candleBurnTtl = ttl;
+    minion.candleBurnTick = (Number(minion.candleBurnTick) || 0) - dt;
+    if (minion.candleBurnTick > 0) return;
+
+    minion.candleBurnTick = 0.28;
+    const burnDamage = Math.max(4, 6 + (Number(minion.maxHp) || 0) * 0.0085);
+    this.dealDamageToMinion(minion, burnDamage);
+    this.queueHitSfx('dragonfire', minion.x, minion.y - Math.max(7, (minion.r || 12) * 0.24), minion.side);
+  }
+
+  handleCandleMinionIntent(minion, dt) {
+    const candleSide = minion.side === 'right' ? 'right' : 'left';
+    const candle = this.candles?.[candleSide];
+    if (!candle || candle.destroyed || candle.delivering) {
+      if (minion.candleCarrier && minion.candleCarrierSide === candleSide) {
+        minion.candleCarrier = false;
+        minion.candleCarrierSide = null;
+      }
+      return false;
+    }
+    if (!this.isCandleCarrierEligible(minion)) return false;
+
+    const dx = candle.x - minion.x;
+    const dy = candle.y - minion.y;
+    const d = Math.hypot(dx, dy);
+
+    if (minion.candleCarrier) {
+      if (minion.candleCarrierSide !== candleSide) {
+        minion.candleCarrier = false;
+        minion.candleCarrierSide = null;
+        return false;
+      }
+      if (d > 160) {
+        const chaseStep = Math.max(34, minion.speed * 1.08) * dt;
+        minion.x += clamp(dx, -chaseStep, chaseStep);
+        minion.y += clamp(dy, -chaseStep * 0.78, chaseStep * 0.78);
+      }
+      return true;
+    }
+
+    if (this.countCandleCarriers(candleSide) >= CANDLE_MAX_HOLDERS) return false;
+    if (d > CANDLE_RECRUIT_RANGE) return false;
+
+    const moveStep = Math.max(32, minion.speed * (d < 84 ? 0.84 : 1.14)) * dt;
+    minion.x += clamp(dx, -moveStep, moveStep);
+    minion.y += clamp(dy, -moveStep * 0.72, moveStep * 0.72);
+
+    if (d <= CANDLE_PICKUP_RANGE + (Number(minion.r) || 16) * 0.24) {
+      minion.candleCarrier = true;
+      minion.candleCarrierSide = candleSide;
+      minion.candleFleeTtl = 0;
+      minion.candleFleeDir = 0;
+      minion.candleFleeVy = 0;
+      minion.candleRetreatSide = null;
+      minion.candleWaitX = null;
+      candle.claimedBy = candleSide;
+      this.queueHitSfx('powerup', minion.x, minion.y - 5, minion.side);
+    }
+    return true;
+  }
+
+  candleMoveSpeed(holderCount) {
+    const n = Math.max(0, Math.floor(holderCount));
+    if (n >= CANDLE_FAST_HOLDERS) return 46 + (n - CANDLE_FAST_HOLDERS) * 6;
+    return 3.5 + n * 1.15;
+  }
+
+  positionCandleHolders(holders, dt, candle, dir) {
+    const ordered = holders
+      .slice()
+      .sort((a, b) => a.id - b.id)
+      .slice(0, CANDLE_MAX_HOLDERS);
+
+    const cartHalf = Math.max(28, Number(candle?.cartHalfW) || CANDLE_CART_HALF_W);
+    const slots = [
+      { x: cartHalf + 16, y: -12 }, // front puller 1
+      { x: cartHalf + 16, y: 12 }, // front puller 2
+      { x: -(cartHalf + 15), y: -12 }, // rear pusher 1
+      { x: -(cartHalf + 15), y: 12 }, // rear pusher 2
+      { x: cartHalf + 30, y: -25 },
+      { x: cartHalf + 30, y: 25 },
+      { x: -(cartHalf + 29), y: -25 },
+      { x: -(cartHalf + 29), y: 25 },
+    ];
+
+    for (let i = 0; i < ordered.length; i += 1) {
+      const m = ordered[i];
+      const slot = slots[i] || slots[slots.length - 1];
+      const tx = candle.x + dir * slot.x;
+      const ty = candle.y + slot.y;
+      const step = Math.max(28, m.speed * 1.22) * dt;
+
+      m.x += clamp(tx - m.x, -step, step);
+      m.y += clamp(ty - m.y, -step * 0.74, step * 0.74);
+      m.y = clamp(m.y, TOWER_Y - 170, TOWER_Y + 170);
+      m.atkCd = Math.max(m.atkCd, 0.25);
+    }
+  }
+
+  hitCandleWithArrow(candle, arrow, part = 'flame') {
+    if (!candle || candle.destroyed) return;
+    const hitSide = arrow?.side || candle.claimedBy || 'left';
+    const flameShotBonus = arrow?.powerType === 'flameShot' ? 0.4 : 0;
+    const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
+    const enemyHit = arrow?.side ? arrow.side !== candleSide : true;
+
+    if (part === 'stem') {
+      const waxLoss = enemyHit ? (0.06 + flameShotBonus * 0.04) : 0.006;
+      candle.wax = Math.max(0, candle.wax - waxLoss);
+      this.queueHitSfx('minion', candle.x, candle.y + 3, hitSide);
+      return;
+    }
+
+    const waxLoss = (enemyHit ? 4.8 : 0.2) + flameShotBonus * 1.6 + (arrow?.mainArrow ? 0.8 : 0.34);
+    candle.wax = Math.max(0, candle.wax - waxLoss);
+
+    this.queueHitSfx('candlehit', candle.x, candle.y - 10, hitSide);
+    if (enemyHit) {
+      this.queueHitSfx('explosion', candle.x, candle.y - 10, hitSide);
+      this.queueHitSfx('dragonfire', candle.x + (Math.random() * 16 - 8), candle.y - 7, hitSide);
+    }
+    if (candle.wax <= 0) {
+      this.burnDownCandle(candle.spawnSide || 'left', arrow?.side || candle.claimedBy || 'left');
+    }
+  }
+
+  burnDownCandle(candleSide, sourceSide = null) {
+    const sideName = candleSide === 'right' ? 'right' : 'left';
+    const candle = this.candles?.[sideName];
+    if (!candle || candle.destroyed) return;
+
+    const hitSide = sourceSide || candle.claimedBy || sideName;
+    const holders = this.minions.filter((m) => m?.candleCarrier && m.candleCarrierSide === sideName);
+    for (const m of holders) {
+      m.candleCarrier = false;
+      m.candleCarrierSide = null;
+      this.igniteMinion(m, 2.4);
+    }
+
+    this.candleScorches.push({
+      x: candle.x,
+      y: candle.y + 20,
+      r: 96,
+      ttl: 4.2,
+      side: hitSide,
+      candleSide: sideName,
+      towerSide: null,
+      towerBurnDps: 0,
+      towerBurnTick: 0,
+    });
+
+    this.candles[sideName] = null;
+    this[sideName].candleActive = false;
+    this[sideName].candleCd = this.candleRetrainSeconds(sideName, false);
+
+    this.queueHitSfx('explosion', candle.x, candle.y, hitSide);
+    this.queueHitSfx('dragonfire', candle.x - 10, candle.y - 10, hitSide);
+    this.queueHitSfx('dragonfire', candle.x + 10, candle.y - 6, hitSide);
+  }
+
+  beginCandleCarrierFlee(minion, candleSide) {
+    if (!minion) return;
+    const runDir = candleSide === 'left' ? -1 : 1;
+    const enemyTowerX = candleSide === 'left' ? TOWER_X_RIGHT : TOWER_X_LEFT;
+    const waitBaseX = candleSide === 'left'
+      ? (enemyTowerX - CANDLE_RETREAT_WAIT_DIST)
+      : (enemyTowerX + CANDLE_RETREAT_WAIT_DIST);
+    minion.candleFleeTtl = CANDLE_FLEE_TTL + Math.random() * 0.7;
+    minion.candleFleeDir = runDir;
+    minion.candleFleeVy = Math.random() * 52 - 26;
+    minion.candleRetreatSide = candleSide;
+    minion.candleWaitX = waitBaseX + (Math.random() * 26 - 13);
+    minion.atkCd = Math.max(minion.atkCd || 0, 0.45);
+  }
+
+  explodeDeliveredCandle(candleSide) {
+    const sideName = candleSide === 'right' ? 'right' : 'left';
+    const candle = this.candles?.[sideName];
+    if (!candle || candle.destroyed || !candle.delivering) return;
+
+    const enemySide = candle.deliverEnemySide === 'left' || candle.deliverEnemySide === 'right'
+      ? candle.deliverEnemySide
+      : (sideName === 'left' ? 'right' : 'left');
+    const waxPct = Math.max(0, Math.min(1, candle.wax / Math.max(1, candle.waxMax)));
+    const damagePct = 0.09 + waxPct * 0.06; // Fuller candle hits harder; full candle is 15% max tower HP.
+    const damage = TOWER_MAX_HP * damagePct;
+    const hitX = Number.isFinite(candle.x)
+      ? candle.x
+      : (enemySide === 'left' ? TOWER_X_LEFT + 54 : TOWER_X_RIGHT - 54);
+
+    this.dealDamageToTower(enemySide, damage, hitX, TOWER_Y - 34);
+
+    this.queueHitSfx('explosion', hitX, TOWER_Y - 28, sideName);
+    this.queueHitSfx('dragonfire', hitX - 24, TOWER_Y - 32, sideName);
+    this.queueHitSfx('dragonfire', hitX + 22, TOWER_Y - 26, sideName);
+    this.queueHitSfx('dragonfire', hitX, TOWER_Y - 46, sideName);
+
+    this.candleScorches.push({
+      x: hitX,
+      y: TOWER_Y + 20,
+      r: 128 + waxPct * 24,
+      ttl: 5.4 + waxPct * 1.8,
+      side: sideName,
+      candleSide: sideName,
+      towerSide: enemySide,
+      towerBurnDps: 52 + waxPct * 36,
+      towerBurnTick: 0.2,
+    });
+
+    this.candles[sideName] = null;
+    this[sideName].candleActive = false;
+    this[sideName].candleCd = this.candleRetrainSeconds(sideName, true);
+  }
+
+  deliverCandle(candleSide) {
+    const sideName = candleSide === 'right' ? 'right' : 'left';
+    const candle = this.candles?.[sideName];
+    if (!candle || candle.destroyed) return;
+
+    const enemySide = sideName === 'left' ? 'right' : 'left';
+    candle.x = sideName === 'left' ? TOWER_X_RIGHT - 52 : TOWER_X_LEFT + 52;
+    candle.y = TOWER_Y + 10;
+    candle.delivering = true;
+    candle.deliverEnemySide = enemySide;
+    candle.deliverExplodeTtl = CANDLE_DELIVER_FUSE;
+    candle.holderIds = [];
+    candle.claimedBy = sideName;
+    candle.flameSpeed = 1;
+    candle.flameBoost = 0;
+    candle.flameBurstTtl = 0;
+    this.queueHitSfx('upgrade', candle.x, candle.y - 10, sideName);
+
+    for (const m of this.minions) {
+      if (m.candleCarrier && m.candleCarrierSide === sideName) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        this.beginCandleCarrierFlee(m, sideName);
+      }
+    }
+  }
+
+  tickCandle(dt) {
+    if (!Array.isArray(this.candleScorches)) this.candleScorches = [];
+    for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
+      const scorch = this.candleScorches[i];
+      scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
+      for (const minion of this.minions) {
+        if (!minion) continue;
+        const dx = minion.x - scorch.x;
+        const dy = minion.y - scorch.y;
+        if (dx * dx + dy * dy > scorch.r * scorch.r) continue;
+        this.igniteMinion(minion, 1.35);
+      }
+      if (scorch.towerSide === 'left' || scorch.towerSide === 'right') {
+        scorch.towerBurnTick = (Number(scorch.towerBurnTick) || 0) - dt;
+        if (scorch.towerBurnTick <= 0) {
+          const dps = Math.max(0, Number(scorch.towerBurnDps) || 0);
+          if (dps > 0) this.dealDamageToTower(scorch.towerSide, dps * 0.25, scorch.x, TOWER_Y - 24);
+          scorch.towerBurnTick = 0.25;
+        }
+      }
+      if (scorch.ttl <= 0) this.candleScorches.splice(i, 1);
+    }
+
+    for (const sideName of ['left', 'right']) {
+      if (!this.candles[sideName]) {
+        this[sideName].candleActive = false;
+        this[sideName].candleCd = Math.max(0, Number(this[sideName].candleCd) || 0);
+        if (this[sideName].candleCd > 0) this[sideName].candleCd = Math.max(0, this[sideName].candleCd - dt);
+        if (this[sideName].candleCd === 0) this.spawnCandleUnit(sideName);
+      }
+      const candle = this.candles[sideName];
+      if (!candle) continue;
+      this[sideName].candleActive = true;
+      this[sideName].candleCd = 0;
+
+      if (candle.delivering) {
+        candle.holderIds = [];
+        candle.claimedBy = sideName;
+        candle.flamePulse += dt * 5.5;
+        candle.deliverExplodeTtl = Math.max(0, (Number(candle.deliverExplodeTtl) || 0) - dt);
+        if (candle.deliverExplodeTtl === 0) this.explodeDeliveredCandle(sideName);
+        continue;
+      }
+
+      candle.flamePulse += dt * 4.8;
+      candle.flameSpeed = 1;
+      candle.flameBoost = 0;
+      candle.flameBurstTtl = 0;
+      const burnRate = 0.03;
+      candle.wax = Math.max(0, candle.wax - burnRate * dt);
+
+      const holders = this.minions.filter((m) => (
+        m?.candleCarrier
+        && m.candleCarrierSide === sideName
+        && m.side === sideName
+        && m.hp > 0
+        && this.isCandleCarrierEligible(m)
+      ));
+      const sideHolders = holders
+        .sort((a, b) => a.id - b.id)
+        .slice(0, CANDLE_MAX_HOLDERS);
+      const keepCarrierIds = new Set(sideHolders.map((m) => m.id));
+      for (const m of holders) {
+        if (!keepCarrierIds.has(m.id)) {
+          m.candleCarrier = false;
+          m.candleCarrierSide = null;
+        }
+      }
+      candle.holderIds = sideHolders.map((m) => m.id);
+      candle.claimedBy = sideName;
+
+      if (!sideHolders.length) {
+        candle.claimedBy = null;
+        const homeX = Number.isFinite(candle.spawnX) ? candle.spawnX : this.candleSpawnX(sideName);
+        const homeY = Number.isFinite(candle.spawnY) ? candle.spawnY : this.candleSpawnY();
+        candle.x += (homeX - candle.x) * Math.min(1, dt * 0.34);
+        candle.y += (homeY - candle.y) * Math.min(1, dt * 0.34);
+        if (candle.wax <= 0) this.burnDownCandle(sideName, null);
+        continue;
+      }
+
+      const dir = sideName === 'left' ? 1 : -1;
+      const speed = this.candleMoveSpeed(sideHolders.length);
+      candle.x = clamp(candle.x + dir * speed * dt, TOWER_X_LEFT + 92, TOWER_X_RIGHT - 92);
+      this.positionCandleHolders(sideHolders, dt, candle, dir);
+
+      const enemyTargetX = sideName === 'left' ? TOWER_X_RIGHT - 84 : TOWER_X_LEFT + 84;
+      const reached = sideName === 'left' ? candle.x >= enemyTargetX : candle.x <= enemyTargetX;
+      if (reached) {
+        this.deliverCandle(sideName);
+        continue;
+      }
+
+      if (candle.wax <= 0) this.burnDownCandle(sideName, sideName);
     }
   }
 
@@ -363,6 +836,35 @@ class GameRoom {
           side.pendingShotPowerShots = 3;
           this.queueHitSfx('powerup', power.x, power.y, a.side);
           this.shotPowers.splice(p, 1);
+        }
+      }
+
+      if (!consumed && this.candles) {
+        for (const candle of Object.values(this.candles)) {
+          if (!candle || candle.destroyed || candle.delivering || consumed) continue;
+          const candleKey = candle.spawnSide === 'right' ? 'right' : 'left';
+          if (a.candleTouched && a.candleTouched[candleKey]) continue;
+          const hitR = (candle.r || 24) + a.r;
+          const waxPct = Math.max(0, Math.min(1, (candle.wax || 0) / Math.max(1, candle.waxMax || 1)));
+          const flameY = candle.y - (20 + waxPct * 18);
+          const flameRx = 14;
+          const flameRy = 22;
+          const fx = (a.x - candle.x) / flameRx;
+          const fy = (a.y - flameY) / flameRy;
+          const flameHit = (fx * fx + fy * fy <= 1) && a.y <= candle.y - 7;
+          const stemHit = dist2(a, candle) <= hitR * hitR;
+          if (flameHit) {
+            if (!a.candleTouched) a.candleTouched = {};
+            a.candleTouched[candleKey] = true;
+            this.markArrowHit(a);
+            this.hitCandleWithArrow(candle, a, 'flame');
+            consumed = a.pierce <= 0;
+            if (a.pierce > 0) a.pierce -= 1;
+          } else if (stemHit) {
+            if (!a.candleTouched) a.candleTouched = {};
+            a.candleTouched[candleKey] = true;
+            this.hitCandleWithArrow(candle, a, 'stem');
+          }
         }
       }
 
@@ -455,6 +957,18 @@ class GameRoom {
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
       const m = this.minions[i];
       if (!m) continue;
+      if (!Number.isFinite(m.candleBurnTtl)) m.candleBurnTtl = 0;
+      if (!Number.isFinite(m.candleBurnTick)) m.candleBurnTick = 0;
+      if (!Number.isFinite(m.candleFleeTtl)) m.candleFleeTtl = 0;
+      if (!Number.isFinite(m.candleFleeDir)) m.candleFleeDir = 0;
+      if (!Number.isFinite(m.candleFleeVy)) m.candleFleeVy = 0;
+      if (m.candleRetreatSide !== 'left' && m.candleRetreatSide !== 'right') m.candleRetreatSide = null;
+      if (!Number.isFinite(m.candleWaitX)) m.candleWaitX = null;
+      if (typeof m.candleCarrier !== 'boolean') m.candleCarrier = false;
+      if (m.candleCarrierSide !== 'left' && m.candleCarrierSide !== 'right') m.candleCarrierSide = null;
+      if (!m.candleCarrier) m.candleCarrierSide = null;
+      this.tickCandleBurnOnMinion(m, dt);
+      if (m.hp <= 0) continue;
       m.atkCd = Math.max(0, m.atkCd - dt);
       if (m.dragonBreathTtl > 0) m.dragonBreathTtl = Math.max(0, m.dragonBreathTtl - dt);
       if (m.gunFlashTtl > 0) m.gunFlashTtl = Math.max(0, m.gunFlashTtl - dt);
@@ -462,6 +976,38 @@ class GameRoom {
       if (m.hero) {
         if (!Number.isFinite(m.heroSwing)) m.heroSwing = Math.random() * Math.PI * 2;
         m.heroSwing += dt * 8.2;
+      }
+      if (m.candleRetreatSide) {
+        const retreatCandle = this.candles?.[m.candleRetreatSide];
+        if (retreatCandle && retreatCandle.delivering) {
+          const fallbackTowerX = m.candleRetreatSide === 'left' ? TOWER_X_RIGHT : TOWER_X_LEFT;
+          const fallbackWaitX = m.candleRetreatSide === 'left'
+            ? (fallbackTowerX - CANDLE_RETREAT_WAIT_DIST)
+            : (fallbackTowerX + CANDLE_RETREAT_WAIT_DIST);
+          const targetX = Number.isFinite(m.candleWaitX) ? m.candleWaitX : fallbackWaitX;
+          const retreatStep = Math.max(72, m.speed * CANDLE_FLEE_SPEED_MUL) * dt;
+          m.x += clamp(targetX - m.x, -retreatStep, retreatStep);
+          m.y = clamp(m.y + m.candleFleeVy * dt, TOWER_Y - 170, TOWER_Y + 170);
+          m.candleFleeVy *= 0.9;
+          m.atkCd = Math.max(m.atkCd, 0.28);
+          continue;
+        }
+
+        m.candleRetreatSide = null;
+        m.candleWaitX = null;
+        m.candleFleeTtl = 0;
+        m.candleFleeDir = 0;
+        m.candleFleeVy = 0;
+      }
+      if (m.candleFleeTtl > 0) {
+        m.candleFleeTtl = Math.max(0, m.candleFleeTtl - dt);
+        const runDir = m.candleFleeDir || (m.side === 'left' ? -1 : 1);
+        const runSpeed = Math.max(72, m.speed * CANDLE_FLEE_SPEED_MUL);
+        m.x = clamp(m.x + runDir * runSpeed * dt, TOWER_X_LEFT + 32, TOWER_X_RIGHT - 32);
+        m.y = clamp(m.y + m.candleFleeVy * dt, TOWER_Y - 170, TOWER_Y + 170);
+        m.candleFleeVy *= 0.94;
+        m.atkCd = Math.max(m.atkCd, 0.25);
+        continue;
       }
       if (m.president) {
         this.tickPresident(m, dt);
@@ -471,6 +1017,7 @@ class GameRoom {
         this.tickMonk(m, dt);
         continue;
       }
+      if (this.handleCandleMinionIntent(m, dt)) continue;
       if (m.digger) {
         if (!Number.isFinite(m.digPhase)) m.digPhase = Math.random() * Math.PI * 2;
         if (!Number.isFinite(m.digBaseY)) m.digBaseY = m.y;
@@ -1237,6 +1784,15 @@ class GameRoom {
         gunRange: 0,
         gunDragonMul: 1,
         gunFlashTtl: 0,
+        candleCarrier: false,
+        candleCarrierSide: null,
+        candleBurnTtl: 0,
+        candleBurnTick: 0,
+        candleFleeTtl: 0,
+        candleFleeDir: 0,
+        candleFleeVy: 0,
+        candleRetreatSide: null,
+        candleWaitX: null,
       });
     }
   }
@@ -1539,6 +2095,15 @@ class GameRoom {
       gunRange: isGunner ? 198 + side.arrowLevel * 10 + side.unitLevel * 6 : 0,
       gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
       gunFlashTtl: 0,
+      candleCarrier: false,
+      candleCarrierSide: null,
+      candleBurnTtl: 0,
+      candleBurnTick: 0,
+      candleFleeTtl: 0,
+      candleFleeDir: 0,
+      candleFleeVy: 0,
+      candleRetreatSide: null,
+      candleWaitX: null,
     };
     this.minions.push(created);
     return created;

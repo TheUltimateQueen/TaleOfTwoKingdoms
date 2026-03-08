@@ -3,6 +3,21 @@ import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
 import { SHOT_POWER_LABELS } from './constants.js';
 
+const VOICE_GAP_MIN_MS = 2000;
+const VOICE_GAP_MAX_MS = 10000;
+const HERO_VOICE_CLIPS = [
+  '/Sounds/HeroVoice/Chacha.m4a',
+  '/Sounds/HeroVoice/Haya.m4a',
+  '/Sounds/HeroVoice/HeroIAm.m4a',
+];
+const PRESIDENT_VOICE_CLIPS = [
+  '/Sounds/PresidentVoice/4score.m4a',
+  '/Sounds/PresidentVoice/BrightFuture.m4a',
+  '/Sounds/PresidentVoice/TickTock.m4a',
+];
+const HERO_VOICE_MANIFEST_URL = '/api/audio/hero-voices';
+const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
+
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
 }
@@ -57,6 +72,10 @@ export class GameClient {
       world: null,
       snapshot: null,
     };
+    this.voiceEnabled = false;
+    this.voiceUnlocked = false;
+    this.voicePools = null;
+    this.voiceState = null;
 
     this.bindDom();
     this.bindEvents();
@@ -145,6 +164,7 @@ export class GameClient {
         this.handleControllerState(snapshot);
       } else {
         this.handleDisplayState(snapshot);
+        this.refreshVoicePlayback();
       }
     });
 
@@ -174,14 +194,208 @@ export class GameClient {
   setupAudio() {
     this.sound = new SoundEngine();
     if (this.isController) return;
+    this.setupVoiceAudio();
 
     const unlock = () => {
       this.sound.unlock();
+      this.unlockVoiceAudio();
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+  }
+
+  setupVoiceAudio() {
+    this.voiceEnabled = true;
+    this.voiceUnlocked = false;
+    this.voicePools = {
+      hero: HERO_VOICE_CLIPS.map((url) => this.createVoiceClip(url)),
+      president: PRESIDENT_VOICE_CLIPS.map((url) => this.createVoiceClip(url)),
+    };
+    this.voiceState = {
+      hero: { timerId: null, fallbackId: null, audio: null, playing: false, lastUrl: null },
+      president: { timerId: null, fallbackId: null, audio: null, playing: false, lastUrl: null },
+    };
+    this.refreshVoicePoolFromManifest('hero', HERO_VOICE_MANIFEST_URL);
+    this.refreshVoicePoolFromManifest('president', PRESIDENT_VOICE_MANIFEST_URL);
+  }
+
+  createVoiceClip(url) {
+    const metaAudio = new Audio(url);
+    const clip = {
+      url,
+      durationSec: 0,
+      metaAudio,
+    };
+    metaAudio.preload = 'metadata';
+    metaAudio.addEventListener('loadedmetadata', () => {
+      const duration = Number(metaAudio.duration);
+      if (Number.isFinite(duration) && duration > 0) clip.durationSec = duration;
+    });
+    metaAudio.load();
+    return clip;
+  }
+
+  async refreshVoicePoolFromManifest(type, manifestUrl) {
+    if (!type || !manifestUrl || typeof fetch !== 'function') return;
+    try {
+      const res = await fetch(manifestUrl, { cache: 'no-store' });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const clips = Array.isArray(payload?.clips)
+        ? payload.clips.filter((url) => typeof url === 'string' && url.trim().length > 0)
+        : [];
+      if (!clips.length) return;
+      const unique = [...new Set(clips)];
+      this.voicePools[type] = unique.map((url) => this.createVoiceClip(url));
+      if (this.voiceUnlocked) this.refreshVoicePlayback();
+    } catch {
+      // Keep fallback list when manifest is unavailable.
+    }
+  }
+
+  unlockVoiceAudio() {
+    if (!this.voiceEnabled) return;
+    this.voiceUnlocked = true;
+    this.refreshVoicePlayback();
+  }
+
+  randomVoiceGapMs() {
+    return Math.round(VOICE_GAP_MIN_MS + Math.random() * (VOICE_GAP_MAX_MS - VOICE_GAP_MIN_MS));
+  }
+
+  voiceClipDurationMs(clip) {
+    if (!clip) return 0;
+    const fromClip = Number(clip.durationSec);
+    if (Number.isFinite(fromClip) && fromClip > 0) return Math.round(fromClip * 1000);
+    const fromMeta = Number(clip.metaAudio?.duration);
+    if (Number.isFinite(fromMeta) && fromMeta > 0) return Math.round(fromMeta * 1000);
+    return 0;
+  }
+
+  refreshVoicePlayback() {
+    if (this.isController || !this.voiceEnabled || !this.voiceState) return;
+
+    const snapshot = this.state.snapshot;
+    const minions = Array.isArray(snapshot?.minions) ? snapshot.minions : [];
+    const inPlayableRound = Boolean(snapshot?.started) && !snapshot?.gameOver;
+    const hasHero = inPlayableRound && minions.some((m) => m?.hero && Number(m.hp) > 0);
+    const hasPresident = inPlayableRound && minions.some((m) => m?.president && Number(m.hp) > 0);
+    this.syncVoiceType('hero', hasHero);
+    this.syncVoiceType('president', hasPresident);
+  }
+
+  syncVoiceType(type, shouldRun) {
+    const state = this.voiceState?.[type];
+    if (!state) return;
+
+    if (!shouldRun || !this.voiceUnlocked) {
+      this.stopVoiceType(type);
+      return;
+    }
+
+    if (state.playing || state.timerId) return;
+    this.scheduleVoiceType(type, this.randomVoiceGapMs());
+  }
+
+  scheduleVoiceType(type, delayMs) {
+    const state = this.voiceState?.[type];
+    if (!state) return;
+    if (state.timerId) window.clearTimeout(state.timerId);
+    state.timerId = window.setTimeout(() => {
+      state.timerId = null;
+      this.playVoiceType(type);
+    }, Math.max(100, Math.round(delayMs)));
+  }
+
+  shouldPlayVoiceType(type) {
+    const snapshot = this.state.snapshot;
+    if (!snapshot || !snapshot.started || snapshot.gameOver) return false;
+    const minions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
+    if (type === 'hero') return minions.some((m) => m?.hero && Number(m.hp) > 0);
+    if (type === 'president') return minions.some((m) => m?.president && Number(m.hp) > 0);
+    return false;
+  }
+
+  pickVoiceClip(type, lastUrl) {
+    const pool = this.voicePools?.[type] || [];
+    if (!pool.length) return null;
+    if (pool.length === 1) return pool[0];
+    const filtered = pool.filter((clip) => clip.url !== lastUrl);
+    const source = filtered.length ? filtered : pool;
+    return source[Math.floor(Math.random() * source.length)];
+  }
+
+  playVoiceType(type) {
+    const state = this.voiceState?.[type];
+    if (!state || !this.voiceUnlocked || !this.shouldPlayVoiceType(type)) return;
+
+    const clip = this.pickVoiceClip(type, state.lastUrl);
+    if (!clip) return;
+
+    const audio = new Audio(clip.url);
+    audio.preload = 'auto';
+    audio.volume = type === 'hero' ? 0.66 : 0.62;
+    state.audio = audio;
+    state.playing = true;
+    state.lastUrl = clip.url;
+
+    const gapMs = this.randomVoiceGapMs();
+    const clipDurationMs = this.voiceClipDurationMs(clip);
+    const fallbackMs = clipDurationMs > 0 ? clipDurationMs : 12000;
+    let settled = false;
+
+    const settle = (nextDelayMs) => {
+      if (settled) return;
+      settled = true;
+      state.playing = false;
+      state.audio = null;
+      if (state.fallbackId) {
+        window.clearTimeout(state.fallbackId);
+        state.fallbackId = null;
+      }
+      if (this.shouldPlayVoiceType(type)) this.scheduleVoiceType(type, nextDelayMs);
+    };
+
+    audio.addEventListener('ended', () => settle(gapMs), { once: true });
+    audio.addEventListener('error', () => settle(gapMs), { once: true });
+
+    if (fallbackMs > 0) {
+      state.fallbackId = window.setTimeout(() => {
+        settle(gapMs);
+      }, fallbackMs + 350);
+    }
+
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        settle(gapMs);
+      });
+    }
+  }
+
+  stopVoiceType(type) {
+    const state = this.voiceState?.[type];
+    if (!state) return;
+
+    if (state.timerId) {
+      window.clearTimeout(state.timerId);
+      state.timerId = null;
+    }
+    if (state.fallbackId) {
+      window.clearTimeout(state.fallbackId);
+      state.fallbackId = null;
+    }
+    if (state.audio) {
+      try {
+        state.audio.pause();
+      } catch {
+        // Ignore pause errors from interrupted media elements.
+      }
+      state.audio = null;
+    }
+    state.playing = false;
   }
 
   setupWakeLock() {
@@ -284,6 +498,11 @@ export class GameClient {
       document.documentElement.classList.toggle('display-game-mode', inGame);
       document.body.classList.toggle('display-game-mode', inGame);
       this.setKeepAwake(inGame);
+      if (inGame) this.refreshVoicePlayback();
+      else {
+        this.stopVoiceType('hero');
+        this.stopVoiceType('president');
+      }
     }
   }
 
