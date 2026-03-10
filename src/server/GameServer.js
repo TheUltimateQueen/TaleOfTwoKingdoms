@@ -92,11 +92,12 @@ class GameServer {
 
   setupSocketHandlers() {
     this.io.on('connection', (socket) => {
-      socket.on('create_room', async ({ name, origin }) => {
+      socket.on('create_room', async ({ name, origin, mode }) => {
         let id = createRoomId();
         while (this.rooms.has(id)) id = createRoomId();
 
-        const room = new GameRoom(id, origin || '');
+        const roomMode = mode === '2v2' ? '2v2' : '1v1';
+        const room = new GameRoom(id, origin || '', { mode: roomMode });
         room.attachDisplay(socket.id, name || 'War Screen');
 
         this.rooms.set(id, room);
@@ -110,7 +111,7 @@ class GameServer {
           qrDataUrl = null;
         }
 
-        socket.emit('room_created', { roomId: id, joinUrl, qrDataUrl });
+        socket.emit('room_created', { roomId: id, joinUrl, qrDataUrl, mode: room.mode, requiredPlayers: room.requiredPlayers() });
         this.broadcastRoom(room);
       });
 
@@ -121,14 +122,20 @@ class GameServer {
           return;
         }
 
-        const side = room.addPlayer(socket.id, name);
-        if (!side) {
+        const join = room.addPlayer(socket.id, name);
+        if (!join) {
           socket.emit('join_error', { message: 'Room is full.' });
           return;
         }
 
         socket.join(room.id);
-        socket.emit('joined_room', { roomId: room.id, side });
+        socket.emit('joined_room', {
+          roomId: room.id,
+          side: join.side,
+          slot: join.slot,
+          mode: room.mode,
+          requiredPlayers: room.requiredPlayers(),
+        });
         this.broadcastRoom(room);
       });
 

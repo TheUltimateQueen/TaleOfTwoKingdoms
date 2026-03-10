@@ -90,10 +90,16 @@ export class GameRenderer {
     this.drawBarracks('left', snapshot.left, world);
     this.drawBarracks('right', snapshot.right, world);
 
-    this.drawCastle('left', world.towerLeftX, world.towerY, snapshot.left.towerHp, snapshot.left.pullX, snapshot.left.pullY, snapshot.left);
-    this.drawCastle('right', world.towerRightX, world.towerY, snapshot.right.towerHp, snapshot.right.pullX, snapshot.right.pullY, snapshot.right);
-    this.drawShotRing(world.towerLeftX, world.towerY - 185, snapshot.left.shotCd, TEAM_COLORS.left.ring);
-    this.drawShotRing(world.towerRightX, world.towerY - 185, snapshot.right.shotCd, TEAM_COLORS.right.ring);
+    const leftPulls = this.sideArcherPulls('left', snapshot.left);
+    const rightPulls = this.sideArcherPulls('right', snapshot.right);
+    this.drawCastle('left', world.towerLeftX, world.towerY, snapshot.left.towerHp, snapshot.left, leftPulls);
+    this.drawCastle('right', world.towerRightX, world.towerY, snapshot.right.towerHp, snapshot.right, rightPulls);
+    for (let i = 0; i < leftPulls.length; i += 1) {
+      this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, snapshot.left.shotCd, TEAM_COLORS.left.ring);
+    }
+    for (let i = 0; i < rightPulls.length; i += 1) {
+      this.drawShotRing(world.towerRightX, world.towerY - 185 - i * 60, snapshot.right.shotCd, TEAM_COLORS.right.ring);
+    }
     this.drawComboBanner('left', world.towerLeftX, world.towerY - 230, snapshot.left);
     this.drawComboBanner('right', world.towerRightX, world.towerY - 230, snapshot.right);
     this.drawUpgradeChargeBar('left', 42, 220, 16, 270, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
@@ -121,12 +127,18 @@ export class GameRenderer {
     this.updateHeroLines(dt);
     this.drawHeroLines();
 
-    const leftAim = worldAimAngle('left', snapshot.left.pullX, snapshot.left.pullY);
-    const rightAim = worldAimAngle('right', snapshot.right.pullX, snapshot.right.pullY);
-    const leftStrength = launchStrengthFromPull('left', snapshot.left.pullX, snapshot.left.pullY);
-    const rightStrength = launchStrengthFromPull('right', snapshot.right.pullX, snapshot.right.pullY);
-    this.drawAimGuide('left', world.towerLeftX + 35, snapshot.left.archerAimY, leftAim, leftStrength);
-    this.drawAimGuide('right', world.towerRightX - 35, snapshot.right.archerAimY, rightAim, rightStrength);
+    for (let i = 0; i < leftPulls.length; i += 1) {
+      const pull = leftPulls[i];
+      const leftAim = worldAimAngle('left', pull.pullX, pull.pullY);
+      const leftStrength = launchStrengthFromPull('left', pull.pullX, pull.pullY);
+      this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength);
+    }
+    for (let i = 0; i < rightPulls.length; i += 1) {
+      const pull = rightPulls[i];
+      const rightAim = worldAimAngle('right', pull.pullX, pull.pullY);
+      const rightStrength = launchStrengthFromPull('right', pull.pullX, pull.pullY);
+      this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength);
+    }
 
     if (snapshot.gameOver) {
       ctx.fillStyle = '#00000099';
@@ -389,6 +401,20 @@ export class GameRenderer {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+
+  sideArcherPulls(sideName, sideState) {
+    const fallbackPullX = sideName === 'right' ? 0.8 : -0.8;
+    const pulls = Array.isArray(sideState?.archerPulls) && sideState.archerPulls.length
+      ? sideState.archerPulls
+      : [{ pullX: sideState?.pullX, pullY: sideState?.pullY, archerAimY: sideState?.archerAimY }];
+    return pulls.map((pull, idx) => ({
+      pullX: Number.isFinite(pull?.pullX) ? pull.pullX : fallbackPullX,
+      pullY: Number.isFinite(pull?.pullY) ? pull.pullY : 0,
+      archerAimY: Number.isFinite(pull?.archerAimY)
+        ? pull.archerAimY
+        : ((Number(sideState?.archerAimY) || (900 / 2 - 56)) - idx * 78),
+    }));
   }
 
   drawAimGuide(side, ox, oy, angle, strength) {
@@ -667,7 +693,7 @@ export class GameRenderer {
     ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
   }
 
-  drawCastle(side, x, y, hp, pullX, pullY, sideState = null) {
+  drawCastle(side, x, y, hp, sideState = null, archerPulls = null) {
     const { ctx } = this;
     const palette = TEAM_COLORS[side];
     const dir = side === 'left' ? 1 : -1;
@@ -699,47 +725,52 @@ export class GameRenderer {
     ctx.fillStyle = '#09101d';
     ctx.fillRect(slitX - 7, y - 118, 14, 96);
 
+    const pulls = Array.isArray(archerPulls) && archerPulls.length
+      ? archerPulls
+      : this.sideArcherPulls(side, sideState);
     const archerX = side === 'left' ? x + 35 : x - 35;
-    const platformX = archerX + dir * 6;
-    ctx.fillStyle = '#4f607f';
-    ctx.fillRect(platformX - 18, y - 44, 36, 10);
+    for (let idx = 0; idx < pulls.length; idx += 1) {
+      const pull = pulls[idx];
+      const archerY = y - 56 - idx * 78;
+      const platformX = archerX + dir * 6;
+      ctx.fillStyle = '#4f607f';
+      ctx.fillRect(platformX - 18, archerY + 12, 36, 10);
 
-    const archerY = y - 56;
-    const aim = worldAimAngle(side, pullX, pullY);
+      const aim = worldAimAngle(side, pull.pullX, pull.pullY);
+      ctx.fillStyle = '#d7c29d';
+      ctx.beginPath();
+      ctx.arc(archerX, archerY - 16, 8, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.fillStyle = '#d7c29d';
-    ctx.beginPath();
-    ctx.arc(archerX, archerY - 16, 8, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.strokeStyle = '#d7c29d';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(archerX, archerY - 8);
+      ctx.lineTo(archerX, archerY + 14);
+      ctx.stroke();
 
-    ctx.strokeStyle = '#d7c29d';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(archerX, archerY - 8);
-    ctx.lineTo(archerX, archerY + 14);
-    ctx.stroke();
+      ctx.fillStyle = palette.primary;
+      ctx.fillRect(archerX - 6, archerY - 8, 12, 14);
 
-    ctx.fillStyle = palette.primary;
-    ctx.fillRect(archerX - 6, archerY - 8, 12, 14);
+      const bx1 = archerX + Math.cos(aim) * 9;
+      const by1 = archerY - 4 + Math.sin(aim) * 9;
+      const bx2 = archerX + Math.cos(aim) * 24;
+      const by2 = archerY - 4 + Math.sin(aim) * 24;
 
-    const bx1 = archerX + Math.cos(aim) * 9;
-    const by1 = archerY - 4 + Math.sin(aim) * 9;
-    const bx2 = archerX + Math.cos(aim) * 24;
-    const by2 = archerY - 4 + Math.sin(aim) * 24;
+      ctx.strokeStyle = '#8b5a2b';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(bx1, by1);
+      ctx.lineTo(bx2, by2);
+      ctx.stroke();
 
-    ctx.strokeStyle = '#8b5a2b';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(bx1, by1);
-    ctx.lineTo(bx2, by2);
-    ctx.stroke();
-
-    ctx.strokeStyle = palette.soft;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(bx1 - Math.sin(aim) * 6, by1 + Math.cos(aim) * 6);
-    ctx.lineTo(bx1 + Math.sin(aim) * 6, by1 - Math.cos(aim) * 6);
-    ctx.stroke();
+      ctx.strokeStyle = palette.soft;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bx1 - Math.sin(aim) * 6, by1 + Math.cos(aim) * 6);
+      ctx.lineTo(bx1 + Math.sin(aim) * 6, by1 - Math.cos(aim) * 6);
+      ctx.stroke();
+    }
 
     const hpW = 92;
     const pct = Math.max(0, hp / 6000);

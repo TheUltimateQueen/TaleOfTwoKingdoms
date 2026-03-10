@@ -10,7 +10,12 @@
     <main id="app">
       <section id="menu" class="card">
         <h1>Tale of Two Kingdoms</h1>
-        <p class="sub">Preparing room and QR code...</p>
+        <p class="sub">Choose a mode to create a room:</p>
+        <div class="row">
+          <button id="create1v1Btn">Create 1v1</button>
+          <button id="create2v2Btn">Create 2v2</button>
+        </div>
+        <p id="menuMsg" class="msg"></p>
       </section>
 
       <section id="lobby" class="card hidden">
@@ -18,7 +23,7 @@
         <p>Scan to join as controller:</p>
         <img id="qrImage" alt="Join QR" />
         <p><a id="joinLink" target="_blank" rel="noreferrer"></a></p>
-        <p id="lobbyMsg" class="msg">Waiting for 2 controllers...</p>
+        <p id="lobbyMsg" class="msg">Waiting for controllers...</p>
       </section>
 
       <section id="controllerPanel" class="card hidden">

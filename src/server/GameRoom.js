@@ -12,6 +12,7 @@ const {
   SHOT_POWER_TYPES,
 } = require('./constants');
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
+const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -85,7 +86,14 @@ function launchFromPull(sideName, pullX, pullY) {
   return { angle, strength };
 }
 
-function makeSideState() {
+function makeSideState(sideName = 'left', archerCount = 1) {
+  const clampedCount = Math.max(1, Math.min(2, Math.floor(archerCount)));
+  const basePullX = sideName === 'right' ? 0.8 : -0.8;
+  const archerPulls = Array.from({ length: clampedCount }, (_, idx) => ({
+    pullX: basePullX,
+    pullY: 0,
+    archerAimY: ARCHER_ORIGIN_Y - idx * ARCHER_VERTICAL_GAP,
+  }));
   return {
     towerHp: TOWER_MAX_HP,
     gold: 0,
@@ -106,9 +114,11 @@ function makeSideState() {
     upgradeCharge: 0,
     upgradeChargeMax: 140,
     upgradeAutoPickAt: null,
-    archerAimY: ARCHER_ORIGIN_Y,
-    pullX: -0.8,
+    archerAimY: archerPulls[0].archerAimY,
+    pullX: archerPulls[0].pullX,
     pullY: 0,
+    archerPulls,
+    archerVolleyIndex: 0,
     shotCd: 1,
     pendingShotPower: null,
     pendingShotPowerShots: 0,
@@ -125,15 +135,16 @@ function makeSideState() {
 }
 
 class GameRoom {
-  constructor(id, baseUrl) {
-    const left = makeSideState();
-    const right = makeSideState();
-    right.pullX = 0.8;
+  constructor(id, baseUrl, options = {}) {
+    this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
+    this.archersPerSide = this.mode === '2v2' ? 2 : 1;
+    const left = makeSideState('left', this.archersPerSide);
+    const right = makeSideState('right', this.archersPerSide);
 
     this.id = id;
     this.baseUrl = baseUrl;
     this.display = null;
-    this.players = { left: null, right: null };
+    this.players = { left: [], right: [] };
     this.started = false;
     this.gameOver = false;
     this.winner = null;
@@ -150,7 +161,7 @@ class GameRoom {
     this.sfxEvents = [];
     this.damageEvents = [];
     this.lineEvents = [];
-    this.sharedShotCd = SHOT_INTERVAL;
+    this.sharedShotCd = this.archersPerSide > 1 ? (SHOT_INTERVAL * 0.5) : SHOT_INTERVAL;
 
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
@@ -169,8 +180,16 @@ class GameRoom {
   }
 
   serialize() {
+    const leftPlayers = this.players.left.map((p) => ({ id: p.id, name: p.name, slot: p.slot }));
+    const rightPlayers = this.players.right.map((p) => ({ id: p.id, name: p.name, slot: p.slot }));
+    const leftPrimary = leftPlayers[0] || null;
+    const rightPrimary = rightPlayers[0] || null;
     return {
       id: this.id,
+      mode: this.mode,
+      archersPerSide: this.archersPerSide,
+      requiredPlayers: this.requiredPlayers(),
+      playerCount: this.totalPlayers(),
       started: this.started,
       gameOver: this.gameOver,
       winner: this.winner,
@@ -193,8 +212,12 @@ class GameRoom {
       shotPowers: this.shotPowers,
       upgradeCards: this.upgradeCards,
       players: {
-        left: this.players.left ? { id: this.players.left.id, name: this.players.left.name } : null,
-        right: this.players.right ? { id: this.players.right.id, name: this.players.right.name } : null,
+        left: leftPlayers,
+        right: rightPlayers,
+      },
+      primaryPlayers: {
+        left: leftPrimary,
+        right: rightPrimary,
       },
       hasDisplay: Boolean(this.display),
     };
@@ -240,37 +263,102 @@ class GameRoom {
     this.display = { id: socketId, name: name || 'War Screen' };
   }
 
-  sideBySocket(socketId) {
-    if (this.players.left && this.players.left.id === socketId) return 'left';
-    if (this.players.right && this.players.right.id === socketId) return 'right';
+  requiredPlayers() {
+    return this.archersPerSide * 2;
+  }
+
+  totalPlayers() {
+    return this.players.left.length + this.players.right.length;
+  }
+
+  isReadyToStart() {
+    return this.players.left.length >= this.archersPerSide && this.players.right.length >= this.archersPerSide;
+  }
+
+  syncSidePrimaryPull(sideName) {
+    const side = this[sideName];
+    if (!side || !Array.isArray(side.archerPulls) || !side.archerPulls.length) return;
+    const primary = side.archerPulls[0];
+    side.pullX = primary.pullX;
+    side.pullY = primary.pullY;
+    side.archerAimY = primary.archerAimY;
+  }
+
+  ensureArcherControl(sideName, slot = 0) {
+    const side = this[sideName];
+    if (!side) return null;
+    if (!Array.isArray(side.archerPulls)) side.archerPulls = [];
+    const cappedSlot = Math.max(0, Math.min(this.archersPerSide - 1, Math.floor(slot)));
+    while (side.archerPulls.length <= cappedSlot) {
+      const idx = side.archerPulls.length;
+      side.archerPulls.push({
+        pullX: sideName === 'right' ? 0.8 : -0.8,
+        pullY: 0,
+        archerAimY: ARCHER_ORIGIN_Y - idx * ARCHER_VERTICAL_GAP,
+      });
+    }
+    return side.archerPulls[cappedSlot];
+  }
+
+  playerBySocket(socketId) {
+    const leftPlayer = this.players.left.find((p) => p.id === socketId);
+    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, player: leftPlayer };
+    const rightPlayer = this.players.right.find((p) => p.id === socketId);
+    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, player: rightPlayer };
     return null;
   }
 
-  addPlayer(socketId, name) {
-    let side = this.sideBySocket(socketId);
-    if (side) return side;
+  sideBySocket(socketId) {
+    const found = this.playerBySocket(socketId);
+    return found ? found.side : null;
+  }
 
-    if (!this.players.left) {
-      this.players.left = { id: socketId, name: name || 'Kingdom West' };
-      side = 'left';
-    } else if (!this.players.right) {
-      this.players.right = { id: socketId, name: name || 'Kingdom East' };
-      side = 'right';
+  addPlayer(socketId, name) {
+    const existing = this.playerBySocket(socketId);
+    if (existing) return { side: existing.side, slot: existing.slot, existing: true };
+    if (this.totalPlayers() >= this.requiredPlayers()) return null;
+
+    const leftCount = this.players.left.length;
+    const rightCount = this.players.right.length;
+    const side = leftCount <= rightCount ? 'left' : 'right';
+    const slot = this.players[side].length;
+    if (slot >= this.archersPerSide) {
+      const otherSide = side === 'left' ? 'right' : 'left';
+      const otherSlot = this.players[otherSide].length;
+      if (otherSlot >= this.archersPerSide) return null;
+      const player = {
+        id: socketId,
+        name: name || (otherSide === 'left' ? `West Archer ${otherSlot + 1}` : `East Archer ${otherSlot + 1}`),
+        slot: otherSlot,
+      };
+      this.players[otherSide].push(player);
+      this.started = this.isReadyToStart();
+      return { side: otherSide, slot: otherSlot, existing: false };
     }
 
-    if (this.players.left && this.players.right && !this.started) this.started = true;
-    return side || null;
+    const player = {
+      id: socketId,
+      name: name || (side === 'left' ? `West Archer ${slot + 1}` : `East Archer ${slot + 1}`),
+      slot,
+    };
+    this.players[side].push(player);
+    this.started = this.isReadyToStart();
+    return { side, slot, existing: false };
   }
 
   setControlPull(socketId, x, y) {
     if (this.gameOver) return;
-    const sideName = this.sideBySocket(socketId);
-    if (!sideName) return;
+    const player = this.playerBySocket(socketId);
+    if (!player) return;
+    const sideName = player.side;
 
     const pull = this.normalizePull(sideName, x, y);
-    this[sideName].pullX = pull.x;
-    this[sideName].pullY = pull.y;
-    this[sideName].archerAimY = ARCHER_ORIGIN_Y;
+    const control = this.ensureArcherControl(sideName, player.slot);
+    if (!control) return;
+    control.pullX = pull.x;
+    control.pullY = pull.y;
+    control.archerAimY = ARCHER_ORIGIN_Y - player.slot * ARCHER_VERTICAL_GAP;
+    this.syncSidePrimaryPull(sideName);
   }
 
   removeSocket(socketId) {
@@ -279,20 +367,24 @@ class GameRoom {
       this.display = null;
       changed = true;
     }
-    if (this.players.left && this.players.left.id === socketId) {
-      this.players.left = null;
+    const leftBefore = this.players.left.length;
+    this.players.left = this.players.left.filter((p) => p.id !== socketId);
+    if (this.players.left.length !== leftBefore) {
+      this.players.left.forEach((p, idx) => { p.slot = idx; });
       changed = true;
     }
-    if (this.players.right && this.players.right.id === socketId) {
-      this.players.right = null;
+    const rightBefore = this.players.right.length;
+    this.players.right = this.players.right.filter((p) => p.id !== socketId);
+    if (this.players.right.length !== rightBefore) {
+      this.players.right.forEach((p, idx) => { p.slot = idx; });
       changed = true;
     }
 
-    if (changed) this.started = false;
+    if (changed) this.started = this.isReadyToStart();
 
     return {
       changed,
-      empty: !this.players.left && !this.players.right && !this.display,
+      empty: this.players.left.length === 0 && this.players.right.length === 0 && !this.display,
     };
   }
 
@@ -300,6 +392,7 @@ class GameRoom {
     if (!this.started || this.gameOver) return;
     this.t += dt;
 
+    const volleyInterval = this.archersPerSide > 1 ? (SHOT_INTERVAL * 0.5) : SHOT_INTERVAL;
     this.sharedShotCd = Math.max(0, this.sharedShotCd - dt);
     this.left.shotCd = this.sharedShotCd;
     this.right.shotCd = this.sharedShotCd;
@@ -307,9 +400,18 @@ class GameRoom {
     this.right.minionCd = Math.max(0, this.right.minionCd - dt);
 
     if (this.sharedShotCd === 0) {
-      this.addArrowFromPull('left');
-      this.addArrowFromPull('right');
-      this.sharedShotCd = SHOT_INTERVAL;
+      if (this.archersPerSide > 1) {
+        const leftSlot = this.left.archerVolleyIndex || 0;
+        const rightSlot = this.right.archerVolleyIndex || 0;
+        this.addArrowFromPull('left', leftSlot);
+        this.addArrowFromPull('right', rightSlot);
+        this.left.archerVolleyIndex = (leftSlot + 1) % this.archersPerSide;
+        this.right.archerVolleyIndex = (rightSlot + 1) % this.archersPerSide;
+      } else {
+        this.addArrowFromPull('left', 0);
+        this.addArrowFromPull('right', 0);
+      }
+      this.sharedShotCd = volleyInterval;
       this.left.shotCd = this.sharedShotCd;
       this.right.shotCd = this.sharedShotCd;
     }
@@ -1812,15 +1914,19 @@ class GameRoom {
     return { x: nx, y: ny };
   }
 
-  addArrowFromPull(sideName) {
+  addArrowFromPull(sideName, archerSlot = 0) {
     const side = this[sideName];
     const sx = sideName === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
-    const pull = this.normalizePull(sideName, side.pullX, side.pullY);
-    side.pullX = pull.x;
-    side.pullY = pull.y;
-    side.archerAimY = ARCHER_ORIGIN_Y;
+    const slot = Math.max(0, Math.min(this.archersPerSide - 1, Math.floor(archerSlot)));
+    const control = this.ensureArcherControl(sideName, slot);
+    if (!control) return;
+    const pull = this.normalizePull(sideName, control.pullX, control.pullY);
+    control.pullX = pull.x;
+    control.pullY = pull.y;
+    control.archerAimY = ARCHER_ORIGIN_Y - slot * ARCHER_VERTICAL_GAP;
+    this.syncSidePrimaryPull(sideName);
 
-    const sy = ARCHER_ORIGIN_Y;
+    const sy = ARCHER_ORIGIN_Y - slot * ARCHER_VERTICAL_GAP;
     const launch = launchFromPull(sideName, pull.x, pull.y);
     const forwardSign = sideName === 'left' ? 1 : -1;
     const comboMul = this.comboMultiplier(side);

@@ -69,6 +69,8 @@ export class GameClient {
     this.state = {
       roomId: null,
       side: null,
+      slot: 0,
+      mode: '1v1',
       world: null,
       snapshot: null,
     };
@@ -97,11 +99,14 @@ export class GameClient {
 
     this.roomInput = document.getElementById('roomInput');
     this.joinBtn = document.getElementById('joinBtn');
+    this.create1v1Btn = document.getElementById('create1v1Btn');
+    this.create2v2Btn = document.getElementById('create2v2Btn');
     this.menuMsg = document.getElementById('menuMsg');
 
     this.roomCodeEl = document.getElementById('roomCode');
     this.qrImage = document.getElementById('qrImage');
     this.joinLink = document.getElementById('joinLink');
+    this.lobbyMsg = document.getElementById('lobbyMsg');
 
     this.leftHud = document.getElementById('leftHud');
     this.rightHud = document.getElementById('rightHud');
@@ -115,6 +120,11 @@ export class GameClient {
   }
 
   bindEvents() {
+    if (!this.isController) {
+      this.create1v1Btn?.addEventListener('click', () => this.requestRoomCreate('1v1'));
+      this.create2v2Btn?.addEventListener('click', () => this.requestRoomCreate('2v2'));
+    }
+
     this.joinBtn.addEventListener('click', () => {
       const roomId = this.roomInput.value.trim().toUpperCase();
       if (!roomId) {
@@ -126,21 +136,26 @@ export class GameClient {
       });
     });
 
-    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl }) => {
+    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers }) => {
       this.state.roomId = roomId;
+      this.state.mode = mode === '2v2' ? '2v2' : '1v1';
       this.roomCodeEl.textContent = roomId;
       if (this.joinLink) {
         this.joinLink.href = joinUrl;
         this.joinLink.textContent = joinUrl;
       }
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
+      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
       if (!this.isController) this.setDisplayMode('lobby');
     });
 
-    this.socket.on('joined_room', ({ roomId, side }) => {
+    this.socket.on('joined_room', ({ roomId, side, slot, mode, requiredPlayers }) => {
       this.state.roomId = roomId;
       this.state.side = side;
-      this.controllerMsg.textContent = `Connected as ${sideLabel(side)} kingdom.`;
+      this.state.slot = Number.isFinite(slot) ? slot : 0;
+      this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
+      this.controllerMsg.textContent = `Connected as ${sideLabel(side)}${laneText}. Room needs ${requiredPlayers || 2} controllers.`;
       this.pullPad.setSide(side);
       this.setControllerMode(true);
       this.socket.emit('control_pull', { roomId, x: this.pullPad.pull.x, y: this.pullPad.pull.y });
@@ -188,6 +203,16 @@ export class GameClient {
       for (const e of events) {
         this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
       }
+    });
+  }
+
+  requestRoomCreate(mode = '1v1') {
+    const normalized = mode === '2v2' ? '2v2' : '1v1';
+    if (this.menuMsg) this.menuMsg.textContent = `Creating ${normalized.toUpperCase()} room...`;
+    this.socket.emit('create_room', {
+      name: 'War Screen',
+      origin: window.location.origin + window.location.pathname,
+      mode: normalized,
     });
   }
 
@@ -461,7 +486,8 @@ export class GameClient {
     if (!this.state.side) return;
 
     const me = snapshot[this.state.side];
-    this.controllerMsg.textContent = `${sideLabel(this.state.side)} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    const laneText = snapshot.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
+    this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
 
     if (snapshot.gameOver) {
       this.controllerMsg.textContent = snapshot.winner === this.state.side
@@ -473,9 +499,19 @@ export class GameClient {
   }
 
   handleDisplayState(snapshot) {
+    this.state.mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
     this.updateHud(snapshot);
     if (snapshot.started) this.setDisplayMode('game');
-    else if (this.state.roomId) this.setDisplayMode('lobby');
+    else if (this.state.roomId) {
+      this.setDisplayMode('lobby');
+      const required = Number(snapshot.requiredPlayers) || (snapshot.mode === '2v2' ? 4 : 2);
+      const count = Number(snapshot.playerCount) || 0;
+      const leftCount = Array.isArray(snapshot.players?.left) ? snapshot.players.left.length : (snapshot.players?.left ? 1 : 0);
+      const rightCount = Array.isArray(snapshot.players?.right) ? snapshot.players.right.length : (snapshot.players?.right ? 1 : 0);
+      if (this.lobbyMsg) {
+        this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | West ${leftCount}/${required / 2} | East ${rightCount}/${required / 2}`;
+      }
+    }
   }
 
   startRenderLoop() {
@@ -525,9 +561,15 @@ export class GameClient {
     const rightDebt = Math.max(0, Math.ceil(s.right.upgradeChargeMax - s.right.upgradeCharge));
     const leftUpg = leftDebt > 0 ? `Debt ${leftDebt} (${lp}%)` : 'READY';
     const rightUpg = rightDebt > 0 ? `Debt ${rightDebt} (${rp}%)` : 'READY';
-    this.leftHud.textContent = `${s.players.left?.name || 'West'} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
-    this.rightHud.textContent = `${s.players.right?.name || 'East'} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
-    this.centerHud.textContent = `Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
+    const leftRoster = Array.isArray(s.players?.left)
+      ? s.players.left.map((p) => p?.name).filter(Boolean).join(' + ')
+      : (s.players?.left?.name || s.primaryPlayers?.left?.name || 'West');
+    const rightRoster = Array.isArray(s.players?.right)
+      ? s.players.right.map((p) => p?.name).filter(Boolean).join(' + ')
+      : (s.players?.right?.name || s.primaryPlayers?.right?.name || 'East');
+    this.leftHud.textContent = `${leftRoster || 'West'} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
+    this.rightHud.textContent = `${rightRoster || 'East'} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
+    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()} | Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
   }
 
   initFromUrl() {
@@ -550,10 +592,7 @@ export class GameClient {
       document.body.classList.add('display-mode');
       this.controllerPanel.classList.add('hidden');
       this.setDisplayMode('menu');
-      this.socket.emit('create_room', {
-        name: 'War Screen',
-        origin: window.location.origin + window.location.pathname,
-      });
+      if (this.menuMsg) this.menuMsg.textContent = 'Select 1v1 or 2v2 to start.';
     }
   }
 }
