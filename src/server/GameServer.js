@@ -139,6 +139,28 @@ class GameServer {
         this.broadcastRoom(room);
       });
 
+      socket.on('set_room_mode', ({ roomId, mode }) => {
+        const room = this.rooms.get((roomId || '').toUpperCase());
+        if (!room) {
+          socket.emit('room_mode_error', { message: 'Room not found.' });
+          return;
+        }
+        if (!room.display || room.display.id !== socket.id) {
+          socket.emit('room_mode_error', { message: 'Only the host display can change room size.' });
+          return;
+        }
+        const result = room.setMode(mode);
+        if (!result?.ok) {
+          socket.emit('room_mode_error', { message: result?.message || 'Unable to change room size.' });
+          return;
+        }
+        socket.emit('room_mode_updated', {
+          mode: room.mode,
+          requiredPlayers: room.requiredPlayers(),
+        });
+        this.broadcastRoom(room);
+      });
+
       socket.on('control_pull', ({ roomId, x, y }) => {
         const room = this.rooms.get((roomId || '').toUpperCase());
         if (!room) return;

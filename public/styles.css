@@ -109,6 +109,35 @@ button:hover {
   filter: brightness(1.07);
 }
 
+.mode-toggle {
+  gap: 0;
+}
+
+.mode-btn {
+  min-width: 120px;
+  border-radius: 0;
+}
+
+.mode-btn:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.mode-btn:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.mode-btn + .mode-btn {
+  border-left: 0;
+}
+
+.mode-btn.active {
+  background: linear-gradient(180deg, #f4c16f 0%, #d39a44 100%);
+  border-color: #f0be6c;
+  color: #221507;
+}
+
 #roomInput {
   width: 92px;
   text-transform: uppercase;

@@ -161,7 +161,7 @@ class GameRoom {
     this.sfxEvents = [];
     this.damageEvents = [];
     this.lineEvents = [];
-    this.sharedShotCd = this.archersPerSide > 1 ? (SHOT_INTERVAL * 0.5) : SHOT_INTERVAL;
+    this.sharedShotCd = SHOT_INTERVAL;
 
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
@@ -261,6 +261,48 @@ class GameRoom {
 
   attachDisplay(socketId, name) {
     this.display = { id: socketId, name: name || 'War Screen' };
+  }
+
+  resizeSideArcherControls(sideName) {
+    const side = this[sideName];
+    if (!side) return;
+    if (!Array.isArray(side.archerPulls)) side.archerPulls = [];
+    if (side.archerPulls.length > this.archersPerSide) {
+      side.archerPulls = side.archerPulls.slice(0, this.archersPerSide);
+    }
+    while (side.archerPulls.length < this.archersPerSide) {
+      const idx = side.archerPulls.length;
+      side.archerPulls.push({
+        pullX: sideName === 'right' ? 0.8 : -0.8,
+        pullY: 0,
+        archerAimY: ARCHER_ORIGIN_Y - idx * ARCHER_VERTICAL_GAP,
+      });
+    }
+    side.archerVolleyIndex = Math.max(0, Math.floor(side.archerVolleyIndex || 0)) % this.archersPerSide;
+    this.syncSidePrimaryPull(sideName);
+  }
+
+  setMode(mode) {
+    const nextMode = mode === '2v2' ? '2v2' : '1v1';
+    if (this.started) {
+      return { ok: false, message: 'Cannot change room size after the match has started.' };
+    }
+    if (nextMode === this.mode) return { ok: true, changed: false };
+
+    const nextArchersPerSide = nextMode === '2v2' ? 2 : 1;
+    if (this.players.left.length > nextArchersPerSide || this.players.right.length > nextArchersPerSide) {
+      return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+    }
+
+    this.mode = nextMode;
+    this.archersPerSide = nextArchersPerSide;
+    this.resizeSideArcherControls('left');
+    this.resizeSideArcherControls('right');
+    this.sharedShotCd = Math.min(Math.max(0, this.sharedShotCd), SHOT_INTERVAL);
+    this.left.shotCd = this.sharedShotCd;
+    this.right.shotCd = this.sharedShotCd;
+    this.started = this.isReadyToStart();
+    return { ok: true, changed: true };
   }
 
   requiredPlayers() {
@@ -392,7 +434,9 @@ class GameRoom {
     if (!this.started || this.gameOver) return;
     this.t += dt;
 
-    const volleyInterval = this.archersPerSide > 1 ? (SHOT_INTERVAL * 0.5) : SHOT_INTERVAL;
+    // In 2v2, archers alternate on the same side-wide cadence as 1v1.
+    // Result: one team shot every second, each individual archer every two seconds.
+    const volleyInterval = SHOT_INTERVAL;
     this.sharedShotCd = Math.max(0, this.sharedShotCd - dt);
     this.left.shotCd = this.sharedShotCd;
     this.right.shotCd = this.sharedShotCd;

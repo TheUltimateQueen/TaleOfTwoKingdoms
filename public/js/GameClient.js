@@ -71,6 +71,7 @@ export class GameClient {
       side: null,
       slot: 0,
       mode: '1v1',
+      createMode: '1v1',
       world: null,
       snapshot: null,
     };
@@ -99,13 +100,18 @@ export class GameClient {
 
     this.roomInput = document.getElementById('roomInput');
     this.joinBtn = document.getElementById('joinBtn');
-    this.create1v1Btn = document.getElementById('create1v1Btn');
-    this.create2v2Btn = document.getElementById('create2v2Btn');
+    this.mode2PlayersBtn = document.getElementById('mode2PlayersBtn');
+    this.mode4PlayersBtn = document.getElementById('mode4PlayersBtn');
+    this.createRoomBtn = document.getElementById('createRoomBtn');
     this.menuMsg = document.getElementById('menuMsg');
 
     this.roomCodeEl = document.getElementById('roomCode');
     this.qrImage = document.getElementById('qrImage');
     this.joinLink = document.getElementById('joinLink');
+    this.lobbyMode2PlayersBtn = document.getElementById('lobbyMode2PlayersBtn');
+    this.lobbyMode4PlayersBtn = document.getElementById('lobbyMode4PlayersBtn');
+    this.applyLobbyModeBtn = document.getElementById('applyLobbyModeBtn');
+    this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
 
     this.leftHud = document.getElementById('leftHud');
@@ -121,8 +127,13 @@ export class GameClient {
 
   bindEvents() {
     if (!this.isController) {
-      this.create1v1Btn?.addEventListener('click', () => this.requestRoomCreate('1v1'));
-      this.create2v2Btn?.addEventListener('click', () => this.requestRoomCreate('2v2'));
+      this.mode2PlayersBtn?.addEventListener('click', () => this.setCreateMode('1v1'));
+      this.mode4PlayersBtn?.addEventListener('click', () => this.setCreateMode('2v2'));
+      this.lobbyMode2PlayersBtn?.addEventListener('click', () => this.setCreateMode('1v1'));
+      this.lobbyMode4PlayersBtn?.addEventListener('click', () => this.setCreateMode('2v2'));
+      this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
+      this.applyLobbyModeBtn?.addEventListener('click', () => this.requestRoomModeChange(this.state.createMode));
+      this.setCreateMode(this.state.createMode);
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -139,14 +150,33 @@ export class GameClient {
     this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers }) => {
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.setCreateMode(this.state.mode);
       this.roomCodeEl.textContent = roomId;
       if (this.joinLink) {
         this.joinLink.href = joinUrl;
         this.joinLink.textContent = joinUrl;
       }
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
+      if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
       if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
       if (!this.isController) this.setDisplayMode('lobby');
+    });
+
+    this.socket.on('room_mode_updated', ({ mode, requiredPlayers }) => {
+      if (this.isController) return;
+      this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.setCreateMode(this.state.mode);
+      if (this.lobbyModeMsg) {
+        const label = this.state.mode === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
+        this.lobbyModeMsg.textContent = `Room size updated: ${label}.`;
+      }
+      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
+    });
+
+    this.socket.on('room_mode_error', ({ message }) => {
+      if (this.isController) return;
+      if (this.lobbyModeMsg && this.state.roomId) this.lobbyModeMsg.textContent = message || 'Unable to change room size.';
+      else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change room size.';
     });
 
     this.socket.on('joined_room', ({ roomId, side, slot, mode, requiredPlayers }) => {
@@ -208,12 +238,40 @@ export class GameClient {
 
   requestRoomCreate(mode = '1v1') {
     const normalized = mode === '2v2' ? '2v2' : '1v1';
-    if (this.menuMsg) this.menuMsg.textContent = `Creating ${normalized.toUpperCase()} room...`;
+    const label = normalized === '2v2' ? '4-player (2v2)' : '2-player (1v1)';
+    if (this.menuMsg) this.menuMsg.textContent = `Creating ${label} room...`;
     this.socket.emit('create_room', {
       name: 'War Screen',
       origin: window.location.origin + window.location.pathname,
       mode: normalized,
     });
+  }
+
+  requestRoomModeChange(mode = '1v1') {
+    if (!this.state.roomId) return;
+    const normalized = mode === '2v2' ? '2v2' : '1v1';
+    const label = normalized === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = `Switching room size to ${label}...`;
+    this.socket.emit('set_room_mode', { roomId: this.state.roomId, mode: normalized });
+  }
+
+  syncModeToggleButtons(twoBtn, fourBtn, normalizedMode) {
+    const twoPlayers = normalizedMode === '1v1';
+    if (twoBtn) {
+      twoBtn.classList.toggle('active', twoPlayers);
+      twoBtn.setAttribute('aria-pressed', String(twoPlayers));
+    }
+    if (fourBtn) {
+      fourBtn.classList.toggle('active', !twoPlayers);
+      fourBtn.setAttribute('aria-pressed', String(!twoPlayers));
+    }
+  }
+
+  setCreateMode(mode = '1v1') {
+    const normalized = mode === '2v2' ? '2v2' : '1v1';
+    this.state.createMode = normalized;
+    this.syncModeToggleButtons(this.mode2PlayersBtn, this.mode4PlayersBtn, normalized);
+    this.syncModeToggleButtons(this.lobbyMode2PlayersBtn, this.lobbyMode4PlayersBtn, normalized);
   }
 
   setupAudio() {
@@ -499,7 +557,9 @@ export class GameClient {
   }
 
   handleDisplayState(snapshot) {
-    this.state.mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
+    const mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
+    this.state.mode = mode;
+    if (this.state.createMode !== mode) this.setCreateMode(mode);
     this.updateHud(snapshot);
     if (snapshot.started) this.setDisplayMode('game');
     else if (this.state.roomId) {
@@ -592,7 +652,8 @@ export class GameClient {
       document.body.classList.add('display-mode');
       this.controllerPanel.classList.add('hidden');
       this.setDisplayMode('menu');
-      if (this.menuMsg) this.menuMsg.textContent = 'Select 1v1 or 2v2 to start.';
+      this.setCreateMode('1v1');
+      if (this.menuMsg) this.menuMsg.textContent = '2 players selected by default. Switch to 4 players if needed.';
     }
   }
 }
