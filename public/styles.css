@@ -194,6 +194,11 @@ button:hover {
   justify-content: center;
 }
 
+#postGamePanel {
+  width: min(620px, calc(100vw - 24px));
+  text-align: center;
+}
+
 #game {
   width: min(1600px, 100%);
   aspect-ratio: 16 / 9;
@@ -267,6 +272,15 @@ body.display-mode.display-game-mode .hud {
   z-index: 3;
   pointer-events: none;
   padding: 0 10px;
+}
+
+body.display-mode.display-game-mode #postGamePanel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  pointer-events: auto;
 }
 
 .hidden {

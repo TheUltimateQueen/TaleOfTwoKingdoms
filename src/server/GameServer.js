@@ -161,6 +161,28 @@ class GameServer {
         this.broadcastRoom(room);
       });
 
+      socket.on('restart_room', ({ roomId }) => {
+        const room = this.rooms.get((roomId || '').toUpperCase());
+        if (!room) {
+          socket.emit('room_restart_error', { message: 'Room not found.' });
+          return;
+        }
+        if (!room.display || room.display.id !== socket.id) {
+          socket.emit('room_restart_error', { message: 'Only the host display can restart the match.' });
+          return;
+        }
+        const result = room.restartMatch();
+        if (!result?.ok) {
+          socket.emit('room_restart_error', { message: result?.message || 'Unable to restart match.' });
+          return;
+        }
+        this.io.to(room.id).emit('room_restarted', {
+          mode: room.mode,
+          requiredPlayers: room.requiredPlayers(),
+        });
+        this.broadcastRoom(room);
+      });
+
       socket.on('control_pull', ({ roomId, x, y }) => {
         const room = this.rooms.get((roomId || '').toUpperCase());
         if (!room) return;

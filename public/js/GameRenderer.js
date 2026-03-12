@@ -38,6 +38,13 @@ function comboTierFromStreak(streak) {
   return 1;
 }
 
+function arrowAccuracy(sideState) {
+  const fired = Math.max(0, sideState?.arrowsFired || 0);
+  const hits = Math.max(0, sideState?.arrowHits || 0);
+  const rate = fired ? Math.round((hits / fired) * 100) : 0;
+  return { fired, hits, rate };
+}
+
 const UPGRADE_BADGE_SPECS = [
   { type: 'arrowLevel', code: 'AR', base: 1, color: '#76c1ff' },
   { type: 'unitLevel', code: 'AT', base: 1, color: '#7ab8ff' },
@@ -141,6 +148,8 @@ export class GameRenderer {
     }
 
     if (snapshot.gameOver) {
+      const leftAcc = arrowAccuracy(snapshot.left);
+      const rightAcc = arrowAccuracy(snapshot.right);
       ctx.fillStyle = '#00000099';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#fff';
@@ -148,7 +157,11 @@ export class GameRenderer {
       ctx.textAlign = 'center';
       ctx.fillText(`${snapshot.winner === 'left' ? 'West' : 'East'} Kingdom Wins`, w / 2, h / 2 - 12);
       ctx.font = '24px sans-serif';
-      ctx.fillText('Refresh to start a new war', w / 2, h / 2 + 40);
+      ctx.fillText(`West Arrow Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows fired)`, w / 2, h / 2 + 34);
+      ctx.fillText(`East Arrow Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows fired)`, w / 2, h / 2 + 68);
+      ctx.font = '20px sans-serif';
+      ctx.fillText('Arrow Accuracy = hits / arrows fired', w / 2, h / 2 + 98);
+      ctx.fillText('Host can press Restart Match to play again with same room', w / 2, h / 2 + 128);
     }
   }
 

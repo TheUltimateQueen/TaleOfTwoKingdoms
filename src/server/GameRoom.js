@@ -305,6 +305,67 @@ class GameRoom {
     return { ok: true, changed: true };
   }
 
+  restartMatch() {
+    if (!this.gameOver) {
+      return { ok: false, message: 'Match has not ended yet.' };
+    }
+
+    const previousPulls = {
+      left: Array.isArray(this.left?.archerPulls) ? this.left.archerPulls : [],
+      right: Array.isArray(this.right?.archerPulls) ? this.right.archerPulls : [],
+    };
+
+    this.left = makeSideState('left', this.archersPerSide);
+    this.right = makeSideState('right', this.archersPerSide);
+    this.gameOver = false;
+    this.winner = null;
+    this.t = 0;
+    this.sharedShotCd = SHOT_INTERVAL;
+    this.left.shotCd = this.sharedShotCd;
+    this.right.shotCd = this.sharedShotCd;
+
+    for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+      const leftPull = previousPulls.left[slot];
+      if (leftPull) {
+        const control = this.ensureArcherControl('left', slot);
+        const pull = this.normalizePull('left', leftPull.pullX, leftPull.pullY);
+        control.pullX = pull.x;
+        control.pullY = pull.y;
+      }
+      const rightPull = previousPulls.right[slot];
+      if (rightPull) {
+        const control = this.ensureArcherControl('right', slot);
+        const pull = this.normalizePull('right', rightPull.pullX, rightPull.pullY);
+        control.pullX = pull.x;
+        control.pullY = pull.y;
+      }
+    }
+    this.syncSidePrimaryPull('left');
+    this.syncSidePrimaryPull('right');
+
+    this.arrows = [];
+    this.minions = [];
+    this.resources = [];
+    this.shotPowers = [];
+    this.upgradeCards = [];
+    this.candles = { left: null, right: null };
+    this.candleScorches = [];
+    this.sfxEvents = [];
+    this.damageEvents = [];
+    this.lineEvents = [];
+    this.nextResourceAt = 5;
+    this.nextShotPowerAt = 7;
+    this.seq = 1;
+    this.left.candleCd = this.candleRareCooldown('left');
+    this.right.candleCd = this.candleRareCooldown('right');
+    this.left.candleActive = false;
+    this.right.candleActive = false;
+    this.seedUpgradeCards();
+    this.started = this.isReadyToStart();
+
+    return { ok: true };
+  }
+
   requiredPlayers() {
     return this.archersPerSide * 2;
   }

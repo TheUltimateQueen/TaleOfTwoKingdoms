@@ -31,9 +31,6 @@
           <button id="lobbyMode2PlayersBtn" class="mode-btn active" type="button" aria-pressed="true">2 Players</button>
           <button id="lobbyMode4PlayersBtn" class="mode-btn" type="button" aria-pressed="false">4 Players</button>
         </div>
-        <div class="row">
-          <button id="applyLobbyModeBtn" type="button">Apply Player Count</button>
-        </div>
         <p id="lobbyModeMsg" class="msg"></p>
         <p id="lobbyMsg" class="msg">Waiting for controllers...</p>
       </section>
@@ -57,6 +54,16 @@
         <div id="leftHud"></div>
         <div id="centerHud"></div>
         <div id="rightHud"></div>
+      </section>
+
+      <section id="postGamePanel" class="card hidden">
+        <h2 id="postGameTitle">Match Over</h2>
+        <p id="postGameStats" class="sub"></p>
+        <p id="postGameExplain" class="sub">Arrow Accuracy = hits / arrows fired</p>
+        <div class="row">
+          <button id="restartMatchBtn" type="button">Restart Match</button>
+        </div>
+        <p id="restartMsg" class="msg"></p>
       </section>
 
       <canvas id="game" class="hidden" width="1600" height="900"></canvas>
