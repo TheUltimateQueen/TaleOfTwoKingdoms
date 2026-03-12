@@ -65,6 +65,7 @@ export class GameRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.particles = [];
+    this.diggerDustMarks = new Map();
     this.damageTexts = [];
     this.heroLines = [];
     this.lastFrameAt = performance.now();
@@ -286,6 +287,34 @@ export class GameRenderer {
         size: sizeBase + Math.random() * sizeRand,
         color: colors[Math.floor(Math.random() * colors.length)],
         gravity,
+      });
+    }
+  }
+
+  emitDiggerDirt(minion, x, y, dir, phase, shovelSwing) {
+    if (!minion || !Number.isFinite(minion.id)) return;
+    const mark = Math.floor(phase * 2.4);
+    if (this.diggerDustMarks.get(minion.id) === mark) return;
+    this.diggerDustMarks.set(minion.id, mark);
+    if (this.diggerDustMarks.size > 2400) this.diggerDustMarks.clear();
+    if (shovelSwing < 0.5) return;
+
+    const r = Math.max(11, Number(minion.r) || 12);
+    const burstX = x + dir * (r * 1.3);
+    const burstY = y + r * 0.2;
+    const colors = ['#8f7558', '#b89a75', '#6d5a44', '#9e825f'];
+    const count = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i += 1) {
+      this.particles.push({
+        x: burstX + (Math.random() * 3 - 1.5),
+        y: burstY + (Math.random() * 2 - 1),
+        vx: dir * (70 + Math.random() * 90) + (Math.random() * 26 - 13),
+        vy: -40 - Math.random() * 55,
+        life: 0.34 + Math.random() * 0.26,
+        maxLife: 0.6,
+        size: 1.6 + Math.random() * 1.9,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        gravity: 480 + Math.random() * 140,
       });
     }
   }
@@ -2235,8 +2264,10 @@ export class GameRenderer {
     const r = Math.max(11, minion.r || 12);
     const dir = minion.side === 'left' ? 1 : -1;
     const phase = Number.isFinite(minion.digPhase) ? minion.digPhase : 0;
-    const shovelSwing = Math.sin(phase * 2.1);
-    const handY = -r * 0.14 + Math.cos(phase * 1.9) * 1.3;
+    const shovelSwing = Math.sin(phase * 3.1);
+    const handY = -r * 0.14 + Math.cos(phase * 2.6) * 2.3;
+    const digBob = Math.sin(phase * 1.9) * 2.1;
+    const topY = y + digBob;
 
     ctx.fillStyle = '#00000020';
     ctx.beginPath();
@@ -2256,7 +2287,7 @@ export class GameRenderer {
     // Upper body above dirt.
     ctx.fillStyle = palette.primary;
     ctx.beginPath();
-    ctx.arc(x, y - r * 0.08, r * 0.74, 0, Math.PI * 2);
+    ctx.arc(x, topY - r * 0.08, r * 0.74, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = palette.dark;
     ctx.lineWidth = 1.6;
@@ -2265,7 +2296,7 @@ export class GameRenderer {
     // Helmet.
     ctx.fillStyle = '#8ea1b7';
     ctx.beginPath();
-    ctx.arc(x, y - r * 0.42, r * 0.48, Math.PI, Math.PI * 2);
+    ctx.arc(x, topY - r * 0.42, r * 0.48, Math.PI, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#4f6176';
     ctx.lineWidth = 1.1;
@@ -2274,18 +2305,18 @@ export class GameRenderer {
     // Face + eyes.
     ctx.fillStyle = '#f0dcc2';
     ctx.beginPath();
-    ctx.arc(x, y - r * 0.18, r * 0.32, 0, Math.PI * 2);
+    ctx.arc(x, topY - r * 0.18, r * 0.32, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#1a2233';
     ctx.beginPath();
-    ctx.arc(x - dir * 2, y - r * 0.2, 1.05, 0, Math.PI * 2);
-    ctx.arc(x + dir * 2, y - r * 0.2, 1.05, 0, Math.PI * 2);
+    ctx.arc(x - dir * 2, topY - r * 0.2, 1.05, 0, Math.PI * 2);
+    ctx.arc(x + dir * 2, topY - r * 0.2, 1.05, 0, Math.PI * 2);
     ctx.fill();
 
     // Slow shovel animation.
     ctx.save();
-    ctx.translate(x + dir * (r * 0.26), y + handY);
-    ctx.rotate(dir * (0.2 + shovelSwing * 0.28));
+    ctx.translate(x + dir * (r * 0.24), topY + handY);
+    ctx.rotate(dir * (0.22 + shovelSwing * 0.46));
     ctx.strokeStyle = '#c9b18f';
     ctx.lineWidth = 2.3;
     ctx.beginPath();
@@ -2302,23 +2333,25 @@ export class GameRenderer {
     ctx.restore();
 
     // Dirt flick while shoveling.
-    const dirtX = x + dir * (r * 1.28);
-    const dirtY = y + r * 0.22 - shovelSwing * 2;
+    const dirtX = x + dir * (r * 1.3);
+    const dirtY = topY + r * 0.24 - shovelSwing * 4.2;
     ctx.fillStyle = '#8f7558';
     ctx.beginPath();
-    ctx.arc(dirtX, dirtY, 2.1, 0, Math.PI * 2);
-    ctx.arc(dirtX + dir * 3.5, dirtY - 1.6, 1.6, 0, Math.PI * 2);
+    ctx.arc(dirtX, dirtY, 2.3, 0, Math.PI * 2);
+    ctx.arc(dirtX + dir * 3.4, dirtY - 1.6, 1.8, 0, Math.PI * 2);
+    ctx.arc(dirtX + dir * 6.4, dirtY - 2.6, 1.4, 0, Math.PI * 2);
     ctx.fill();
+    this.emitDiggerDirt(minion, x, topY, dir, phase, shovelSwing);
 
     ctx.fillStyle = '#e3d0ab';
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('DIGGER', x, y - r - 14);
+    ctx.fillText('DIGGER', x, topY - r - 14);
 
     const hpPct = Math.max(0, minion.hp / minion.maxHp);
     const hpW = 28;
     const hpX = x - hpW / 2;
-    const hpY = y - r - 9;
+    const hpY = topY - r - 9;
     ctx.fillStyle = '#101420cc';
     ctx.fillRect(hpX, hpY, hpW, 4);
     ctx.fillStyle = '#6bff95';

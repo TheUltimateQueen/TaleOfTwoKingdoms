@@ -45,7 +45,7 @@ const PRESIDENT_LINES = [
   'We came here to win this battlefield!',
   'Stay strong, stay sharp, stay united!',
 ];
-const CANDLE_WAX_MAX = 180;
+const CANDLE_WAX_MAX = 96;
 const CANDLE_MAX_HOLDERS = 8;
 const CANDLE_FAST_HOLDERS = 6;
 const CANDLE_PICKUP_RANGE = 28;
@@ -58,6 +58,11 @@ const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FLEE_TTL = 2.2;
 const CANDLE_FLEE_SPEED_MUL = 1.42;
 const CANDLE_RETREAT_WAIT_DIST = 168;
+const CANDLE_FIRE_RANGE = 250;
+const CANDLE_FIRE_INTERVAL = 1.22;
+const CANDLE_FIRE_SPLASH_R = 64;
+const CANDLE_SCORCH_DPS_ALLY = 1.2;
+const CANDLE_SCORCH_DPS_ENEMY = 3.4;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -611,6 +616,7 @@ class GameRoom {
       delivering: false,
       deliverEnemySide: null,
       deliverExplodeTtl: 0,
+      fireCd: 0.3,
       destroyed: false,
       respawnCd: 0,
     };
@@ -771,6 +777,53 @@ class GameRoom {
     }
   }
 
+  findCandleFireTarget(sideName, candle, range = CANDLE_FIRE_RANGE) {
+    if (!candle) return null;
+    const maxR2 = Math.max(100, range) ** 2;
+    let target = null;
+    let best = Infinity;
+    for (const enemy of this.minions) {
+      if (!enemy || enemy.side === sideName || (Number(enemy.hp) || 0) <= 0) continue;
+      const dx = enemy.x - candle.x;
+      const dy = enemy.y - (candle.y - 10);
+      const d2 = dx * dx + dy * dy;
+      if (d2 > maxR2 || d2 >= best) continue;
+      best = d2;
+      target = enemy;
+    }
+    return target;
+  }
+
+  candleFireBurst(sideName, candle, target) {
+    if (!candle || !target) return;
+    const waxPct = Math.max(0, Math.min(1, (Number(candle.wax) || 0) / Math.max(1, Number(candle.waxMax) || 1)));
+    const side = this[sideName];
+    const base = 18 + waxPct * 10 + Math.max(0, (Number(side?.powerLevel) || 1) - 1) * 1.4;
+    const splash = base * 0.42;
+    const splashR2 = CANDLE_FIRE_SPLASH_R * CANDLE_FIRE_SPLASH_R;
+    const pseudoAttacker = { side: sideName, super: false, summoned: false };
+    const mouthX = candle.x;
+    const mouthY = candle.y - 28;
+
+    this.dealMinionDamage(pseudoAttacker, target, base, 'dragonfire');
+    this.igniteMinion(target, 1.05);
+    this.queueHitSfx('dragonfire', mouthX, mouthY, sideName);
+    this.queueHitSfx('dragonfire', target.x, target.y - Math.max(6, (target.r || 12) * 0.22), sideName);
+
+    for (const other of this.minions) {
+      if (!other || other.id === target.id || other.side === sideName || (Number(other.hp) || 0) <= 0) continue;
+      const dx = other.x - target.x;
+      const dy = other.y - target.y;
+      if (dx * dx + dy * dy > splashR2) continue;
+      this.dealMinionDamage(pseudoAttacker, other, splash, 'dragonfire');
+      this.igniteMinion(other, 0.7);
+    }
+
+    candle.flameSpeed = 1.22;
+    candle.flameBoost = 0.74 + waxPct * 0.56;
+    candle.flameBurstTtl = 0.26;
+  }
+
   hitCandleWithArrow(candle, arrow, part = 'flame') {
     if (!candle || candle.destroyed) return;
     const hitSide = arrow?.side || candle.claimedBy || 'left';
@@ -779,13 +832,13 @@ class GameRoom {
     const enemyHit = arrow?.side ? arrow.side !== candleSide : true;
 
     if (part === 'stem') {
-      const waxLoss = enemyHit ? (0.06 + flameShotBonus * 0.04) : 0.006;
+      const waxLoss = enemyHit ? (0.45 + flameShotBonus * 0.2) : 0.02;
       candle.wax = Math.max(0, candle.wax - waxLoss);
       this.queueHitSfx('minion', candle.x, candle.y + 3, hitSide);
       return;
     }
 
-    const waxLoss = (enemyHit ? 4.8 : 0.2) + flameShotBonus * 1.6 + (arrow?.mainArrow ? 0.8 : 0.34);
+    const waxLoss = (enemyHit ? 13.6 : 0.55) + flameShotBonus * 2.8 + (arrow?.mainArrow ? 1.9 : 0.8);
     candle.wax = Math.max(0, candle.wax - waxLoss);
 
     this.queueHitSfx('candlehit', candle.x, candle.y - 10, hitSide);
@@ -918,12 +971,14 @@ class GameRoom {
     for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
       const scorch = this.candleScorches[i];
       scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
+      const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
       for (const minion of this.minions) {
         if (!minion) continue;
         const dx = minion.x - scorch.x;
         const dy = minion.y - scorch.y;
         if (dx * dx + dy * dy > scorch.r * scorch.r) continue;
-        this.igniteMinion(minion, 1.35);
+        const dps = minion.side === candleSide ? CANDLE_SCORCH_DPS_ALLY : CANDLE_SCORCH_DPS_ENEMY;
+        if (dps > 0) this.dealDamageToMinion(minion, dps * dt);
       }
       if (scorch.towerSide === 'left' || scorch.towerSide === 'right') {
         scorch.towerBurnTick = (Number(scorch.towerBurnTick) || 0) - dt;
@@ -961,6 +1016,7 @@ class GameRoom {
       candle.flameSpeed = 1;
       candle.flameBoost = 0;
       candle.flameBurstTtl = 0;
+      candle.fireCd = Math.max(0, (Number(candle.fireCd) || 0) - dt);
       const burnRate = 0.03;
       candle.wax = Math.max(0, candle.wax - burnRate * dt);
 
@@ -983,6 +1039,15 @@ class GameRoom {
       }
       candle.holderIds = sideHolders.map((m) => m.id);
       candle.claimedBy = sideName;
+
+      if (candle.fireCd === 0) {
+        const fireRange = sideHolders.length ? (CANDLE_FIRE_RANGE + 40) : CANDLE_FIRE_RANGE;
+        const target = this.findCandleFireTarget(sideName, candle, fireRange);
+        if (target) {
+          this.candleFireBurst(sideName, candle, target);
+          candle.fireCd = CANDLE_FIRE_INTERVAL * (sideHolders.length ? 0.8 : 1.08);
+        }
+      }
 
       if (!sideHolders.length) {
         candle.claimedBy = null;
@@ -1228,8 +1293,8 @@ class GameRoom {
       if (m.digger) {
         if (!Number.isFinite(m.digPhase)) m.digPhase = Math.random() * Math.PI * 2;
         if (!Number.isFinite(m.digBaseY)) m.digBaseY = m.y;
-        m.digPhase += dt * (0.9 + Math.min(0.4, m.speed / 170));
-        m.y = clamp(m.digBaseY + Math.sin(m.digPhase) * 1.6, TOWER_Y + 28, TOWER_Y + 172);
+        m.digPhase += dt * (1.35 + Math.min(0.65, m.speed / 150));
+        m.y = clamp(m.digBaseY + Math.sin(m.digPhase) * 3.6, TOWER_Y + 52, TOWER_Y + 196);
       }
       if (m.flying) {
         if (!Number.isFinite(m.flyBaseY)) m.flyBaseY = m.y;
@@ -2127,16 +2192,19 @@ class GameRoom {
     let tier = Math.min(3, Math.floor(power / 8));
     const dragonEvery = this.statDragonEvery(side);
     const isDragon = forceType === 'dragon' || (!forceType && Number.isFinite(dragonEvery) && side.spawnCount % dragonEvery === 0);
+    const diggerEvery = this.statDiggerEvery(side);
+    // Digger should claim its spawn interval before other specialist rolls.
+    const isDigger = forceType === 'digger'
+      || (!forceType && !isDragon && side.spawnCount % diggerEvery === 0);
     const necroEvery = this.statNecroEvery(side);
-    const isNecrominion = forceType === 'necrominion' || (!forceType && !isDragon && side.spawnCount % necroEvery === 0);
+    const isNecrominion = forceType === 'necrominion'
+      || (!forceType && !isDragon && !isDigger && side.spawnCount % necroEvery === 0);
     const gunnerEvery = this.statGunnerEvery(side);
-    const isGunner = forceType === 'gunner' || (!forceType && !isDragon && !isNecrominion && side.spawnCount % gunnerEvery === 0);
+    const isGunner = forceType === 'gunner'
+      || (!forceType && !isDragon && !isDigger && !isNecrominion && side.spawnCount % gunnerEvery === 0);
     const riderEvery = this.statRiderEvery(side);
     const isRider = forceType === 'rider'
-      || (!forceType && !isDragon && !isNecrominion && !isGunner && side.spawnCount % riderEvery === 0);
-    const diggerEvery = this.statDiggerEvery(side);
-    const isDigger = forceType === 'digger'
-      || (!forceType && !isDragon && !isNecrominion && !isGunner && !isRider && side.spawnCount % diggerEvery === 0);
+      || (!forceType && !isDragon && !isDigger && !isNecrominion && !isGunner && side.spawnCount % riderEvery === 0);
     const monkEvery = this.statMonkEvery(side);
     const isMonk = forceType === 'monk'
       || (!forceType && !isDragon && !isNecrominion && !isGunner && !isRider && !isDigger && side.spawnCount % monkEvery === 0);
@@ -2195,10 +2263,10 @@ class GameRoom {
     if (isDigger) {
       hp *= 0.62;
       dmg *= 0.58;
-      speed *= 0.42;
+      speed *= 0.34;
       radius = Math.max(12, radius - 2);
       visualPower += 2;
-      spawnY = TOWER_Y + 70 + (Math.random() * 28 - 14);
+      spawnY = TOWER_Y + 102 + (Math.random() * 32 - 16);
     }
 
     if (isMonk) {
