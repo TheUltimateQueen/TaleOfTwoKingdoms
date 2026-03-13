@@ -50,6 +50,16 @@ const HERO_LINES = [
   'I slash, therefore I am!',
   'Fear my perfectly timed monologue!',
 ];
+const HERO_DEATH_LINES = [
+  'Tell my fans... I was fabulous!',
+  'No sequel? This is a travesty!',
+  'I regret... absolutely nothing!',
+  'My agent said this was safe!',
+  'Remember me in slow motion!',
+  'This cape deserved better!',
+];
+const HERO_HP_MULT = 3;
+const HERO_ARROW_FINISHER_HITS = 9;
 const PRESIDENT_LINES = [
   'Team, we are absolutely crushing this!',
   'Believe in yourselves and swing harder!',
@@ -874,6 +884,33 @@ class GameRoom {
     }
   }
 
+  hitCandleWithMinion(candle, minion) {
+    if (!candle || candle.destroyed || candle.delivering || !minion) return;
+    const hitSide = minion.side || candle.claimedBy || 'left';
+    const baseDamage = Math.max(1, Number(minion.dmg) || 8);
+    let waxLoss = baseDamage * 0.44;
+    if (minion.hero) waxLoss *= 2.8;
+    else if (minion.dragon) waxLoss *= 2.2;
+    else if (minion.gunner) waxLoss *= 1.7;
+    else if (minion.rider) waxLoss *= 1.42;
+    else if (minion.digger) waxLoss *= 0.92;
+
+    candle.wax = Math.max(0, candle.wax - waxLoss);
+    candle.flameHitFlashTtl = Math.max(Number(candle.flameHitFlashTtl) || 0, 0.24);
+    this.queueHitSfx('candlehit', candle.x, candle.y - 10, hitSide);
+    if (minion.dragon || minion.hero || waxLoss >= 16) {
+      this.queueHitSfx('explosion', candle.x, candle.y - 10, hitSide);
+    }
+    if (minion.dragon) {
+      this.queueHitSfx('dragonfire', candle.x + (Math.random() * 12 - 6), candle.y - 8, hitSide);
+    }
+    this.queueDamageNumber(waxLoss, candle.x + (Math.random() * 10 - 5), candle.y - 24);
+
+    if (candle.wax <= 0) {
+      this.burnDownCandle(candle.spawnSide || 'left', hitSide);
+    }
+  }
+
   burnDownCandle(candleSide, sourceSide = null) {
     const sideName = candleSide === 'right' ? 'right' : 'left';
     const candle = this.candles?.[sideName];
@@ -910,17 +947,14 @@ class GameRoom {
 
   beginCandleCarrierFlee(minion, candleSide) {
     if (!minion) return;
-    const runDir = candleSide === 'left' ? -1 : 1;
-    const enemyTowerX = candleSide === 'left' ? TOWER_X_RIGHT : TOWER_X_LEFT;
-    const waitBaseX = candleSide === 'left'
-      ? (enemyTowerX - CANDLE_RETREAT_WAIT_DIST)
-      : (enemyTowerX + CANDLE_RETREAT_WAIT_DIST);
-    minion.candleFleeTtl = CANDLE_FLEE_TTL + Math.random() * 0.7;
-    minion.candleFleeDir = runDir;
-    minion.candleFleeVy = Math.random() * 52 - 26;
-    minion.candleRetreatSide = candleSide;
-    minion.candleWaitX = waitBaseX + (Math.random() * 26 - 13);
-    minion.atkCd = Math.max(minion.atkCd || 0, 0.45);
+    void candleSide;
+    // Keep ex-carriers in regular combat flow; no backward float/retreat motion.
+    minion.candleFleeTtl = 0;
+    minion.candleFleeDir = 0;
+    minion.candleFleeVy = 0;
+    minion.candleRetreatSide = null;
+    minion.candleWaitX = null;
+    minion.atkCd = Math.max(minion.atkCd || 0, 0.22);
   }
 
   explodeDeliveredCandle(candleSide) {
@@ -1199,10 +1233,18 @@ class GameRoom {
 
           if (minion.hero) {
             minion.heroArrowHits = (minion.heroArrowHits || 0) + 1;
-            if (minion.heroArrowHits >= 3) {
+            if (minion.heroArrowHits >= HERO_ARROW_FINISHER_HITS) {
               this.queueHitSfx('explosion', minion.x, minion.y - 6, a.side);
               this.killMinion(m, a.side, { goldScalar: 1.2 });
               continue;
+            }
+            if (minion.heroArrowHits === 3 || minion.heroArrowHits === 6) {
+              this.queueLine(
+                `${minion.heroArrowHits}/${HERO_ARROW_FINISHER_HITS} dramatic wounds!`,
+                minion.x,
+                minion.y - minion.r - 24,
+                minion.side
+              );
             }
           }
 
@@ -1340,6 +1382,20 @@ class GameRoom {
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
+      const enemyCandle = this.candles?.[enemySideName];
+      let candleInReach = false;
+      let candleDist = Infinity;
+      if (enemyCandle && !enemyCandle.destroyed && !enemyCandle.delivering) {
+        const cdx = enemyCandle.x - m.x;
+        const cdy = enemyCandle.y - m.y;
+        candleDist = Math.hypot(cdx, cdy);
+        const candleReach = m.dragon
+          ? 176
+          : (m.gunner
+              ? Math.max(132, (m.gunRange || 220) * 0.72)
+              : m.r + (enemyCandle.r || 24) + 24 + (m.digger ? 10 : 0) + (m.hero ? 24 : 0));
+        candleInReach = candleDist <= candleReach;
+      }
 
       if (m.hero) {
         const retreatHp = Math.max(1, m.maxHp * (Number(m.heroRetreatHpPct) || 0.3));
@@ -1376,6 +1432,7 @@ class GameRoom {
       let target = null;
       let best = Infinity;
       for (const other of this.minions) {
+        if (!other) continue;
         if (other.side === m.side) continue;
         const dx = other.x - m.x;
         const dy = other.y - m.y;
@@ -1391,7 +1448,36 @@ class GameRoom {
         }
       }
 
-      if (target) {
+      if (candleInReach && enemyCandle && (!target || candleDist <= best * 0.92)) {
+        if (m.atkCd === 0) {
+          if (m.dragon) {
+            const mouthX = m.x + dir * (m.r * 0.95);
+            const mouthY = m.y - m.r * 0.24;
+            m.dragonBreathTtl = 0.24;
+            m.dragonBreathToX = enemyCandle.x;
+            m.dragonBreathToY = enemyCandle.y - 10;
+            this.queueHitSfx('dragonfire', mouthX, mouthY, m.side);
+            this.queueHitSfx('dragonfire', enemyCandle.x, enemyCandle.y - 10, m.side);
+            m.atkCd = 0.98;
+          } else if (m.gunner) {
+            const muzzleX = m.x + dir * (m.r + 7);
+            const muzzleY = m.y - 2;
+            m.gunFlashTtl = 0.12;
+            this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
+            this.queueHitSfx('gunhit', enemyCandle.x, enemyCandle.y - 9, m.side);
+            m.atkCd = 0.66;
+          } else if (m.rider) {
+            m.atkCd = 0.72;
+          } else if (m.hero) {
+            m.atkCd = 0.46;
+          } else if (m.digger) {
+            m.atkCd = 1.2;
+          } else {
+            m.atkCd = 0.72;
+          }
+          this.hitCandleWithMinion(enemyCandle, m);
+        }
+      } else if (target) {
         if (m.atkCd === 0) {
           if (m.dragon) {
             this.dragonBreath(m, target);
@@ -1998,6 +2084,7 @@ class GameRoom {
     } = options;
 
     this.awardMinionKillGold(killerSide, goldScalar);
+    if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
     this.minions.splice(index, 1);
 
     if (triggerExplosion && minion.explosive) {
@@ -2013,6 +2100,28 @@ class GameRoom {
     }
 
     if (minion.necrominion) this.raiseNecroServants(minion);
+  }
+
+  triggerHeroDramaticDeath(hero, killerSide = null) {
+    if (!hero || !hero.hero) return;
+    const x = Number(hero.x) || 0;
+    const y = Number(hero.y) || 0;
+    const fxSide = (killerSide === 'left' || killerSide === 'right') ? killerSide : hero.side;
+    const pulse = [
+      { dx: 0, dy: -6 },
+      { dx: -16, dy: -2 },
+      { dx: 16, dy: -2 },
+      { dx: 0, dy: 10 },
+    ];
+    for (const p of pulse) {
+      this.queueHitSfx('explosion', x + p.dx, y + p.dy, fxSide);
+    }
+    this.queueHitSfx('dragonfire', x - 9, y - 12, fxSide);
+    this.queueHitSfx('dragonfire', x + 10, y - 8, fxSide);
+    this.queueHitSfx('powerup', x, y - 5, hero.side);
+    this.queueDamageNumber(Math.max(77, (Number(hero.maxHp) || 0) * 0.24), x, y - (hero.r || 16) - 6);
+    this.queueLine(randomFrom(HERO_DEATH_LINES), x, y - (hero.r || 16) - 27, hero.side);
+    this.queueLine('Cue the tragic violin solo!', x, y - (hero.r || 16) - 45, hero.side);
   }
 
   raiseNecroServants(minion) {
@@ -2315,7 +2424,7 @@ class GameRoom {
     }
 
     if (isHero) {
-      hp *= 1.12;
+      hp *= 1.12 * HERO_HP_MULT;
       dmg *= 0.9;
       speed *= 1.02;
       radius = Math.max(20, radius + 2);

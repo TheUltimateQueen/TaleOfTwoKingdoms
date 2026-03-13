@@ -1724,6 +1724,16 @@ export class GameRenderer {
     const scale = minion.super ? 1.26 : 1.08;
     const bodyR = 14 * scale;
     const swing = Math.sin((Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0) * 1.4);
+    const dramaPulse = 0.65 + Math.abs(swing) * 0.55;
+
+    const aura = ctx.createRadialGradient(x, y - bodyR * 0.2, bodyR * 0.6, x, y - bodyR * 0.2, bodyR * (2.2 + dramaPulse * 0.35));
+    aura.addColorStop(0, minion.side === 'left' ? 'rgba(147, 214, 255, 0.24)' : 'rgba(255, 154, 154, 0.24)');
+    aura.addColorStop(0.5, minion.side === 'left' ? 'rgba(116, 194, 255, 0.14)' : 'rgba(255, 128, 128, 0.13)');
+    aura.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x, y - bodyR * 0.2, bodyR * (2.2 + dramaPulse * 0.35), 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.fillStyle = '#0000002a';
     ctx.beginPath();
@@ -1816,10 +1826,13 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#ffe4b0';
-    ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+    ctx.strokeStyle = '#311707';
+    ctx.lineWidth = 2.6;
+    ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('HERO', x, y - bodyR - 20);
+    ctx.strokeText('HERO!!!', x, y - bodyR - 20);
+    ctx.fillStyle = '#ffe4b0';
+    ctx.fillText('HERO!!!', x, y - bodyR - 20);
     this.drawMinionHpBar(minion, x, y, scale);
   }
 
