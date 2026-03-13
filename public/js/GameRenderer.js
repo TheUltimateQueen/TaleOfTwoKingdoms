@@ -162,6 +162,7 @@ export class GameRenderer {
       loser: null,
       lastBurstMs: 0,
     };
+    this.frameArrowCount = 0;
     this.lastFrameAt = performance.now();
   }
 
@@ -241,6 +242,7 @@ export class GameRenderer {
     for (const candle of candles) this.drawCandle(candle);
     this.updateParticles(dt);
     this.drawParticles();
+    this.frameArrowCount = Array.isArray(snapshot.arrows) ? snapshot.arrows.length : 0;
     for (const arrow of snapshot.arrows) this.drawArrow(arrow);
     this.updateDamageTexts(dt);
     this.drawDamageTexts();
@@ -2960,6 +2962,9 @@ export class GameRenderer {
     const isMainArrow = Boolean(arrow.mainArrow);
     const comboTier = Math.max(1, Math.min(4, Number(arrow.comboTier) || 1));
     const comboBoost = isMainArrow ? Math.max(0, (comboTier - 1) / 3) : 0;
+    const arrowCount = Math.max(0, Number(this.frameArrowCount) || 0);
+    const heavyArrowLoad = arrowCount >= 40;
+    const veryHeavyArrowLoad = arrowCount >= 80;
 
     let body = arrow.side === 'left' ? '#d5ecff' : '#ffe0e0';
     let glow = null;
@@ -2984,12 +2989,13 @@ export class GameRenderer {
     ctx.translate(arrow.x, arrow.y);
     ctx.rotate(angle);
 
-    if (glow) {
+    const allowGlow = glow && !veryHeavyArrowLoad && (isMainArrow || !heavyArrowLoad);
+    if (allowGlow) {
       ctx.shadowColor = glow;
-      ctx.shadowBlur = isMainArrow ? 9 : 7;
+      ctx.shadowBlur = isMainArrow ? 8 : 5;
     }
 
-    if (comboBoost > 0) {
+    if (comboBoost > 0 && !heavyArrowLoad) {
       const trailColor = comboTier >= 4
         ? (arrow.side === 'left' ? '#eefbffcc' : '#fff1c6cc')
         : (arrow.side === 'left' ? '#b9ecffb8' : '#ffcab7b8');
@@ -3022,11 +3028,15 @@ export class GameRenderer {
     ctx.lineTo(len * 0.45, 0);
     ctx.stroke();
     if (arrow.powerType === 'flameShot') {
-      const flameGradient = ctx.createLinearGradient(-len * 0.5, 0, len * 0.2, 0);
-      flameGradient.addColorStop(0, '#ffe09a');
-      flameGradient.addColorStop(0.45, '#ff9c55');
-      flameGradient.addColorStop(1, '#ff5f39');
-      ctx.strokeStyle = flameGradient;
+      if (heavyArrowLoad) {
+        ctx.strokeStyle = '#ff8f52';
+      } else {
+        const flameGradient = ctx.createLinearGradient(-len * 0.5, 0, len * 0.2, 0);
+        flameGradient.addColorStop(0, '#ffe09a');
+        flameGradient.addColorStop(0.45, '#ff9c55');
+        flameGradient.addColorStop(1, '#ff5f39');
+        ctx.strokeStyle = flameGradient;
+      }
       ctx.lineWidth = Math.max(1.2, arrow.r * 0.35) * (isMainArrow ? 1.18 : 1);
       ctx.beginPath();
       ctx.moveTo(-len * 0.5, 0);

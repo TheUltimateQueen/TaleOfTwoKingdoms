@@ -1533,7 +1533,7 @@ class GameRoom {
   markArrowMiss(arrow) {
     if (!arrow || !arrow.mainArrow || arrow.comboCounted) return;
     const side = arrow.side === 'left' ? this.left : this.right;
-    side.comboHitStreak = Math.max(0, (side.comboHitStreak || 0) - 1);
+    side.comboHitStreak = 0;
   }
 
   applyMaxComboSplash(arrow, target, baseDamage) {
