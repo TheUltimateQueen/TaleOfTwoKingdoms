@@ -1,4 +1,4 @@
-const {
+import {
   WORLD_W,
   WORLD_H,
   TOWER_X_LEFT,
@@ -10,7 +10,7 @@ const {
   CARD_H,
   UPGRADE_TYPES,
   SHOT_POWER_TYPES,
-} = require('./constants');
+} from './simConstants.js';
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
@@ -3069,4 +3069,4 @@ class GameRoom {
   }
 }
 
-module.exports = { GameRoom };
+export { GameRoom };

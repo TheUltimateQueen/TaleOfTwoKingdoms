@@ -2,6 +2,7 @@ import { GameRenderer } from './GameRenderer.js';
 import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
 import { SHOT_POWER_LABELS } from './constants.js';
+import { GameRoom as SimGameRoom } from './SimGameRoom.js';
 
 const VOICE_GAP_MIN_MS = 2000;
 const VOICE_GAP_MAX_MS = 10000;
@@ -18,6 +19,8 @@ const PRESIDENT_VOICE_CLIPS = [
 const HERO_VOICE_MANIFEST_URL = '/api/audio/hero-voices';
 const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
 const GAME_OVER_CINEMATIC_MS = 4000;
+const HOST_TICK_MS = 1000 / 30;
+const HOST_STATE_EMIT_MS = 50;
 
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
@@ -93,6 +96,11 @@ export class GameClient {
     this.gameOverLatched = false;
     this.gameOverRevealAtMs = 0;
     this.nextGameOverBoomAtMs = 0;
+    this.hostAuthoritative = false;
+    this.localRoom = null;
+    this.hostTickTimer = null;
+    this.nextHostStateEmitAt = 0;
+    this.remoteDisplayCount = 0;
 
     this.bindDom();
     this.bindEvents();
@@ -172,10 +180,12 @@ export class GameClient {
       });
     });
 
-    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers }) => {
+    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative }) => {
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.hostAuthoritative = Boolean(hostAuthoritative) && !this.isController;
       this.setCreateMode(this.state.mode);
+      if (this.hostAuthoritative) this.initLocalHostRoom();
       this.roomCodeEl.textContent = roomId;
       if (this.joinLink) {
         this.joinLink.href = joinUrl;
@@ -194,6 +204,7 @@ export class GameClient {
       if (this.isController) return;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
       this.setCreateMode(this.state.mode);
+      if (this.hostAuthoritative && this.localRoom) this.localRoom.setMode(this.state.mode);
       if (this.lobbyModeMsg) {
         const label = this.state.mode === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
         this.lobbyModeMsg.textContent = `Room size updated: ${label}.`;
@@ -209,6 +220,10 @@ export class GameClient {
 
     this.socket.on('room_restarted', () => {
       if (this.isController) return;
+      if (this.hostAuthoritative && this.localRoom) {
+        this.localRoom.restartMatch();
+        this.pushHostState(true);
+      }
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
@@ -241,16 +256,36 @@ export class GameClient {
       else this.centerHud.textContent = 'Controller disconnected. Waiting for players...';
     });
 
+    this.socket.on('controller_state', (payload) => {
+      if (!this.isController) return;
+      this.handleControllerCompactState(payload || {});
+    });
+
+    this.socket.on('room_roster', (payload) => {
+      if (!this.hostAuthoritative || this.isController) return;
+      this.applyHostRoster(payload);
+    });
+
+    this.socket.on('host_control_pull', ({ side, slot, x, y }) => {
+      if (!this.hostAuthoritative || this.isController || !this.localRoom) return;
+      const sideName = side === 'right' ? 'right' : 'left';
+      const lane = Number.isFinite(slot) ? slot : 0;
+      const pull = this.localRoom.normalizePull(sideName, x, y);
+      const control = this.localRoom.ensureArcherControl(sideName, lane);
+      if (!control) return;
+      control.pullX = pull.x;
+      control.pullY = pull.y;
+      control.archerAimY = (this.localRoom.left.archerAimY || (900 / 2 - 56)) - lane * 78;
+      this.localRoom.syncSidePrimaryPull(sideName);
+    });
+
     this.socket.on('state', (snapshot) => {
+      if (this.isController) return;
+      if (this.hostAuthoritative && !this.isController) return;
       this.state.snapshot = snapshot;
       this.state.world = snapshot.world;
-
-      if (this.isController) {
-        this.handleControllerState(snapshot);
-      } else {
-        this.handleDisplayState(snapshot);
-        this.refreshVoicePlayback();
-      }
+      this.handleDisplayState(snapshot);
+      this.refreshVoicePlayback();
     });
 
     this.socket.on('hit_sfx', (events) => {
@@ -273,6 +308,113 @@ export class GameClient {
       for (const e of events) {
         this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
       }
+    });
+  }
+
+  initLocalHostRoom() {
+    if (this.isController || !this.state.roomId) return;
+    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, { mode: this.state.mode });
+    this.nextHostStateEmitAt = 0;
+    this.startHostAuthorityLoop();
+    this.pushHostState(true);
+  }
+
+  applyHostRoster(payload = {}) {
+    if (!this.localRoom) return;
+    if (payload.roomId && payload.roomId !== this.state.roomId) return;
+    const mode = payload.mode === '2v2' ? '2v2' : '1v1';
+    if (this.localRoom.mode !== mode) this.localRoom.setMode(mode);
+    this.state.mode = mode;
+    this.setCreateMode(mode);
+
+    const archersPerSide = mode === '2v2' ? 2 : 1;
+    this.localRoom.archersPerSide = archersPerSide;
+    this.localRoom.resizeSideArcherControls('left');
+    this.localRoom.resizeSideArcherControls('right');
+    this.localRoom.players = {
+      left: Array.isArray(payload.players?.left) ? payload.players.left.map((p) => ({ ...p })) : [],
+      right: Array.isArray(payload.players?.right) ? payload.players.right.map((p) => ({ ...p })) : [],
+    };
+    this.remoteDisplayCount = Math.max(0, Number(payload.spectatorDisplays) || 0);
+    this.localRoom.started = Boolean(payload.started);
+    this.localRoom.gameOver = this.localRoom.gameOver && this.localRoom.started;
+    this.pushHostState(true);
+  }
+
+  startHostAuthorityLoop() {
+    if (this.isController || !this.hostAuthoritative || !this.localRoom || this.hostTickTimer) return;
+    this.hostTickTimer = window.setInterval(() => {
+      if (!this.localRoom) return;
+      this.localRoom.tick(HOST_TICK_MS / 1000);
+      this.pushHostState(false);
+    }, HOST_TICK_MS);
+  }
+
+  stopHostAuthorityLoop() {
+    if (!this.hostTickTimer) return;
+    window.clearInterval(this.hostTickTimer);
+    this.hostTickTimer = null;
+  }
+
+  pushHostState(force = false) {
+    if (!this.hostAuthoritative || this.isController || !this.localRoom || !this.state.roomId) return;
+    const snapshot = this.localRoom.serialize();
+    this.state.snapshot = snapshot;
+    this.state.world = snapshot.world;
+    this.handleDisplayState(snapshot);
+    this.refreshVoicePlayback();
+
+    const sfxEvents = this.localRoom.consumeSfxEvents();
+    const damageEvents = this.localRoom.consumeDamageEvents();
+    const lineEvents = this.localRoom.consumeLineEvents();
+
+    for (const e of sfxEvents) {
+      this.sound.play(e.type);
+      this.renderer.emitHitParticles(e.type, e.x, e.y, e.side);
+    }
+    for (const e of damageEvents) this.renderer.emitDamageNumber(e.amount, e.x, e.y);
+    for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
+
+    const now = performance.now();
+    if (!force && !snapshot.started && !snapshot.gameOver) return;
+    if (!force && now < this.nextHostStateEmitAt) return;
+    this.nextHostStateEmitAt = now + HOST_STATE_EMIT_MS;
+
+    const controllerFrame = {
+      mode: snapshot.mode === '2v2' ? '2v2' : '1v1',
+      started: Boolean(snapshot.started),
+      gameOver: Boolean(snapshot.gameOver),
+      winner: snapshot.winner || null,
+      requiredPlayers: Number(snapshot.requiredPlayers) || (snapshot.mode === '2v2' ? 4 : 2),
+      playerCount: Number(snapshot.playerCount) || 0,
+      left: {
+        towerHp: Number(snapshot.left?.towerHp) || 0,
+        shotCd: Number(snapshot.left?.shotCd) || 0,
+        pendingShotPower: snapshot.left?.pendingShotPower || null,
+        pendingShotPowerShots: Math.max(0, Number(snapshot.left?.pendingShotPowerShots) || 0),
+        arrowsFired: Math.max(0, Number(snapshot.left?.arrowsFired) || 0),
+        arrowHits: Math.max(0, Number(snapshot.left?.arrowHits) || 0),
+        comboHitStreak: Math.max(0, Number(snapshot.left?.comboHitStreak) || 0),
+      },
+      right: {
+        towerHp: Number(snapshot.right?.towerHp) || 0,
+        shotCd: Number(snapshot.right?.shotCd) || 0,
+        pendingShotPower: snapshot.right?.pendingShotPower || null,
+        pendingShotPowerShots: Math.max(0, Number(snapshot.right?.pendingShotPowerShots) || 0),
+        arrowsFired: Math.max(0, Number(snapshot.right?.arrowsFired) || 0),
+        arrowHits: Math.max(0, Number(snapshot.right?.arrowHits) || 0),
+        comboHitStreak: Math.max(0, Number(snapshot.right?.comboHitStreak) || 0),
+      },
+    };
+
+    const needsDisplaySnapshot = this.remoteDisplayCount > 0;
+    this.socket.emit('host_state', {
+      roomId: this.state.roomId,
+      snapshot: needsDisplaySnapshot ? snapshot : null,
+      controllerFrame,
+      sfxEvents,
+      damageEvents,
+      lineEvents,
     });
   }
 
@@ -601,6 +743,39 @@ export class GameClient {
       const outcome = snapshot.winner === this.state.side ? 'Victory' : 'Defeat';
       this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Waiting for host restart`;
     }
+    this.setControllerMode(true);
+    this.pullPad.draw();
+  }
+
+  handleControllerCompactState(payload) {
+    if (!this.state.side) return;
+    if (!payload || typeof payload !== 'object') return;
+
+    if (payload.mode === '2v2' || payload.mode === '1v1') {
+      this.state.mode = payload.mode;
+    }
+    const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
+    const me = payload.me || {};
+    const enemy = payload.enemy || {};
+    const requiredPlayers = Number(payload.requiredPlayers) || (this.state.mode === '2v2' ? 4 : 2);
+    const playerCount = Number(payload.playerCount) || 0;
+
+    if (!payload.started && !payload.gameOver) {
+      this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
+      this.setControllerMode(true);
+      this.pullPad.draw();
+      return;
+    }
+
+    this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | HP ${Math.floor(Number(me.towerHp) || 0)} | Next ${(Number(me.shotCd) || 0).toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+
+    if (payload.gameOver) {
+      const myAcc = arrowAccuracy(me);
+      const enemyAcc = arrowAccuracy(enemy);
+      const outcome = payload.winner === this.state.side ? 'Victory' : 'Defeat';
+      this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Waiting for host restart`;
+    }
+
     this.setControllerMode(true);
     this.pullPad.draw();
   }
