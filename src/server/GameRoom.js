@@ -78,14 +78,11 @@ const CANDLE_CART_HALF_W = 34;
 const CANDLE_RARE_CD_MIN = 52;
 const CANDLE_RARE_CD_MAX = 92;
 const CANDLE_DELIVER_FUSE = 1.1;
-const CANDLE_FLEE_TTL = 2.2;
-const CANDLE_FLEE_SPEED_MUL = 1.42;
-const CANDLE_RETREAT_WAIT_DIST = 168;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22;
 const CANDLE_FIRE_SPLASH_R = 64;
-const CANDLE_SCORCH_DPS_ALLY = 1.2;
-const CANDLE_SCORCH_DPS_ENEMY = 3.4;
+const CANDLE_SCORCH_DPS_ALLY = 0.1;
+const CANDLE_SCORCH_DPS_ENEMY = 1;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -755,11 +752,6 @@ class GameRoom {
     if (d <= CANDLE_PICKUP_RANGE + (Number(minion.r) || 16) * 0.24) {
       minion.candleCarrier = true;
       minion.candleCarrierSide = candleSide;
-      minion.candleFleeTtl = 0;
-      minion.candleFleeDir = 0;
-      minion.candleFleeVy = 0;
-      minion.candleRetreatSide = null;
-      minion.candleWaitX = null;
       candle.claimedBy = candleSide;
       this.queueHitSfx('powerup', minion.x, minion.y - 5, minion.side);
     }
@@ -945,18 +937,6 @@ class GameRoom {
     this.queueHitSfx('dragonfire', candle.x + 10, candle.y - 6, hitSide);
   }
 
-  beginCandleCarrierFlee(minion, candleSide) {
-    if (!minion) return;
-    void candleSide;
-    // Keep ex-carriers in regular combat flow; no backward float/retreat motion.
-    minion.candleFleeTtl = 0;
-    minion.candleFleeDir = 0;
-    minion.candleFleeVy = 0;
-    minion.candleRetreatSide = null;
-    minion.candleWaitX = null;
-    minion.atkCd = Math.max(minion.atkCd || 0, 0.22);
-  }
-
   explodeDeliveredCandle(candleSide) {
     const sideName = candleSide === 'right' ? 'right' : 'left';
     const candle = this.candles?.[sideName];
@@ -1022,7 +1002,7 @@ class GameRoom {
       if (m.candleCarrier && m.candleCarrierSide === sideName) {
         m.candleCarrier = false;
         m.candleCarrierSide = null;
-        this.beginCandleCarrierFlee(m, sideName);
+        m.atkCd = Math.max(m.atkCd || 0, 0.22);
       }
     }
   }
@@ -1307,11 +1287,6 @@ class GameRoom {
       if (!m) continue;
       if (!Number.isFinite(m.candleBurnTtl)) m.candleBurnTtl = 0;
       if (!Number.isFinite(m.candleBurnTick)) m.candleBurnTick = 0;
-      if (!Number.isFinite(m.candleFleeTtl)) m.candleFleeTtl = 0;
-      if (!Number.isFinite(m.candleFleeDir)) m.candleFleeDir = 0;
-      if (!Number.isFinite(m.candleFleeVy)) m.candleFleeVy = 0;
-      if (m.candleRetreatSide !== 'left' && m.candleRetreatSide !== 'right') m.candleRetreatSide = null;
-      if (!Number.isFinite(m.candleWaitX)) m.candleWaitX = null;
       if (typeof m.candleCarrier !== 'boolean') m.candleCarrier = false;
       if (m.candleCarrierSide !== 'left' && m.candleCarrierSide !== 'right') m.candleCarrierSide = null;
       if (!m.candleCarrier) m.candleCarrierSide = null;
@@ -1324,38 +1299,6 @@ class GameRoom {
       if (m.hero) {
         if (!Number.isFinite(m.heroSwing)) m.heroSwing = Math.random() * Math.PI * 2;
         m.heroSwing += dt * 8.2;
-      }
-      if (m.candleRetreatSide) {
-        const retreatCandle = this.candles?.[m.candleRetreatSide];
-        if (retreatCandle && retreatCandle.delivering) {
-          const fallbackTowerX = m.candleRetreatSide === 'left' ? TOWER_X_RIGHT : TOWER_X_LEFT;
-          const fallbackWaitX = m.candleRetreatSide === 'left'
-            ? (fallbackTowerX - CANDLE_RETREAT_WAIT_DIST)
-            : (fallbackTowerX + CANDLE_RETREAT_WAIT_DIST);
-          const targetX = Number.isFinite(m.candleWaitX) ? m.candleWaitX : fallbackWaitX;
-          const retreatStep = Math.max(72, m.speed * CANDLE_FLEE_SPEED_MUL) * dt;
-          m.x += clamp(targetX - m.x, -retreatStep, retreatStep);
-          m.y = clamp(m.y + m.candleFleeVy * dt, TOWER_Y - 170, TOWER_Y + 170);
-          m.candleFleeVy *= 0.9;
-          m.atkCd = Math.max(m.atkCd, 0.28);
-          continue;
-        }
-
-        m.candleRetreatSide = null;
-        m.candleWaitX = null;
-        m.candleFleeTtl = 0;
-        m.candleFleeDir = 0;
-        m.candleFleeVy = 0;
-      }
-      if (m.candleFleeTtl > 0) {
-        m.candleFleeTtl = Math.max(0, m.candleFleeTtl - dt);
-        const runDir = m.candleFleeDir || (m.side === 'left' ? -1 : 1);
-        const runSpeed = Math.max(72, m.speed * CANDLE_FLEE_SPEED_MUL);
-        m.x = clamp(m.x + runDir * runSpeed * dt, TOWER_X_LEFT + 32, TOWER_X_RIGHT - 32);
-        m.y = clamp(m.y + m.candleFleeVy * dt, TOWER_Y - 170, TOWER_Y + 170);
-        m.candleFleeVy *= 0.94;
-        m.atkCd = Math.max(m.atkCd, 0.25);
-        continue;
       }
       if (m.president) {
         this.tickPresident(m, dt);
@@ -2206,11 +2149,6 @@ class GameRoom {
         candleCarrierSide: null,
         candleBurnTtl: 0,
         candleBurnTick: 0,
-        candleFleeTtl: 0,
-        candleFleeDir: 0,
-        candleFleeVy: 0,
-        candleRetreatSide: null,
-        candleWaitX: null,
       });
     }
   }
@@ -2522,11 +2460,6 @@ class GameRoom {
       candleCarrierSide: null,
       candleBurnTtl: 0,
       candleBurnTick: 0,
-      candleFleeTtl: 0,
-      candleFleeDir: 0,
-      candleFleeVy: 0,
-      candleRetreatSide: null,
-      candleWaitX: null,
     };
     this.minions.push(created);
     return created;
