@@ -17,6 +17,7 @@ const PRESIDENT_VOICE_CLIPS = [
 ];
 const HERO_VOICE_MANIFEST_URL = '/api/audio/hero-voices';
 const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
+const GAME_OVER_CINEMATIC_MS = 4000;
 
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
@@ -89,6 +90,9 @@ export class GameClient {
     this.voiceUnlocked = false;
     this.voicePools = null;
     this.voiceState = null;
+    this.gameOverLatched = false;
+    this.gameOverRevealAtMs = 0;
+    this.nextGameOverBoomAtMs = 0;
 
     this.bindDom();
     this.bindEvents();
@@ -180,6 +184,7 @@ export class GameClient {
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
       if (this.restartMsg) this.restartMsg.textContent = '';
+      this.resetGameOverPresentation();
       this.setPostGamePanel(false);
       if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
       if (!this.isController) this.setDisplayMode('lobby');
@@ -205,6 +210,7 @@ export class GameClient {
     this.socket.on('room_restarted', () => {
       if (this.isController) return;
       if (this.restartMsg) this.restartMsg.textContent = '';
+      this.resetGameOverPresentation();
       this.setPostGamePanel(false);
     });
 
@@ -614,6 +620,12 @@ export class GameClient {
     if (this.postGameExplain) this.postGameExplain.textContent = 'Arrow Accuracy = hits / arrows fired';
   }
 
+  resetGameOverPresentation() {
+    this.gameOverLatched = false;
+    this.gameOverRevealAtMs = 0;
+    this.nextGameOverBoomAtMs = 0;
+  }
+
   handleDisplayState(snapshot) {
     const mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
     this.state.mode = mode;
@@ -631,7 +643,31 @@ export class GameClient {
         this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | West ${leftCount}/${required / 2} | East ${rightCount}/${required / 2}`;
       }
     }
-    this.setPostGamePanel(Boolean(snapshot.gameOver), snapshot);
+
+    if (snapshot.gameOver) {
+      const now = performance.now();
+      if (!this.gameOverLatched) {
+        this.gameOverLatched = true;
+        this.gameOverRevealAtMs = now + GAME_OVER_CINEMATIC_MS;
+        this.nextGameOverBoomAtMs = now;
+      }
+
+      if (!this.isController && this.sound && now < this.gameOverRevealAtMs && now >= this.nextGameOverBoomAtMs) {
+        this.sound.play('explosion');
+        this.sound.play('dragonfire');
+        this.nextGameOverBoomAtMs = now + 420 + Math.random() * 170;
+      }
+
+      if (!this.isController && this.centerHud && now < this.gameOverRevealAtMs) {
+        this.centerHud.textContent = 'Tower collapsing...';
+      }
+
+      this.setPostGamePanel(now >= this.gameOverRevealAtMs, snapshot);
+      return;
+    }
+
+    this.resetGameOverPresentation();
+    this.setPostGamePanel(false);
   }
 
   startRenderLoop() {

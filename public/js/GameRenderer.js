@@ -140,6 +140,8 @@ function upgradeCategory(type) {
   return UPGRADE_CATEGORY_BY_TYPE[type] || 'misc';
 }
 
+const GAME_OVER_CINEMATIC_MS = 4000;
+
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -148,6 +150,18 @@ export class GameRenderer {
     this.diggerDustMarks = new Map();
     this.damageTexts = [];
     this.heroLines = [];
+    this.towerShake = {
+      left: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
+      right: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
+    };
+    this.gameOverCinematic = {
+      active: false,
+      startMs: 0,
+      durationMs: GAME_OVER_CINEMATIC_MS,
+      winner: null,
+      loser: null,
+      lastBurstMs: 0,
+    };
     this.lastFrameAt = performance.now();
   }
 
@@ -158,6 +172,8 @@ export class GameRenderer {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrameAt) / 1000);
     this.lastFrameAt = now;
+    this.updateTowerShake(dt);
+    this.updateGameOverCinematic(snapshot, world, now, dt);
 
     const w = canvas.width;
     const h = canvas.height;
@@ -180,8 +196,24 @@ export class GameRenderer {
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
-    this.drawCastle('left', world.towerLeftX, world.towerY, snapshot.left.towerHp, snapshot.left, leftPulls);
-    this.drawCastle('right', world.towerRightX, world.towerY, snapshot.right.towerHp, snapshot.right, rightPulls);
+    const leftShake = this.towerShakeOffset('left');
+    const rightShake = this.towerShakeOffset('right');
+    this.drawCastle(
+      'left',
+      world.towerLeftX + leftShake.x,
+      world.towerY + leftShake.y,
+      snapshot.left.towerHp,
+      snapshot.left,
+      leftPulls
+    );
+    this.drawCastle(
+      'right',
+      world.towerRightX + rightShake.x,
+      world.towerY + rightShake.y,
+      snapshot.right.towerHp,
+      snapshot.right,
+      rightPulls
+    );
     for (let i = 0; i < leftPulls.length; i += 1) {
       this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, snapshot.left.shotCd, TEAM_COLORS.left.ring);
     }
@@ -228,7 +260,10 @@ export class GameRenderer {
       this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength);
     }
 
-    if (snapshot.gameOver) {
+    const gameOverCinematicActive = this.isGameOverCinematicActive(now);
+    if (gameOverCinematicActive) this.drawTowerCollapseCinematic(world, now);
+
+    if (snapshot.gameOver && !gameOverCinematicActive) {
       const leftAcc = arrowAccuracy(snapshot.left);
       const rightAcc = arrowAccuracy(snapshot.right);
       ctx.fillStyle = '#00000099';
@@ -248,6 +283,27 @@ export class GameRenderer {
 
   emitHitParticles(type, x, y, side) {
     const palette = TEAM_COLORS[side] || TEAM_COLORS.left;
+    if (type === 'towerhit') {
+      const half = (this.canvas?.width || 1600) * 0.5;
+      const towerSide = side === 'left' || side === 'right' ? side : (x < half ? 'left' : 'right');
+      this.registerTowerImpact(towerSide, x, y, 1);
+      for (let i = 0; i < 20; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 90 + Math.random() * 220;
+        this.particles.push({
+          x: x + (Math.random() * 8 - 4),
+          y: y + (Math.random() * 6 - 3),
+          vx: Math.cos(ang) * mag,
+          vy: Math.sin(ang) * mag - 24,
+          life: 0.42 + Math.random() * 0.22,
+          maxLife: 0.62,
+          size: 1.8 + Math.random() * 2.6,
+          color: ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'][Math.floor(Math.random() * 4)],
+          gravity: 640,
+        });
+      }
+      return;
+    }
     if (type === 'candlehit') {
       // Fire burst centered on the flame hit.
       for (let i = 0; i < 30; i += 1) {
@@ -459,6 +515,156 @@ export class GameRenderer {
       b.life -= dt;
       if (b.life <= 0) this.heroLines.splice(i, 1);
     }
+  }
+
+  registerTowerImpact(side, x, y, intensity = 1) {
+    const key = side === 'right' ? 'right' : 'left';
+    const state = this.towerShake[key];
+    const mag = Math.max(0.7, Number(intensity) || 1);
+    state.ttl = Math.max(state.ttl, 0.16 + mag * 0.05);
+    state.amp = Math.min(8, state.amp + 1.1 + mag * 0.8);
+
+    for (let i = 0; i < 12; i += 1) {
+      const ang = Math.random() * Math.PI * 2;
+      const magV = 60 + Math.random() * 150;
+      this.particles.push({
+        x: x + (Math.random() * 7 - 3.5),
+        y: y + (Math.random() * 5 - 2.5),
+        vx: Math.cos(ang) * magV,
+        vy: Math.sin(ang) * magV - 18,
+        life: 0.35 + Math.random() * 0.2,
+        maxLife: 0.56,
+        size: 1.6 + Math.random() * 2.2,
+        color: ['#c5d4e6', '#8fa1b8', '#73839a'][Math.floor(Math.random() * 3)],
+        gravity: 620,
+      });
+    }
+  }
+
+  updateGameOverCinematic(snapshot, world, nowMs, dt) {
+    void dt;
+    if (!snapshot?.gameOver || !world) {
+      this.gameOverCinematic.active = false;
+      return;
+    }
+
+    const winner = snapshot.winner === 'right' ? 'right' : 'left';
+    const loser = winner === 'left' ? 'right' : 'left';
+    const state = this.gameOverCinematic;
+    if (!state.active || state.winner !== winner) {
+      state.active = true;
+      state.startMs = nowMs;
+      state.winner = winner;
+      state.loser = loser;
+      state.lastBurstMs = 0;
+    }
+
+    if (!this.isGameOverCinematicActive(nowMs)) return;
+
+    const progress = this.gameOverCinematicProgress(nowMs);
+    const towerX = loser === 'left' ? world.towerLeftX : world.towerRightX;
+    const baseY = world.towerY;
+    const burstGap = 70 - Math.min(30, progress * 30);
+    if (nowMs - state.lastBurstMs >= burstGap) {
+      const impactY = baseY - 110 + Math.random() * 150;
+      this.registerTowerImpact(loser, towerX + (Math.random() * 20 - 10), impactY, 1.2 + progress * 1.7);
+
+      const chunkCount = 18 + Math.floor(progress * 16);
+      for (let i = 0; i < chunkCount; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 100 + Math.random() * (180 + progress * 120);
+        this.particles.push({
+          x: towerX + (Math.random() * 36 - 18),
+          y: impactY + (Math.random() * 30 - 15),
+          vx: Math.cos(ang) * mag,
+          vy: Math.sin(ang) * mag - (40 + progress * 45),
+          life: 0.55 + Math.random() * 0.46,
+          maxLife: 0.96,
+          size: 2 + Math.random() * 3.8,
+          color: ['#ced9e7', '#9baec3', '#6f8094', '#d9b483', '#7f6852'][Math.floor(Math.random() * 5)],
+          gravity: 660,
+        });
+      }
+      state.lastBurstMs = nowMs;
+    }
+  }
+
+  gameOverCinematicProgress(nowMs = performance.now()) {
+    const state = this.gameOverCinematic;
+    if (!state.active) return 1;
+    const elapsed = Math.max(0, nowMs - state.startMs);
+    return Math.max(0, Math.min(1, elapsed / state.durationMs));
+  }
+
+  isGameOverCinematicActive(nowMs = performance.now()) {
+    const state = this.gameOverCinematic;
+    if (!state.active) return false;
+    return nowMs - state.startMs < state.durationMs;
+  }
+
+  drawTowerCollapseCinematic(world, nowMs = performance.now()) {
+    const state = this.gameOverCinematic;
+    if (!state.active || !world) return;
+    const loser = state.loser === 'right' ? 'right' : 'left';
+    const x = loser === 'left' ? world.towerLeftX : world.towerRightX;
+    const y = world.towerY;
+    const dir = loser === 'left' ? -1 : 1;
+    const p = this.gameOverCinematicProgress(nowMs);
+    const ease = 1 - (1 - p) ** 3;
+    const drop = ease * 160;
+    const angle = dir * (0.02 + ease * 1.15);
+
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalAlpha = 0.26 + Math.min(0.56, p * 0.7);
+    const dust = ctx.createRadialGradient(x, y + 26, 8, x, y + 26, 180 + p * 80);
+    dust.addColorStop(0, 'rgba(211, 189, 165, 0.48)');
+    dust.addColorStop(0.4, 'rgba(127, 110, 94, 0.32)');
+    dust.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = dust;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 26, 180 + p * 80, 66 + p * 32, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(x, y - 112 + drop);
+    ctx.rotate(angle);
+    ctx.globalAlpha = 0.42 + (1 - p) * 0.3;
+    ctx.fillStyle = '#526479';
+    ctx.fillRect(-58, -132, 116, 236);
+    ctx.fillStyle = '#364659';
+    ctx.fillRect(-42, -114, 84, 18);
+    ctx.fillRect(-42, -70, 84, 14);
+    ctx.fillRect(-42, -30, 84, 14);
+    ctx.fillRect(-42, 10, 84, 14);
+    ctx.strokeStyle = '#98adbf';
+    ctx.globalAlpha = 0.38 + (1 - p) * 0.24;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(-58, -132, 116, 236);
+    ctx.restore();
+  }
+
+  updateTowerShake(dt) {
+    for (const key of ['left', 'right']) {
+      const s = this.towerShake[key];
+      s.ttl = Math.max(0, s.ttl - dt);
+      s.amp = Math.max(0, s.amp - dt * 15);
+      if (s.ttl === 0 && s.amp < 0.08) s.amp = 0;
+    }
+  }
+
+  towerShakeOffset(side) {
+    const key = side === 'right' ? 'right' : 'left';
+    const s = this.towerShake[key];
+    if (!s || s.ttl <= 0 || s.amp <= 0) return { x: 0, y: 0 };
+    const t = performance.now() * 0.001 + s.seed;
+    const fade = Math.max(0, Math.min(1, s.ttl / 0.28));
+    const amp = s.amp * fade;
+    return {
+      x: Math.sin(t * 52) * amp,
+      y: Math.cos(t * 37) * amp * 0.48,
+    };
   }
 
   drawDamageTexts() {

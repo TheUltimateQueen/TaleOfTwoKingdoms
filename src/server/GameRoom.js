@@ -1663,10 +1663,10 @@ class GameRoom {
   }
 
   applyMinionTowerDamage(attacker, sideName, amount, x = null, y = null) {
-    return this.dealDamageToTower(sideName, this.minionOutgoingDamage(attacker, amount), x, y);
+    return this.dealDamageToTower(sideName, this.minionOutgoingDamage(attacker, amount), x, y, 'unit');
   }
 
-  dealDamageToTower(sideName, amount, x = null, y = null) {
+  dealDamageToTower(sideName, amount, x = null, y = null, hitFx = null) {
     const side = this[sideName];
     if (!side) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
@@ -1677,6 +1677,7 @@ class GameRoom {
     const tx = Number.isFinite(x) ? x : (sideName === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT);
     const ty = Number.isFinite(y) ? y : (TOWER_Y - 100);
     this.queueDamageNumber(dmg, tx, ty);
+    if (hitFx === 'unit') this.queueHitSfx('towerhit', tx, ty, sideName);
     if (firstDamage) this.triggerTowerHeroRescue(sideName, tx, ty);
     return dmg;
   }
@@ -1868,7 +1869,7 @@ class GameRoom {
 
     if (Math.abs(hero.x - enemyX) <= Math.sqrt(slashR2) + 10) {
       hitAny = true;
-      this.dealDamageToTower(enemySideName, damage * 0.72, enemyX, TOWER_Y - 16);
+      this.dealDamageToTower(enemySideName, damage * 0.72, enemyX, TOWER_Y - 16, 'unit');
     }
 
     this.queueHitSfx('powerup', hero.x, hero.y - 8, hero.side);
