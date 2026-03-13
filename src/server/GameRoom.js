@@ -1047,9 +1047,10 @@ class GameRoom {
 
   hitCandleWithArrow(candle, arrow, part = 'flame') {
     if (!candle || candle.destroyed) return;
+    const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
+    if (arrow?.side && arrow.side === candleSide) return;
     const hitSide = arrow?.side || candle.claimedBy || 'left';
     const flameShotBonus = arrow?.powerType === 'flameShot' ? 0.4 : 0;
-    const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
     const enemyHit = arrow?.side ? arrow.side !== candleSide : true;
 
     if (part === 'stem') {
@@ -1361,6 +1362,7 @@ class GameRoom {
         for (const candle of candleList) {
           if (!candle || candle.destroyed || candle.delivering || consumed) continue;
           const candleKey = candle.spawnSide === 'right' ? 'right' : 'left';
+          if (a.side === candleKey) continue;
           if (a.candleTouched && a.candleTouched[candleKey]) continue;
           const hitR = (candle.r || 24) + a.r;
           const waxPct = Math.max(0, Math.min(1, (candle.wax || 0) / Math.max(1, candle.waxMax || 1)));
