@@ -19,7 +19,6 @@ module.exports = {
     'unitHpLevel',
     'resourceLevel',
     'bountyLevel',
-    'explosiveLevel',
     'powerLevel',
     'dragonLevel',
     'superMinionLevel',

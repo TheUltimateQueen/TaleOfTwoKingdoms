@@ -29,6 +29,19 @@ const UPGRADE_COST_RULES = {
   dragonLevel: { base: 236, growth: 26, start: 0 },
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
+const UPGRADE_PATH_BY_TYPE = {
+  arrowLevel: 'arrow',
+  multiShotLevel: 'arrow',
+  volleyLevel: 'arrow',
+  unitLevel: 'unit',
+  unitHpLevel: 'unit',
+  spawnLevel: 'unit',
+  resourceLevel: 'economy',
+  bountyLevel: 'economy',
+  powerLevel: 'power',
+  dragonLevel: 'special',
+  superMinionLevel: 'special',
+};
 const HERO_LINES = [
   'Justice is my cardio!',
   'Hope you brought a villain permit!',
@@ -606,6 +619,10 @@ class GameRoom {
       flameSpeed: 0.95,
       flameBoost: 0,
       flameBurstTtl: 0,
+      flameBeamTtl: 0,
+      flameBeamToX: null,
+      flameBeamToY: null,
+      flameHitFlashTtl: 0,
       flamePulse: Math.random() * Math.PI * 2,
       cartHalfW: CANDLE_CART_HALF_W,
       claimedBy: null,
@@ -822,6 +839,9 @@ class GameRoom {
     candle.flameSpeed = 1.22;
     candle.flameBoost = 0.74 + waxPct * 0.56;
     candle.flameBurstTtl = 0.26;
+    candle.flameBeamTtl = 0.24;
+    candle.flameBeamToX = Number.isFinite(target.x) ? target.x : mouthX + (sideName === 'left' ? 120 : -120);
+    candle.flameBeamToY = Number.isFinite(target.y) ? target.y - Math.max(4, (target.r || 12) * 0.16) : mouthY + 8;
   }
 
   hitCandleWithArrow(candle, arrow, part = 'flame') {
@@ -838,13 +858,16 @@ class GameRoom {
       return;
     }
 
-    const waxLoss = (enemyHit ? 13.6 : 0.55) + flameShotBonus * 2.8 + (arrow?.mainArrow ? 1.9 : 0.8);
+    const baseLoss = (enemyHit ? 13.6 : 0.55) + flameShotBonus * 2.8 + (arrow?.mainArrow ? 1.9 : 0.8);
+    const waxLoss = enemyHit ? baseLoss * 4 : baseLoss;
     candle.wax = Math.max(0, candle.wax - waxLoss);
+    candle.flameHitFlashTtl = enemyHit ? 0.28 : Math.max(Number(candle.flameHitFlashTtl) || 0, 0.12);
 
     this.queueHitSfx('candlehit', candle.x, candle.y - 10, hitSide);
     if (enemyHit) {
       this.queueHitSfx('explosion', candle.x, candle.y - 10, hitSide);
       this.queueHitSfx('dragonfire', candle.x + (Math.random() * 16 - 8), candle.y - 7, hitSide);
+      this.queueDamageNumber(waxLoss, candle.x + (Math.random() * 12 - 6), candle.y - 26);
     }
     if (candle.wax <= 0) {
       this.burnDownCandle(candle.spawnSide || 'left', arrow?.side || candle.claimedBy || 'left');
@@ -955,6 +978,10 @@ class GameRoom {
     candle.flameSpeed = 1;
     candle.flameBoost = 0;
     candle.flameBurstTtl = 0;
+    candle.flameBeamTtl = 0;
+    candle.flameBeamToX = null;
+    candle.flameBeamToY = null;
+    candle.flameHitFlashTtl = 0;
     this.queueHitSfx('upgrade', candle.x, candle.y - 10, sideName);
 
     for (const m of this.minions) {
@@ -1007,6 +1034,10 @@ class GameRoom {
         candle.holderIds = [];
         candle.claimedBy = sideName;
         candle.flamePulse += dt * 5.5;
+        candle.flameBeamTtl = 0;
+        candle.flameBeamToX = null;
+        candle.flameBeamToY = null;
+        candle.flameHitFlashTtl = Math.max(0, (Number(candle.flameHitFlashTtl) || 0) - dt);
         candle.deliverExplodeTtl = Math.max(0, (Number(candle.deliverExplodeTtl) || 0) - dt);
         if (candle.deliverExplodeTtl === 0) this.explodeDeliveredCandle(sideName);
         continue;
@@ -1015,7 +1046,9 @@ class GameRoom {
       candle.flamePulse += dt * 4.8;
       candle.flameSpeed = 1;
       candle.flameBoost = 0;
-      candle.flameBurstTtl = 0;
+      candle.flameBurstTtl = Math.max(0, (Number(candle.flameBurstTtl) || 0) - dt);
+      candle.flameBeamTtl = Math.max(0, (Number(candle.flameBeamTtl) || 0) - dt);
+      candle.flameHitFlashTtl = Math.max(0, (Number(candle.flameHitFlashTtl) || 0) - dt);
       candle.fireCd = Math.max(0, (Number(candle.fireCd) || 0) - dt);
       const burnRate = 0.03;
       candle.wax = Math.max(0, candle.wax - burnRate * dt);
@@ -1142,6 +1175,7 @@ class GameRoom {
 
       for (let m = this.minions.length - 1; m >= 0 && !consumed; m -= 1) {
         const minion = this.minions[m];
+        if (!minion) continue;
         if (minion.side === a.side) continue;
         const hitR = minion.r + a.r;
         if (dist2(a, minion) <= hitR * hitR) {
@@ -1425,7 +1459,9 @@ class GameRoom {
     }
 
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
-      if (this.minions[i].hp <= 0) this.killMinion(i, null);
+      const minion = this.minions[i];
+      if (!minion) continue;
+      if (minion.hp <= 0) this.killMinion(i, null);
     }
   }
 
@@ -1791,6 +1827,7 @@ class GameRoom {
 
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
       const other = this.minions[i];
+      if (!other) continue;
       if (other.side === hero.side || other.id === hero.id) continue;
       const dx = other.x - hero.x;
       const dy = other.y - hero.y;
@@ -2214,12 +2251,10 @@ class GameRoom {
     const presidentEvery = this.statPresidentEvery(side);
     const isPresident = forceType === 'president'
       || (!forceType && !isDragon && !isNecrominion && !isGunner && !isRider && !isDigger && !isMonk && !isHero && side.spawnCount % presidentEvery === 0);
-    const explosiveEvery = Math.max(3, 6 - (side.explosiveLevel - 1));
     const superEvery = this.statSuperEvery(side);
     const isSuper = forceType === 'super'
       || (!forceType && !isDragon && !isGunner && !isRider && !isDigger && !isMonk && !isHero && !isPresident && Number.isFinite(superEvery) && side.spawnCount % superEvery === 0);
-    const explosive = forceType === 'explosive'
-      || (!forceType && !isDragon && !isNecrominion && !isGunner && !isRider && !isDigger && !isMonk && !isHero && !isPresident && !isSuper && side.spawnCount % explosiveEvery === 0);
+    const explosive = false;
     let radius = 16;
     let visualPower = power;
     let spawnY = TOWER_Y + (Math.random() * 110 - 55);
@@ -2397,6 +2432,7 @@ class GameRoom {
 
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
       const m = this.minions[i];
+      if (!m) continue;
       if (m.id === sourceId) continue;
       const dx = m.x - x;
       const dy = m.y - y;
@@ -2473,10 +2509,34 @@ class GameRoom {
     });
   }
 
+  upgradePathForType(type) {
+    return UPGRADE_PATH_BY_TYPE[type] || 'misc';
+  }
+
+  pickUpgradeType(excludedTypes = new Set(), excludedPaths = new Set()) {
+    const withPathSpread = UPGRADE_TYPES.filter((type) => (
+      !excludedTypes.has(type)
+      && !excludedPaths.has(this.upgradePathForType(type))
+    ));
+    if (withPathSpread.length) return randomFrom(withPathSpread);
+
+    const uniqueTypePool = UPGRADE_TYPES.filter((type) => !excludedTypes.has(type));
+    if (uniqueTypePool.length) return randomFrom(uniqueTypePool);
+
+    return randomFrom(UPGRADE_TYPES);
+  }
+
   refillRegularCards(sideName) {
+    const shown = this.upgradeCards.filter((c) => c.side === sideName && c.slot >= 0 && c.slot < 2);
+    const usedTypes = new Set(shown.map((c) => c.type));
+    const usedPaths = new Set(shown.map((c) => this.upgradePathForType(c.type)));
+
     for (let slot = 0; slot < 2; slot += 1) {
       if (!this.hasCardInSlot(sideName, slot)) {
-        this.addUpgradeCard(sideName, slot, randomFrom(UPGRADE_TYPES), 'random');
+        const type = this.pickUpgradeType(usedTypes, usedPaths);
+        this.addUpgradeCard(sideName, slot, type, 'random');
+        usedTypes.add(type);
+        usedPaths.add(this.upgradePathForType(type));
       }
     }
   }

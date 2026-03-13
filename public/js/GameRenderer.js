@@ -46,19 +46,99 @@ function arrowAccuracy(sideState) {
 }
 
 const UPGRADE_BADGE_SPECS = [
-  { type: 'arrowLevel', code: 'AR', base: 1, color: '#76c1ff' },
-  { type: 'unitLevel', code: 'AT', base: 1, color: '#7ab8ff' },
-  { type: 'multiShotLevel', code: 'MS', base: 1, color: '#7ff0c9' },
-  { type: 'volleyLevel', code: 'VO', base: 0, color: '#5ccad6' },
-  { type: 'spawnLevel', code: 'SP', base: 1, color: '#f5c56b' },
-  { type: 'unitHpLevel', code: 'HP', base: 1, color: '#7de2ff' },
-  { type: 'resourceLevel', code: 'RS', base: 1, color: '#ffe17a' },
-  { type: 'bountyLevel', code: 'KG', base: 1, color: '#f7df8e' },
-  { type: 'explosiveLevel', code: 'BM', base: 1, color: '#ffab7c' },
-  { type: 'powerLevel', code: 'PW', base: 1, color: '#f4a3ff' },
-  { type: 'dragonLevel', code: 'DR', base: 0, color: '#ff8f78' },
-  { type: 'superMinionLevel', code: 'SU', base: 0, color: '#fff3ad' },
+  { type: 'arrowLevel', code: 'AR', base: 1 },
+  { type: 'unitLevel', code: 'AT', base: 1 },
+  { type: 'multiShotLevel', code: 'MS', base: 1 },
+  { type: 'volleyLevel', code: 'VO', base: 0 },
+  { type: 'spawnLevel', code: 'SP', base: 1 },
+  { type: 'unitHpLevel', code: 'HP', base: 1 },
+  { type: 'resourceLevel', code: 'RS', base: 1 },
+  { type: 'bountyLevel', code: 'KG', base: 1 },
+  { type: 'powerLevel', code: 'PW', base: 1 },
+  { type: 'dragonLevel', code: 'DR', base: 0 },
+  { type: 'superMinionLevel', code: 'SU', base: 0 },
 ];
+
+const UPGRADE_CATEGORY_BY_TYPE = {
+  arrowLevel: 'arrow',
+  multiShotLevel: 'arrow',
+  volleyLevel: 'arrow',
+  unitLevel: 'unit',
+  unitHpLevel: 'unit',
+  spawnLevel: 'unit',
+  resourceLevel: 'economy',
+  bountyLevel: 'economy',
+  powerLevel: 'power',
+  dragonLevel: 'special',
+  superMinionLevel: 'special',
+};
+
+const UPGRADE_CATEGORY_STYLE = {
+  arrow: {
+    tag: 'ARROW',
+    panel: '#1f3446',
+    glow: '#89d0ff2a',
+    border: '#6cb5ee',
+    title: '#dbf2ff',
+    hint: '#9ecde9',
+    cost: '#b9e4ff',
+    badge: '#7ec9ff',
+  },
+  unit: {
+    tag: 'UNIT',
+    panel: '#243f2c',
+    glow: '#93e59d26',
+    border: '#7dcf8c',
+    title: '#e4ffe7',
+    hint: '#a8ddb2',
+    cost: '#c8f5ce',
+    badge: '#86dd95',
+  },
+  economy: {
+    tag: 'ECO',
+    panel: '#4b3a1d',
+    glow: '#ffd86d29',
+    border: '#e8c46a',
+    title: '#fff3ce',
+    hint: '#e1cb90',
+    cost: '#ffe7aa',
+    badge: '#f4cf70',
+  },
+  power: {
+    tag: 'POWER',
+    panel: '#3d2746',
+    glow: '#d6a1ff2a',
+    border: '#bc8de8',
+    title: '#f6e5ff',
+    hint: '#d6b9ea',
+    cost: '#e5cbff',
+    badge: '#c999ff',
+  },
+  special: {
+    tag: 'SPECIAL',
+    panel: '#4a2e21',
+    glow: '#ffb0832b',
+    border: '#ea9a6d',
+    title: '#ffe6da',
+    hint: '#e6b8a3',
+    cost: '#ffd1bc',
+    badge: '#ffaf86',
+  },
+  misc: {
+    tag: 'UPG',
+    panel: '#3a3020',
+    glow: '#f4d5852b',
+    border: '#cfab52',
+    title: '#fff1c8',
+    hint: '#d9c08a',
+    cost: '#ffe3a5',
+    badge: '#d8be86',
+  },
+};
+
+function upgradeCategory(type) {
+  return UPGRADE_CATEGORY_BY_TYPE[type] || 'misc';
+}
 
 export class GameRenderer {
   constructor(canvas) {
@@ -520,8 +600,6 @@ export class GameRenderer {
     const eco = Math.max(0, Number(s.economyLevel) || 0);
     const dragon = Math.max(0, Number(s.dragonLevel) || 0);
     const sup = Math.max(0, Number(s.superMinionLevel) || 0);
-    const explosive = Math.max(1, Number(s.explosiveLevel) || 1);
-
     if (type === 'militia') return 1;
     if (type === 'necro') return 8;
     if (type === 'gunner') return Math.max(9, 13 - Math.floor((unit + arrow + eco) / 6));
@@ -530,7 +608,6 @@ export class GameRenderer {
     if (type === 'monk') return Math.max(11, 19 - Math.floor((hp + power + resource) / 7));
     if (type === 'hero') return Math.max(15, 24 - Math.floor((unit + power + eco) / 7));
     if (type === 'president') return Math.max(17, 27 - Math.floor((eco + resource + power) / 6));
-    if (type === 'bomber') return Math.max(3, 6 - (explosive - 1));
     if (type === 'dragon') return dragon <= 0 ? Infinity : Math.max(12, 28 - dragon * 3);
     if (type === 'super') return sup <= 0 ? Infinity : Math.max(3, 11 - sup * 2);
     return Infinity;
@@ -557,7 +634,6 @@ export class GameRenderer {
       monk: Math.max(1, Number(sideState?.powerLevel) || 1),
       hero: Math.max(1, Number(sideState?.powerLevel) || 1),
       president: Math.max(1, Number(sideState?.resourceLevel) || 1),
-      bomber: Math.max(1, Number(sideState?.explosiveLevel) || 1),
       dragon: Math.max(0, Number(sideState?.dragonLevel) || 0),
       super: Math.max(0, Number(sideState?.superMinionLevel) || 0),
       candle: candleActive ? 1 : 0,
@@ -571,7 +647,6 @@ export class GameRenderer {
       { type: 'monk', label: 'Monk', color: '#cbffb6', unlockHint: '' },
       { type: 'hero', label: 'Hero', color: '#ffe2a0', unlockHint: '' },
       { type: 'president', label: 'President', color: '#f1c7a2', unlockHint: '' },
-      { type: 'bomber', label: 'Bomber', color: '#ffb07d', unlockHint: '' },
       { type: 'dragon', label: 'Dragon', color: '#ff9c7b', unlockHint: 'need DR1' },
       { type: 'super', label: 'Super', color: '#fff2aa', unlockHint: 'need SU1' },
       { type: 'candle', label: 'Candle', color: '#ffd7a2', unlockHint: '' },
@@ -831,7 +906,9 @@ export class GameRenderer {
       const level = Math.max(0, Number(sideState[spec.type]) || 0);
       const count = Math.max(0, level - spec.base);
       if (count <= 0) continue;
-      out.push({ ...spec, count });
+      const category = upgradeCategory(spec.type);
+      const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+      out.push({ ...spec, count, color: style.badge });
     }
     return out;
   }
@@ -987,29 +1064,33 @@ export class GameRenderer {
 
   drawUpgradeCard(card) {
     const { ctx } = this;
-    const tint = card.side === 'left' ? '#cfab52' : '#c58f3b';
-    const bg = '#3a3020';
-    ctx.fillStyle = bg;
+    const category = upgradeCategory(card.type);
+    const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+    ctx.fillStyle = style.panel;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
-    ctx.fillStyle = '#f4d5852b';
+    ctx.fillStyle = style.glow;
     ctx.fillRect(card.x - card.w / 2 + 1, card.y - card.h / 2 + 1, card.w - 2, card.h - 2);
-    ctx.strokeStyle = tint;
+    ctx.strokeStyle = style.border;
     ctx.lineWidth = 2;
     ctx.strokeRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
 
-    ctx.fillStyle = '#fff1c8';
-    ctx.font = '10px sans-serif';
+    ctx.fillStyle = style.hint;
+    ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(UPGRADE_LABELS[card.type] || 'Upgrade', card.x, card.y - 8);
-    ctx.fillStyle = '#d9c08a';
+    ctx.fillText(style.tag, card.x, card.y - 15);
+
+    ctx.fillStyle = style.title;
+    ctx.font = '10px sans-serif';
+    ctx.fillText(UPGRADE_LABELS[card.type] || 'Upgrade', card.x, card.y - 5);
+    ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    ctx.fillText(UPGRADE_HINTS[card.type] || 'upgrade effect', card.x, card.y + 2);
-    ctx.fillStyle = '#ffe3a5';
+    ctx.fillText(UPGRADE_HINTS[card.type] || 'upgrade effect', card.x, card.y + 4);
+    ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';
-    ctx.fillText(`cost ${Math.max(1, Math.round(Number(card.cost) || 0))}`, card.x, card.y + 11);
-    ctx.fillStyle = '#d4b67e';
+    ctx.fillText(`cost ${Math.max(1, Math.round(Number(card.cost) || 0))}`, card.x, card.y + 13);
+    ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    ctx.fillText('shoot to choose', card.x, card.y + 19);
+    ctx.fillText('shoot to choose', card.x, card.y + 20);
   }
 
   drawShotPower(power) {
@@ -1259,8 +1340,10 @@ export class GameRenderer {
     ctx.lineTo(x, wickY - 2);
     ctx.stroke();
 
-    const flameH = 28 + flicker * 2.1;
-    const flameW = 11 + Math.max(0, flicker) * 1.25;
+    const burstLife = Math.max(0, Math.min(1, (Number(candle.flameBurstTtl) || 0) / 0.26));
+    const flameBoost = Math.max(0, Number(candle.flameBoost) || 0) * burstLife;
+    const flameH = 28 + flicker * 2.1 + flameBoost * 10;
+    const flameW = 11 + Math.max(0, flicker) * 1.25 + flameBoost * 3.4;
     const flameX = x + Math.sin(time * 6.2 + pulse) * 1.1;
     const flameY = wickY - flameH * 0.28;
 
@@ -1322,6 +1405,65 @@ export class GameRenderer {
       flameY - flameH * 0.58
     );
     ctx.fill();
+
+    const beamTtl = Math.max(0, Number(candle.flameBeamTtl) || 0);
+    if (beamTtl > 0) {
+      const toX = Number.isFinite(candle.flameBeamToX) ? candle.flameBeamToX : flameX + 120;
+      const toY = Number.isFinite(candle.flameBeamToY) ? candle.flameBeamToY : flameY + 8;
+      const beamLife = Math.max(0, Math.min(1, beamTtl / 0.24));
+      const arc = Math.sin(time * 15 + pulse) * 8;
+
+      ctx.save();
+      ctx.globalAlpha = 0.4 + beamLife * 0.5;
+      const beamGrad = ctx.createLinearGradient(flameX, flameY, toX, toY);
+      beamGrad.addColorStop(0, '#fff1b2');
+      beamGrad.addColorStop(0.34, '#ffbb4e');
+      beamGrad.addColorStop(0.75, '#ff7a33');
+      beamGrad.addColorStop(1, '#ff4c2c');
+      ctx.strokeStyle = beamGrad;
+      ctx.lineWidth = 6 + beamLife * 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(flameX, flameY);
+      ctx.quadraticCurveTo(
+        (flameX + toX) * 0.5 + arc,
+        (flameY + toY) * 0.5 - 10 - beamLife * 5,
+        toX,
+        toY
+      );
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.58 + beamLife * 0.35;
+      ctx.fillStyle = '#ffe7a0';
+      ctx.beginPath();
+      ctx.arc(flameX, flameY, 3 + beamLife * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const hitFlashTtl = Math.max(0, Number(candle.flameHitFlashTtl) || 0);
+    if (hitFlashTtl > 0) {
+      const flashLife = Math.max(0, Math.min(1, hitFlashTtl / 0.28));
+      ctx.save();
+      ctx.globalAlpha = 0.32 + flashLife * 0.56;
+      const blast = ctx.createRadialGradient(flameX, flameY, 2, flameX, flameY, 38 + flashLife * 20);
+      blast.addColorStop(0, '#fff4be');
+      blast.addColorStop(0.2, '#ffbe69');
+      blast.addColorStop(0.55, '#ff6a3f');
+      blast.addColorStop(1, '#00000000');
+      ctx.fillStyle = blast;
+      ctx.beginPath();
+      ctx.arc(flameX, flameY, 38 + flashLife * 20, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.4 + flashLife * 0.38;
+      ctx.strokeStyle = '#ffd58f';
+      ctx.lineWidth = 1.8 + flashLife * 1.4;
+      ctx.beginPath();
+      ctx.arc(flameX, flameY, 18 + flashLife * 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.restore();
   }
