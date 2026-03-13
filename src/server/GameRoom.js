@@ -83,6 +83,8 @@ const CANDLE_FIRE_INTERVAL = 1.22;
 const CANDLE_FIRE_SPLASH_R = 64;
 const CANDLE_SCORCH_DPS_ALLY = 0.1;
 const CANDLE_SCORCH_DPS_ENEMY = 1;
+const ARROW_TARGET_BUCKET_W = 120;
+const ARROW_TARGET_BUCKET_SCAN = 2;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -1123,6 +1125,9 @@ class GameRoom {
   }
 
   tickArrows(dt) {
+    const candleList = this.candles ? Object.values(this.candles) : [];
+    const minionBuckets = this.buildArrowMinionBuckets();
+
     for (let i = this.arrows.length - 1; i >= 0; i -= 1) {
       const a = this.arrows[i];
       a.vy += (a.gravity || 560) * dt;
@@ -1158,8 +1163,8 @@ class GameRoom {
         }
       }
 
-      if (!consumed && this.candles) {
-        for (const candle of Object.values(this.candles)) {
+      if (!consumed && candleList.length) {
+        for (const candle of candleList) {
           if (!candle || candle.destroyed || candle.delivering || consumed) continue;
           const candleKey = candle.spawnSide === 'right' ? 'right' : 'left';
           if (a.candleTouched && a.candleTouched[candleKey]) continue;
@@ -1187,12 +1192,23 @@ class GameRoom {
         }
       }
 
-      for (let m = this.minions.length - 1; m >= 0 && !consumed; m -= 1) {
-        const minion = this.minions[m];
-        if (!minion) continue;
-        if (minion.side === a.side) continue;
-        const hitR = minion.r + a.r;
-        if (dist2(a, minion) <= hitR * hitR) {
+      const enemySide = a.side === 'left' ? 'right' : 'left';
+      const enemyBuckets = minionBuckets[enemySide];
+      const centerCell = Math.floor((Number.isFinite(a.x) ? a.x : 0) / ARROW_TARGET_BUCKET_W);
+      for (
+        let cell = centerCell - ARROW_TARGET_BUCKET_SCAN;
+        cell <= centerCell + ARROW_TARGET_BUCKET_SCAN && !consumed;
+        cell += 1
+      ) {
+        const bucket = enemyBuckets.get(cell);
+        if (!bucket) continue;
+
+        for (let b = bucket.length - 1; b >= 0 && !consumed; b -= 1) {
+          const minion = bucket[b];
+          if (!minion || minion.removed || minion.side === a.side) continue;
+          const hitR = minion.r + a.r;
+          if (dist2(a, minion) > hitR * hitR) continue;
+
           this.markArrowHit(a);
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
@@ -1214,8 +1230,9 @@ class GameRoom {
           if (minion.hero) {
             minion.heroArrowHits = (minion.heroArrowHits || 0) + 1;
             if (minion.heroArrowHits >= HERO_ARROW_FINISHER_HITS) {
+              const minionIndex = this.minions.indexOf(minion);
               this.queueHitSfx('explosion', minion.x, minion.y - 6, a.side);
-              this.killMinion(m, a.side, { goldScalar: 1.2 });
+              if (minionIndex >= 0) this.killMinion(minionIndex, a.side, { goldScalar: 1.2 });
               continue;
             }
             if (minion.heroArrowHits === 3 || minion.heroArrowHits === 6) {
@@ -1229,14 +1246,18 @@ class GameRoom {
           }
 
           if (minion.explosive) {
-            this.killMinion(m, a.side, { triggerExplosion: true, impactDamage: a.dmg });
+            const minionIndex = this.minions.indexOf(minion);
+            if (minionIndex >= 0) this.killMinion(minionIndex, a.side, { triggerExplosion: true, impactDamage: a.dmg });
             continue;
           }
 
           this.dealDamageToMinion(minion, damage);
           this.applyFlameArrowImpact(a, minion, damage);
           this.applyMaxComboSplash(a, minion, damage);
-          if (minion.hp <= 0) this.killMinion(m, a.side);
+          if (minion.hp <= 0) {
+            const minionIndex = this.minions.indexOf(minion);
+            if (minionIndex >= 0) this.killMinion(minionIndex, a.side);
+          }
         }
       }
 
@@ -1279,6 +1300,25 @@ class GameRoom {
 
       if (consumed) this.arrows.splice(i, 1);
     }
+  }
+
+  buildArrowMinionBuckets() {
+    const buckets = {
+      left: new Map(),
+      right: new Map(),
+    };
+
+    for (const minion of this.minions) {
+      if (!minion || minion.removed) continue;
+      const sideName = minion.side === 'right' ? 'right' : 'left';
+      const x = Number.isFinite(minion.x) ? minion.x : 0;
+      const key = Math.floor(x / ARROW_TARGET_BUCKET_W);
+      const cell = buckets[sideName].get(key);
+      if (cell) cell.push(minion);
+      else buckets[sideName].set(key, [minion]);
+    }
+
+    return buckets;
   }
 
   tickMinions(dt) {
@@ -2029,6 +2069,7 @@ class GameRoom {
 
     this.awardMinionKillGold(killerSide, goldScalar);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
+    minion.removed = true;
     this.minions.splice(index, 1);
 
     if (triggerExplosion && minion.explosive) {
