@@ -191,8 +191,8 @@ export class GameRenderer {
     ctx.fillStyle = '#2d3b53';
     ctx.fillRect(0, world.groundY, w, 4);
 
-    this.drawBarracks('left', snapshot.left, world);
-    this.drawBarracks('right', snapshot.right, world);
+    this.drawBarracks('left', snapshot.left, world, snapshot);
+    this.drawBarracks('right', snapshot.right, world, snapshot);
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
@@ -828,9 +828,72 @@ export class GameRenderer {
     return steps === 0 ? every : steps;
   }
 
-  barracksRows(sideState) {
+  barracksRows(sideState, sideName = 'left', minions = [], candles = []) {
+    const side = sideName === 'right' ? 'right' : 'left';
     const candleCd = Math.max(0, Number(sideState?.candleCd) || 0);
     const candleActive = Boolean(sideState?.candleActive);
+    const liveMinions = Array.isArray(minions)
+      ? minions.filter((m) => m && m.side === side && (Number(m.hp) || 0) > 0)
+      : [];
+    const activeCountByType = {
+      militia: 0,
+      necro: 0,
+      gunner: 0,
+      rider: 0,
+      digger: 0,
+      monk: 0,
+      hero: 0,
+      president: 0,
+      dragon: 0,
+      super: 0,
+      candle: 0,
+    };
+    for (const m of liveMinions) {
+      if (m.super) {
+        activeCountByType.super += 1;
+        continue;
+      }
+      if (m.dragon) {
+        activeCountByType.dragon += 1;
+        continue;
+      }
+      if (m.digger) {
+        activeCountByType.digger += 1;
+        continue;
+      }
+      if (m.gunner) {
+        activeCountByType.gunner += 1;
+        continue;
+      }
+      if (m.necrominion) {
+        activeCountByType.necro += 1;
+        continue;
+      }
+      if (m.rider) {
+        activeCountByType.rider += 1;
+        continue;
+      }
+      if (m.hero) {
+        activeCountByType.hero += 1;
+        continue;
+      }
+      if (m.monk) {
+        activeCountByType.monk += 1;
+        continue;
+      }
+      if (m.president) {
+        activeCountByType.president += 1;
+        continue;
+      }
+      activeCountByType.militia += 1;
+    }
+    if (Array.isArray(candles)) {
+      for (const candle of candles) {
+        if (!candle || candle.destroyed) continue;
+        const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
+        if (candleSide === side) activeCountByType.candle += 1;
+      }
+    }
     const levelOf = {
       militia: Math.max(1, Number(sideState?.unitLevel) || 1),
       necro: Math.max(1, Number(sideState?.unitLevel) || 1),
@@ -868,6 +931,7 @@ export class GameRenderer {
         return {
           ...row,
           level: levelOf[row.type],
+          activeCount: activeCountByType[row.type] || 0,
           unlocked: true,
           every: 1,
           inSpawns: 1,
@@ -888,6 +952,7 @@ export class GameRenderer {
       return {
         ...row,
         level: levelOf[row.type],
+        activeCount: activeCountByType[row.type] || 0,
         unlocked,
         every,
         inSpawns,
@@ -897,7 +962,7 @@ export class GameRenderer {
     });
   }
 
-  drawBarracks(side, sideState, world) {
+  drawBarracks(side, sideState, world, snapshot = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const panelW = 250;
@@ -932,7 +997,14 @@ export class GameRenderer {
     // Training board.
     const px = panelX - panelW / 2;
     const py = panelY;
-    const rows = this.barracksRows(sideState);
+    const rows = this.barracksRows(
+      sideState,
+      side,
+      snapshot?.minions,
+      Array.isArray(snapshot?.candles)
+        ? snapshot.candles
+        : (snapshot?.candle ? [snapshot.candle] : [])
+    );
     const rowH = 17;
 
     ctx.fillStyle = '#0f1625d0';
@@ -970,7 +1042,7 @@ export class GameRenderer {
       ctx.textAlign = 'left';
       ctx.fillText(row.label, px + 24, ry + 1);
       ctx.fillStyle = '#c7d4e9';
-      ctx.fillText(`L${row.level}`, px + 86, ry + 1);
+      ctx.fillText(`L${row.level} A${Math.max(0, Number(row.activeCount) || 0)}`, px + 76, ry + 1);
 
       const barX = px + 108;
       const barY = ry - 8;
@@ -985,20 +1057,21 @@ export class GameRenderer {
       if (row.type === 'candle') {
         if (row.candleActive) {
           ctx.fillStyle = '#ffe8a6';
-          ctx.fillText('escort active', px + panelW - 10, ry + 1);
+          ctx.fillText(`active x${Math.max(0, Number(row.activeCount) || 0)}`, px + panelW - 10, ry + 1);
         } else {
           ctx.fillStyle = '#b8c8e2';
-          ctx.fillText(`training ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
+          ctx.fillText(`x${Math.max(0, Number(row.activeCount) || 0)} train ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
         }
       } else if (!row.unlocked) {
         ctx.fillStyle = '#9da8ba';
-        ctx.fillText(row.unlockHint || 'locked', px + panelW - 10, ry + 1);
+        ctx.fillText(`x${Math.max(0, Number(row.activeCount) || 0)} ${row.unlockHint || 'locked'}`, px + panelW - 10, ry + 1);
       } else if (row.every <= 1) {
         ctx.fillStyle = '#8affcf';
-        ctx.fillText('active', px + panelW - 10, ry + 1);
+        ctx.fillText(`active x${Math.max(0, Number(row.activeCount) || 0)}`, px + panelW - 10, ry + 1);
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
-        const tag = row.inSpawns === 1 ? `NEXT ${eta}s` : `${row.inSpawns}sp ${eta}s`;
+        const active = Math.max(0, Number(row.activeCount) || 0);
+        const tag = row.inSpawns === 1 ? `x${active} NEXT ${eta}s` : `x${active} ${row.inSpawns}sp ${eta}s`;
         ctx.fillStyle = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
         ctx.fillText(tag, px + panelW - 10, ry + 1);
       }

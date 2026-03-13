@@ -18,7 +18,7 @@ const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
   arrowLevel: { base: 130, growth: 18, start: 1 },
   unitLevel: { base: 138, growth: 18, start: 1 },
-  multiShotLevel: { base: 170, growth: 22, start: 1 },
+  multiShotLevel: { base: 340, growth: 44, start: 1 },
   volleyLevel: { base: 190, growth: 24, start: 0 },
   spawnLevel: { base: 150, growth: 16, start: 1 },
   unitHpLevel: { base: 138, growth: 16, start: 1 },
@@ -2187,7 +2187,7 @@ class GameRoom {
     const comboMul = this.comboMultiplier(side);
 
     let count = this.statArrowCount(side);
-    let spread = 0.08 + Math.min(0.07, Math.max(0, count - 1) * 0.006);
+    let spread = 0.032 + Math.min(0.02, Math.max(0, count - 1) * 0.0025);
     let speed = 230 + launch.strength * 380;
     speed *= 1.5;
     const chargeMul = 0.55 + launch.strength * 0.95;
@@ -2203,7 +2203,7 @@ class GameRoom {
 
     if (activePower === 'multiShot') {
       count += 2 + Math.floor(powerScale * 2);
-      spread = 0.14;
+      spread = 0.05;
       powerType = 'multiShot';
     } else if (activePower === 'ultraShot') {
       dmgMul = 2.2 + powerScale * 0.8;
@@ -2242,6 +2242,7 @@ class GameRoom {
       const vx = Math.cos(localAngle) * speed * forwardSign;
       const vy = -Math.sin(localAngle) * speed;
       if (isMainArrow) side.arrowsFired = (side.arrowsFired || 0) + 1;
+      const sideArrowMul = count > 1 && !isMainArrow ? 0.25 : 1;
       this.arrows.push({
         id: this.seq++,
         side: sideName,
@@ -2249,7 +2250,7 @@ class GameRoom {
         y: sy,
         vx,
         vy,
-        dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul,
+        dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul * sideArrowMul,
         ttl: 3.5,
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
