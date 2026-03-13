@@ -2958,6 +2958,8 @@ export class GameRenderer {
     const angle = Math.atan2(arrow.vy, arrow.vx);
     const len = 14 + arrow.r * 1.6;
     const isMainArrow = Boolean(arrow.mainArrow);
+    const comboTier = Math.max(1, Math.min(4, Number(arrow.comboTier) || 1));
+    const comboBoost = isMainArrow ? Math.max(0, (comboTier - 1) / 3) : 0;
 
     let body = arrow.side === 'left' ? '#d5ecff' : '#ffe0e0';
     let glow = null;
@@ -2984,7 +2986,33 @@ export class GameRenderer {
 
     if (glow) {
       ctx.shadowColor = glow;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = isMainArrow ? 9 : 7;
+    }
+
+    if (comboBoost > 0) {
+      const trailColor = comboTier >= 4
+        ? (arrow.side === 'left' ? '#eefbffcc' : '#fff1c6cc')
+        : (arrow.side === 'left' ? '#b9ecffb8' : '#ffcab7b8');
+      const trailLength = len * (0.95 + comboBoost * 2.6);
+      const wing = 0.8 + comboBoost * 2.2;
+
+      // Simple long stem: clean, readable, and cheap to draw.
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = trailColor;
+      ctx.lineWidth = Math.max(1.4, arrow.r * (0.45 + comboBoost * 0.7));
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.46, 0);
+      ctx.lineTo(-trailLength, 0);
+      ctx.stroke();
+
+      ctx.strokeStyle = comboTier >= 4 ? '#fffbe8b8' : '#ffffff88';
+      ctx.lineWidth = Math.max(1, arrow.r * 0.24);
+      ctx.beginPath();
+      ctx.moveTo(-trailLength * 0.7, -wing);
+      ctx.lineTo(-trailLength, 0);
+      ctx.lineTo(-trailLength * 0.7, wing);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
     }
 
     ctx.strokeStyle = body;

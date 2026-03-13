@@ -2259,6 +2259,7 @@ class GameRoom {
         flameBurn,
         gravity,
         mainArrow: isMainArrow,
+        comboTier: comboMul,
       });
     }
   }
