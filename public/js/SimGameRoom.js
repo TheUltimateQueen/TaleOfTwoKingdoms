@@ -81,8 +81,15 @@ const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22;
 const CANDLE_FIRE_SPLASH_R = 64;
-const CANDLE_SCORCH_DPS_ALLY = 0.1;
-const CANDLE_SCORCH_DPS_ENEMY = 1;
+const CANDLE_SCORCH_DPS_ALLY = 0.025;
+const CANDLE_SCORCH_DPS_ENEMY = 0.25;
+const CANDLE_SMOKE_SHIELD_SECONDS = 3.5;
+const CANDLE_SMOKE_SHIELD_Y_OFFSET = -8;
+const CANDLE_SMOKE_SHIELD_SCALE = 2;
+const CANDLE_SMOKE_SHIELD_RY = 30 * CANDLE_SMOKE_SHIELD_SCALE;
+const CANDLE_DESTROYED_SMOKE_SCALE = 2;
+const CANDLE_DESTROYED_SMOKE_RY = CANDLE_SMOKE_SHIELD_RY * CANDLE_DESTROYED_SMOKE_SCALE;
+const CANDLE_DESTROYED_SMOKE_Y_OFFSET = -28;
 const ARROW_TARGET_BUCKET_W = 120;
 const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
@@ -339,6 +346,7 @@ class GameRoom {
       flameBeamToX: finiteOrNull(candle.flameBeamToX, 1),
       flameBeamToY: finiteOrNull(candle.flameBeamToY, 1),
       flameHitFlashTtl: roundTo(candle.flameHitFlashTtl, 2),
+      smokeShieldTtl: roundTo(candle.smokeShieldTtl, 2),
       respawnCd: roundTo(candle.respawnCd, 2),
       destroyed: Boolean(candle.destroyed),
     } : null));
@@ -347,6 +355,10 @@ class GameRoom {
       y: roundTo(scorch.y, 1),
       r: roundTo(scorch.r, 1),
       ttl: roundTo(scorch.ttl, 2),
+      smokeShieldTtl: roundTo(scorch.smokeShieldTtl, 2),
+      smokeShieldRx: roundTo(scorch.smokeShieldRx, 1),
+      smokeShieldRy: roundTo(scorch.smokeShieldRy, 1),
+      smokeShieldYOffset: roundTo(scorch.smokeShieldYOffset, 1),
       towerSide: scorch.towerSide === 'right' ? 'right' : 'left',
     }));
     const resources = this.resources.map((res) => ({
@@ -803,6 +815,7 @@ class GameRoom {
       flameBeamToX: null,
       flameBeamToY: null,
       flameHitFlashTtl: 0,
+      smokeShieldTtl: 0,
       flamePulse: Math.random() * Math.PI * 2,
       cartHalfW: CANDLE_CART_HALF_W,
       claimedBy: null,
@@ -817,6 +830,60 @@ class GameRoom {
       destroyed: false,
       respawnCd: 0,
     };
+  }
+
+  candleSmokeShieldShape(candle) {
+    if (!candle) return null;
+    const cartHalf = Math.max(28, Number(candle.cartHalfW) || CANDLE_CART_HALF_W);
+    return {
+      x: Number(candle.x) || 0,
+      y: (Number(candle.y) || 0) + CANDLE_SMOKE_SHIELD_Y_OFFSET,
+      rx: (cartHalf + 18) * CANDLE_SMOKE_SHIELD_SCALE,
+      ry: CANDLE_SMOKE_SHIELD_RY,
+    };
+  }
+
+  arrowInsideCandleSmokeShield(arrow, candle) {
+    if (!arrow || !candle) return false;
+    const ttl = Number(candle.smokeShieldTtl) || 0;
+    if (ttl <= 0) return false;
+    const shield = this.candleSmokeShieldShape(candle);
+    if (!shield) return false;
+
+    const hitRx = Math.max(1, shield.rx + (Number(arrow.r) || 0) * 0.85);
+    const hitRy = Math.max(1, shield.ry + (Number(arrow.r) || 0) * 0.85);
+    const nx = (arrow.x - shield.x) / hitRx;
+    const ny = (arrow.y - shield.y) / hitRy;
+    if (nx * nx + ny * ny > 1) return false;
+    return arrow.y <= shield.y + shield.ry * 0.28;
+  }
+
+  scorchSmokeShieldShape(scorch) {
+    if (!scorch) return null;
+    const rx = Math.max(1, Number(scorch.smokeShieldRx) || 0);
+    const ry = Math.max(1, Number(scorch.smokeShieldRy) || 0);
+    if (rx <= 0 || ry <= 0) return null;
+    return {
+      x: Number(scorch.x) || 0,
+      y: (Number(scorch.y) || 0) + (Number(scorch.smokeShieldYOffset) || CANDLE_DESTROYED_SMOKE_Y_OFFSET),
+      rx,
+      ry,
+    };
+  }
+
+  arrowInsideScorchSmokeShield(arrow, scorch) {
+    if (!arrow || !scorch) return false;
+    const ttl = Number(scorch.smokeShieldTtl) || 0;
+    if (ttl <= 0) return false;
+    const shield = this.scorchSmokeShieldShape(scorch);
+    if (!shield) return false;
+
+    const hitRx = Math.max(1, shield.rx + (Number(arrow.r) || 0) * 0.85);
+    const hitRy = Math.max(1, shield.ry + (Number(arrow.r) || 0) * 0.85);
+    const nx = (arrow.x - shield.x) / hitRx;
+    const ny = (arrow.y - shield.y) / hitRy;
+    if (nx * nx + ny * ny > 1) return false;
+    return arrow.y <= shield.y + shield.ry * 0.28;
   }
 
   resetCandle(sideName = 'left') {
@@ -1154,6 +1221,9 @@ class GameRoom {
     const hitSide = arrow?.side || candle.claimedBy || 'left';
     const flameShotBonus = arrow?.powerType === 'flameShot' ? 0.4 : 0;
     const enemyHit = arrow?.side ? arrow.side !== candleSide : true;
+    if (enemyHit) {
+      candle.smokeShieldTtl = Math.max(Number(candle.smokeShieldTtl) || 0, CANDLE_SMOKE_SHIELD_SECONDS);
+    }
 
     if (part === 'stem') {
       const waxLoss = enemyHit ? (0.45 + flameShotBonus * 0.2) : 0.02;
@@ -1223,6 +1293,12 @@ class GameRoom {
       y: candle.y + 20,
       r: 96,
       ttl: 4.2,
+      smokeShieldTtl: CANDLE_SMOKE_SHIELD_SECONDS,
+      smokeShieldRx: (Math.max(28, Number(candle.cartHalfW) || CANDLE_CART_HALF_W) + 18)
+        * CANDLE_SMOKE_SHIELD_SCALE
+        * CANDLE_DESTROYED_SMOKE_SCALE,
+      smokeShieldRy: CANDLE_DESTROYED_SMOKE_RY,
+      smokeShieldYOffset: CANDLE_DESTROYED_SMOKE_Y_OFFSET,
       side: hitSide,
       candleSide: sideName,
       towerSide: null,
@@ -1266,6 +1342,10 @@ class GameRoom {
       y: TOWER_Y + 20,
       r: 128 + waxPct * 24,
       ttl: 5.4 + waxPct * 1.8,
+      smokeShieldTtl: 0,
+      smokeShieldRx: 0,
+      smokeShieldRy: 0,
+      smokeShieldYOffset: 0,
       side: sideName,
       candleSide: sideName,
       towerSide: enemySide,
@@ -1299,6 +1379,7 @@ class GameRoom {
     candle.flameBeamToX = null;
     candle.flameBeamToY = null;
     candle.flameHitFlashTtl = 0;
+    candle.smokeShieldTtl = 0;
     this.queueHitSfx('upgrade', candle.x, candle.y - 10, sideName);
 
     for (const m of this.minions) {
@@ -1316,6 +1397,7 @@ class GameRoom {
     for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
       const scorch = this.candleScorches[i];
       scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
+      scorch.smokeShieldTtl = Math.max(0, (Number(scorch.smokeShieldTtl) || 0) - dt);
       const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
       this.forEachMinionInRadius(scorch.x, scorch.y, scorch.r, minionBuckets, MINION_TARGET_BUCKET_W, (minion) => {
         const dps = minion.side === candleSide ? CANDLE_SCORCH_DPS_ALLY : CANDLE_SCORCH_DPS_ENEMY;
@@ -1353,6 +1435,7 @@ class GameRoom {
         candle.flameBeamToX = null;
         candle.flameBeamToY = null;
         candle.flameHitFlashTtl = Math.max(0, (Number(candle.flameHitFlashTtl) || 0) - dt);
+        candle.smokeShieldTtl = 0;
         candle.deliverExplodeTtl = Math.max(0, (Number(candle.deliverExplodeTtl) || 0) - dt);
         if (candle.deliverExplodeTtl === 0) this.explodeDeliveredCandle(sideName);
         continue;
@@ -1364,6 +1447,7 @@ class GameRoom {
       candle.flameBurstTtl = Math.max(0, (Number(candle.flameBurstTtl) || 0) - dt);
       candle.flameBeamTtl = Math.max(0, (Number(candle.flameBeamTtl) || 0) - dt);
       candle.flameHitFlashTtl = Math.max(0, (Number(candle.flameHitFlashTtl) || 0) - dt);
+      candle.smokeShieldTtl = Math.max(0, (Number(candle.smokeShieldTtl) || 0) - dt);
       candle.fireCd = Math.max(0, (Number(candle.fireCd) || 0) - dt);
       const burnRate = 0.03;
       candle.wax = Math.max(0, candle.wax - burnRate * dt);
@@ -1453,6 +1537,13 @@ class GameRoom {
           if (!candle || candle.destroyed || candle.delivering || consumed) continue;
           const candleKey = candle.spawnSide === 'right' ? 'right' : 'left';
           if (a.side === candleKey) continue;
+          if (this.arrowInsideCandleSmokeShield(a, candle)) {
+            this.markArrowMiss(a);
+            this.queueLine('BLOCKED', a.x, a.y - 12, candleKey);
+            this.queueHitSfx('blocked', a.x, a.y, candleKey);
+            consumed = true;
+            break;
+          }
           if (a.candleTouched && a.candleTouched[candleKey]) continue;
           const hitR = (candle.r || 24) + a.r;
           const waxPct = Math.max(0, Math.min(1, (candle.wax || 0) / Math.max(1, candle.waxMax || 1)));
@@ -1474,6 +1565,22 @@ class GameRoom {
             if (!a.candleTouched) a.candleTouched = {};
             a.candleTouched[candleKey] = true;
             this.hitCandleWithArrow(candle, a, 'stem');
+          }
+        }
+      }
+
+      if (!consumed && Array.isArray(this.candleScorches) && this.candleScorches.length) {
+        for (const scorch of this.candleScorches) {
+          if (!scorch || (Number(scorch.ttl) || 0) <= 0) continue;
+          if ((Number(scorch.smokeShieldTtl) || 0) <= 0) continue;
+          const candleKey = scorch.candleSide === 'right' ? 'right' : 'left';
+          if (a.side === candleKey) continue;
+          if (this.arrowInsideScorchSmokeShield(a, scorch)) {
+            this.markArrowMiss(a);
+            this.queueLine('BLOCKED', a.x, a.y - 12, candleKey);
+            this.queueHitSfx('blocked', a.x, a.y, candleKey);
+            consumed = true;
+            break;
           }
         }
       }

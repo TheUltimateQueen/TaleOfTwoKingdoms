@@ -13,6 +13,7 @@ export class SoundEngine {
       dragon: 0,
       dragonfire: 0,
       gunhit: 0,
+      blocked: 0,
     };
   }
 
@@ -46,6 +47,7 @@ export class SoundEngine {
     else if (type === 'dragon') this.playDragonHurt();
     else if (type === 'dragonfire') this.playDragonFire();
     else if (type === 'gunhit') this.playGunHit();
+    else if (type === 'blocked') this.playBlocked();
   }
 
   envGain(start, peak, decay) {
@@ -141,5 +143,15 @@ export class SoundEngine {
     const o2 = this.osc('triangle', 480, t + 0.01, 0.11, g2);
     o1.frequency.exponentialRampToValueAtTime(110, t + 0.08);
     o2.frequency.exponentialRampToValueAtTime(260, t + 0.1);
+  }
+
+  playBlocked() {
+    const t = this.ctx.currentTime;
+    const g1 = this.envGain(t, 0.16, 0.16);
+    const g2 = this.envGain(t + 0.015, 0.12, 0.14);
+    const o1 = this.osc('square', 190, t, 0.18, g1);
+    const o2 = this.osc('triangle', 420, t + 0.015, 0.14, g2);
+    o1.frequency.exponentialRampToValueAtTime(96, t + 0.15);
+    o2.frequency.exponentialRampToValueAtTime(210, t + 0.12);
   }
 }

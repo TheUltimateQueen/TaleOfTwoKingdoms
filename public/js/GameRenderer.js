@@ -307,6 +307,24 @@ export class GameRenderer {
       }
       return;
     }
+    if (type === 'blocked') {
+      for (let i = 0; i < 18; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 80 + Math.random() * 140;
+        this.particles.push({
+          x: x + (Math.random() * 6 - 3),
+          y: y + (Math.random() * 4 - 2),
+          vx: Math.cos(ang) * mag,
+          vy: Math.sin(ang) * mag - 16,
+          life: 0.34 + Math.random() * 0.2,
+          maxLife: 0.58,
+          size: 2 + Math.random() * 2.6,
+          color: ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'][Math.floor(Math.random() * 4)],
+          gravity: 320,
+        });
+      }
+      return;
+    }
     if (type === 'candlehit') {
       // Fire burst centered on the flame hit.
       for (let i = 0; i < 30; i += 1) {
@@ -1558,6 +1576,45 @@ export class GameRenderer {
       ctx.bezierCurveTo(fx - w * 0.7, fy + h * 0.14, fx - w, fy - h * 0.5, fx, fy - h);
       ctx.fill();
     }
+
+    const smokeShieldTtl = Math.max(0, Number(scorch.smokeShieldTtl) || 0);
+    if (smokeShieldTtl > 0) {
+      const life = Math.max(0, Math.min(1, smokeShieldTtl / 3.5));
+      const smokeX = x;
+      const smokeY = y + (Number(scorch.smokeShieldYOffset) || -28);
+      const smokeRx = Math.max(12, Number(scorch.smokeShieldRx) || 0);
+      const smokeRy = Math.max(10, Number(scorch.smokeShieldRy) || 0);
+      const breathe = Math.sin(t * 5.1 + r * 0.02) * 0.06;
+      const domeRx = smokeRx * (1 + breathe * 0.55);
+      const domeRy = smokeRy * (1 + breathe * 0.32);
+
+      ctx.globalAlpha = 0.22 + life * 0.34;
+      const cloud = ctx.createRadialGradient(
+        smokeX,
+        smokeY - domeRy * 0.62,
+        4,
+        smokeX,
+        smokeY,
+        domeRx
+      );
+      cloud.addColorStop(0, '#f8fcffcc');
+      cloud.addColorStop(0.42, '#d7deea99');
+      cloud.addColorStop(1, '#8a97a800');
+      ctx.fillStyle = cloud;
+      ctx.beginPath();
+      ctx.ellipse(smokeX, smokeY, domeRx, domeRy, 0, Math.PI, Math.PI * 2, false);
+      ctx.lineTo(smokeX + domeRx * 0.82, smokeY + domeRy * 0.24);
+      ctx.quadraticCurveTo(smokeX, smokeY + domeRy * 0.46, smokeX - domeRx * 0.82, smokeY + domeRy * 0.24);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 0.24 + life * 0.42;
+      ctx.strokeStyle = '#f5fbff';
+      ctx.lineWidth = 1.3 + life * 1.2;
+      ctx.beginPath();
+      ctx.ellipse(smokeX, smokeY, domeRx * 0.97, domeRy * 0.95, 0, Math.PI, Math.PI * 2, false);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -1609,6 +1666,59 @@ export class GameRenderer {
     ctx.ellipse(x, y + 28, cartHalf + 20, 9, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+
+    const smokeShieldTtl = Math.max(0, Number(candle.smokeShieldTtl) || 0);
+    if (smokeShieldTtl > 0) {
+      const life = Math.max(0, Math.min(1, smokeShieldTtl / 3.5));
+      const smokeX = x;
+      const smokeY = y - 8;
+      const smokeRx = (cartHalf + 18) * 2;
+      const smokeRy = 30 * 2;
+      const pulseBreathe = Math.sin(time * 6.3 + pulse * 0.6) * 0.06;
+      const domeRx = smokeRx * (1 + pulseBreathe * 0.6);
+      const domeRy = smokeRy * (1 + pulseBreathe * 0.35);
+
+      ctx.save();
+      ctx.globalAlpha = 0.24 + life * 0.34;
+      const cloud = ctx.createRadialGradient(
+        smokeX,
+        smokeY - domeRy * 0.62,
+        4,
+        smokeX,
+        smokeY,
+        domeRx
+      );
+      cloud.addColorStop(0, '#f6fbffcc');
+      cloud.addColorStop(0.4, '#d6dde8aa');
+      cloud.addColorStop(1, '#8a97a800');
+      ctx.fillStyle = cloud;
+      ctx.beginPath();
+      ctx.ellipse(smokeX, smokeY, domeRx, domeRy, 0, Math.PI, Math.PI * 2, false);
+      ctx.lineTo(smokeX + domeRx * 0.84, smokeY + domeRy * 0.24);
+      ctx.quadraticCurveTo(smokeX, smokeY + domeRy * 0.44, smokeX - domeRx * 0.84, smokeY + domeRy * 0.24);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 0.22 + life * 0.4;
+      ctx.strokeStyle = '#f4fbff';
+      ctx.lineWidth = 1.2 + life * 1.1;
+      ctx.beginPath();
+      ctx.ellipse(smokeX, smokeY, domeRx * 0.96, domeRy * 0.94, 0, Math.PI, Math.PI * 2, false);
+      ctx.stroke();
+
+      for (let i = 0; i < 5; i += 1) {
+        const phase = time * (1.6 + i * 0.22) + i * 1.7 + pulse * 0.32;
+        const px = smokeX + Math.cos(phase) * domeRx * 0.52;
+        const py = smokeY - domeRy * (0.14 + (i % 3) * 0.16) + Math.sin(phase * 0.8) * 2.6;
+        const pr = 4.6 + (i % 2) * 2.3;
+        ctx.globalAlpha = 0.16 + life * 0.22;
+        ctx.fillStyle = '#eff4fb';
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     const wheelY = y + 20;
     const wheelR = 9;
