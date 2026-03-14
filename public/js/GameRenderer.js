@@ -3139,6 +3139,7 @@ export class GameRenderer {
   }
 
   drawArrow(arrow) {
+    if ((Number(arrow?.launchDelay) || 0) > 0) return;
     const { ctx } = this;
     const angle = Math.atan2(arrow.vy, arrow.vx);
     const len = 14 + arrow.r * 1.6;

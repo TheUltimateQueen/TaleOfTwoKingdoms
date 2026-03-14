@@ -90,8 +90,8 @@ const CANDLE_SMOKE_SHIELD_RY = 30 * CANDLE_SMOKE_SHIELD_SCALE;
 const CANDLE_DESTROYED_SMOKE_SCALE = 2;
 const CANDLE_DESTROYED_SMOKE_RY = CANDLE_SMOKE_SHIELD_RY * CANDLE_DESTROYED_SMOKE_SCALE;
 const CANDLE_DESTROYED_SMOKE_Y_OFFSET = -28;
-const MULTI_SIDE_ARROW_SPEED_STEP = 0.05;
-const MULTI_SIDE_ARROW_SPEED_MIN = 0.2;
+const MULTI_SIDE_ARROW_DELAY_STEP = 0.05;
+const MULTI_SIDE_ARROW_DELAY_MAX = 0.9;
 const ARROW_TARGET_BUCKET_W = 120;
 const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
@@ -298,6 +298,7 @@ class GameRoom {
       powerType: a.powerType || null,
       mainArrow: Boolean(a.mainArrow),
       comboTier: Math.max(1, Math.round(Number(a.comboTier) || 1)),
+      launchDelay: roundTo(a.launchDelay, 3),
     }));
     const minions = this.minions.map((m) => ({
       id: m.id,
@@ -1501,10 +1502,19 @@ class GameRoom {
 
     for (let i = this.arrows.length - 1; i >= 0; i -= 1) {
       const a = this.arrows[i];
-      a.vy += (a.gravity || 560) * dt;
-      a.x += a.vx * dt;
-      a.y += a.vy * dt;
-      a.ttl -= dt;
+      let stepDt = dt;
+      if ((Number(a.launchDelay) || 0) > 0) {
+        a.launchDelay -= dt;
+        if (a.launchDelay > 0) continue;
+        stepDt = Math.max(0, -a.launchDelay);
+        a.launchDelay = 0;
+      }
+      if (stepDt <= 0) continue;
+
+      a.vy += (a.gravity || 560) * stepDt;
+      a.x += a.vx * stepDt;
+      a.y += a.vy * stepDt;
+      a.ttl -= stepDt;
 
       if (a.ttl <= 0 || a.x < -50 || a.x > WORLD_W + 50 || a.y < -50 || a.y > WORLD_H + 50) {
         this.markArrowMiss(a);
@@ -2876,14 +2886,9 @@ class GameRoom {
         Math.min(Math.PI / 2, launch.angle + (i - (count - 1) / 2) * spread)
       );
       const offsetFromCenter = Math.abs(i - mainIndex);
-      const sideArrowSpeedScale = Math.max(
-        MULTI_SIDE_ARROW_SPEED_MIN,
-        1 - offsetFromCenter * MULTI_SIDE_ARROW_SPEED_STEP
-      );
-      const arrowSpeed = speed * sideArrowSpeedScale;
-      const arrowTtl = 3.5 / sideArrowSpeedScale;
-      const vx = Math.cos(localAngle) * arrowSpeed * forwardSign;
-      const vy = -Math.sin(localAngle) * arrowSpeed;
+      const launchDelay = Math.min(MULTI_SIDE_ARROW_DELAY_MAX, offsetFromCenter * MULTI_SIDE_ARROW_DELAY_STEP);
+      const vx = Math.cos(localAngle) * speed * forwardSign;
+      const vy = -Math.sin(localAngle) * speed;
       if (isMainArrow) side.arrowsFired = (side.arrowsFired || 0) + 1;
       const sideArrowMul = count > 1 && !isMainArrow ? 0.25 : 1;
       this.arrows.push({
@@ -2894,13 +2899,14 @@ class GameRoom {
         vx,
         vy,
         dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul * sideArrowMul,
-        ttl: arrowTtl,
+        ttl: 3.5,
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
         powerType,
         flameSplash,
         flameBurn,
-        gravity: gravity * sideArrowSpeedScale * sideArrowSpeedScale,
+        gravity,
+        launchDelay,
         mainArrow: isMainArrow,
         comboTier: comboMul,
       });
