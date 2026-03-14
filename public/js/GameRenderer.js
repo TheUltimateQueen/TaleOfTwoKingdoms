@@ -3175,8 +3175,8 @@ export class GameRenderer {
 
     const allowGlow = glow && !veryHeavyArrowLoad && (isMainArrow || !heavyArrowLoad);
     if (allowGlow) {
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = isMainArrow ? 8 : 5;
+      ctx.shadowColor = isMainArrow ? this.withAlpha(glow, 0.1) : glow;
+      ctx.shadowBlur = isMainArrow ? 0.8 : 5;
     }
 
     if (comboBoost > 0 && !heavyArrowLoad) {
