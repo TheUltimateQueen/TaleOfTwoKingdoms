@@ -92,6 +92,7 @@ const CANDLE_DESTROYED_SMOKE_RY = CANDLE_SMOKE_SHIELD_RY * CANDLE_DESTROYED_SMOK
 const CANDLE_DESTROYED_SMOKE_Y_OFFSET = -28;
 const MULTI_SIDE_ARROW_DELAY_STEP = 0.05;
 const MULTI_SIDE_ARROW_DELAY_MAX = 0.9;
+const MULTI_SIDE_ARROW_UNDER_DELAY_MUL = 2;
 const ARROW_TARGET_BUCKET_W = 120;
 const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
@@ -2882,7 +2883,12 @@ class GameRoom {
         Math.min(Math.PI / 2, launch.angle + (i - (count - 1) / 2) * spread)
       );
       const offsetFromCenter = Math.abs(i - mainIndex);
-      const launchDelay = Math.min(MULTI_SIDE_ARROW_DELAY_MAX, offsetFromCenter * MULTI_SIDE_ARROW_DELAY_STEP);
+      const isUnderArcArrow = i < mainIndex;
+      const underDelayMul = isUnderArcArrow ? MULTI_SIDE_ARROW_UNDER_DELAY_MUL : 1;
+      const launchDelay = Math.min(
+        MULTI_SIDE_ARROW_DELAY_MAX,
+        offsetFromCenter * MULTI_SIDE_ARROW_DELAY_STEP * underDelayMul
+      );
       const vx = Math.cos(localAngle) * speed * forwardSign;
       const vy = -Math.sin(localAngle) * speed;
       if (isMainArrow) side.arrowsFired = (side.arrowsFired || 0) + 1;
