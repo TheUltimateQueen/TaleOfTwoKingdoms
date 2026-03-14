@@ -88,6 +88,7 @@ const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
 const MINION_TARGET_RADIUS_PAD = 84;
 const MAX_DAMAGE_EVENTS_PER_TICK = 240;
+const ROOM_SIDES = ['left', 'right'];
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -738,9 +739,12 @@ class GameRoom {
     this.refreshPresidentAuraCache();
 
     this.tickShotPowers(dt);
-    this.tickArrows(dt);
-    this.tickMinions(dt);
-    this.tickCandle(dt);
+    const preBuckets = this.buildDualMinionBuckets(ARROW_TARGET_BUCKET_W, MINION_TARGET_BUCKET_W);
+    this.tickArrows(dt, preBuckets.arrow);
+    this.tickMinions(dt, preBuckets.minion, preBuckets.carrierCounts);
+    const candleBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
+    const candleHolders = this.collectAllCandleHolders();
+    this.tickCandle(dt, candleBuckets, candleHolders);
 
     this.processEconomy(this.left);
     this.processEconomy(this.right);
@@ -952,10 +956,8 @@ class GameRoom {
   }
 
   positionCandleHolders(holders, dt, candle, dir) {
-    const ordered = holders
-      .slice()
-      .sort((a, b) => a.id - b.id)
-      .slice(0, CANDLE_MAX_HOLDERS);
+    const ordered = Array.isArray(holders) ? holders : [];
+    const holderCount = Math.min(CANDLE_MAX_HOLDERS, ordered.length);
 
     const cartHalf = Math.max(28, Number(candle?.cartHalfW) || CANDLE_CART_HALF_W);
     const slots = [
@@ -969,7 +971,7 @@ class GameRoom {
       { x: -(cartHalf + 29), y: 25 },
     ];
 
-    for (let i = 0; i < ordered.length; i += 1) {
+    for (let i = 0; i < holderCount; i += 1) {
       const m = ordered[i];
       const slot = slots[i] || slots[slots.length - 1];
       const tx = candle.x + dir * slot.x;
@@ -981,6 +983,106 @@ class GameRoom {
       m.y = clamp(m.y, TOWER_Y - 170, TOWER_Y + 170);
       m.atkCd = Math.max(m.atkCd, 0.25);
     }
+  }
+
+  collectCandleHolders(sideName) {
+    const ordered = [];
+    for (const m of this.minions) {
+      if (!m?.candleCarrier || m.candleCarrierSide !== sideName) continue;
+      const valid = m.side === sideName && m.hp > 0 && this.isCandleCarrierEligible(m);
+      if (!valid) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        continue;
+      }
+
+      let insertAt = ordered.length;
+      while (insertAt > 0 && ordered[insertAt - 1].id > m.id) insertAt -= 1;
+
+      if (ordered.length < CANDLE_MAX_HOLDERS) {
+        ordered.splice(insertAt, 0, m);
+        continue;
+      }
+
+      if (insertAt >= CANDLE_MAX_HOLDERS) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        continue;
+      }
+
+      const dropped = ordered[ordered.length - 1];
+      if (dropped) {
+        dropped.candleCarrier = false;
+        dropped.candleCarrierSide = null;
+      }
+      ordered.splice(ordered.length - 1, 1);
+      ordered.splice(insertAt, 0, m);
+    }
+    return ordered;
+  }
+
+  collectAllCandleHolders() {
+    const grouped = { left: [], right: [] };
+    for (const m of this.minions) {
+      if (!m?.candleCarrier) continue;
+      const sideName = m.candleCarrierSide === 'right' ? 'right' : 'left';
+      const valid = m.side === sideName && m.hp > 0 && this.isCandleCarrierEligible(m);
+      if (!valid) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        continue;
+      }
+
+      const ordered = grouped[sideName];
+      let insertAt = ordered.length;
+      while (insertAt > 0 && ordered[insertAt - 1].id > m.id) insertAt -= 1;
+
+      if (ordered.length < CANDLE_MAX_HOLDERS) {
+        ordered.splice(insertAt, 0, m);
+        continue;
+      }
+
+      if (insertAt >= CANDLE_MAX_HOLDERS) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        continue;
+      }
+
+      const dropped = ordered[ordered.length - 1];
+      if (dropped) {
+        dropped.candleCarrier = false;
+        dropped.candleCarrierSide = null;
+      }
+      ordered.splice(ordered.length - 1, 1);
+      ordered.splice(insertAt, 0, m);
+    }
+    return grouped;
+  }
+
+  syncCandleHolderIds(candle, holders) {
+    if (!candle) return;
+    if (!Array.isArray(candle.holderIds)) candle.holderIds = [];
+    candle.holderIds.length = holders.length;
+    for (let i = 0; i < holders.length; i += 1) {
+      candle.holderIds[i] = holders[i].id;
+    }
+  }
+
+  sanitizeCandleHolders(sideName, candidates) {
+    if (!Array.isArray(candidates) || !candidates.length) return [];
+    const out = [];
+    for (const m of candidates) {
+      if (!m?.candleCarrier || m.candleCarrierSide !== sideName) continue;
+      const valid = m.side === sideName && m.hp > 0 && this.isCandleCarrierEligible(m);
+      if (!valid) {
+        m.candleCarrier = false;
+        m.candleCarrierSide = null;
+        continue;
+      }
+      out.push(m);
+      if (out.length >= CANDLE_MAX_HOLDERS) break;
+    }
+    return out;
   }
 
   findCandleFireTarget(sideName, candle, range = CANDLE_FIRE_RANGE, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
@@ -1187,7 +1289,8 @@ class GameRoom {
     candle.delivering = true;
     candle.deliverEnemySide = enemySide;
     candle.deliverExplodeTtl = CANDLE_DELIVER_FUSE;
-    candle.holderIds = [];
+    if (!Array.isArray(candle.holderIds)) candle.holderIds = [];
+    candle.holderIds.length = 0;
     candle.claimedBy = sideName;
     candle.flameSpeed = 1;
     candle.flameBoost = 0;
@@ -1207,9 +1310,9 @@ class GameRoom {
     }
   }
 
-  tickCandle(dt) {
+  tickCandle(dt, precomputedBuckets = null, precomputedHolders = null) {
     if (!Array.isArray(this.candleScorches)) this.candleScorches = [];
-    const minionBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
+    const minionBuckets = precomputedBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
       const scorch = this.candleScorches[i];
       scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
@@ -1229,7 +1332,7 @@ class GameRoom {
       if (scorch.ttl <= 0) this.candleScorches.splice(i, 1);
     }
 
-    for (const sideName of ['left', 'right']) {
+    for (const sideName of ROOM_SIDES) {
       if (!this.candles[sideName]) {
         this[sideName].candleActive = false;
         this[sideName].candleCd = Math.max(0, Number(this[sideName].candleCd) || 0);
@@ -1242,7 +1345,8 @@ class GameRoom {
       this[sideName].candleCd = 0;
 
       if (candle.delivering) {
-        candle.holderIds = [];
+        if (!Array.isArray(candle.holderIds)) candle.holderIds = [];
+        candle.holderIds.length = 0;
         candle.claimedBy = sideName;
         candle.flamePulse += dt * 5.5;
         candle.flameBeamTtl = 0;
@@ -1264,24 +1368,10 @@ class GameRoom {
       const burnRate = 0.03;
       candle.wax = Math.max(0, candle.wax - burnRate * dt);
 
-      const holders = this.minions.filter((m) => (
-        m?.candleCarrier
-        && m.candleCarrierSide === sideName
-        && m.side === sideName
-        && m.hp > 0
-        && this.isCandleCarrierEligible(m)
-      ));
-      const sideHolders = holders
-        .sort((a, b) => a.id - b.id)
-        .slice(0, CANDLE_MAX_HOLDERS);
-      const keepCarrierIds = new Set(sideHolders.map((m) => m.id));
-      for (const m of holders) {
-        if (!keepCarrierIds.has(m.id)) {
-          m.candleCarrier = false;
-          m.candleCarrierSide = null;
-        }
-      }
-      candle.holderIds = sideHolders.map((m) => m.id);
+      const sideHolders = Array.isArray(precomputedHolders?.[sideName])
+        ? this.sanitizeCandleHolders(sideName, precomputedHolders[sideName])
+        : this.collectCandleHolders(sideName);
+      this.syncCandleHolderIds(candle, sideHolders);
       candle.claimedBy = sideName;
 
       if (candle.fireCd === 0) {
@@ -1319,9 +1409,9 @@ class GameRoom {
     }
   }
 
-  tickArrows(dt) {
+  tickArrows(dt, precomputedBuckets = null) {
     const candleList = this.candles ? Object.values(this.candles) : [];
-    const minionBuckets = this.buildArrowMinionBuckets();
+    const minionBuckets = precomputedBuckets || this.buildArrowMinionBuckets();
 
     for (let i = this.arrows.length - 1; i >= 0; i -= 1) {
       const a = this.arrows[i];
@@ -1518,6 +1608,47 @@ class GameRoom {
     return this.buildMinionBuckets(ARROW_TARGET_BUCKET_W);
   }
 
+  buildDualMinionBuckets(arrowBucketW = ARROW_TARGET_BUCKET_W, minionBucketW = MINION_TARGET_BUCKET_W) {
+    const arrowBuckets = {
+      left: new Map(),
+      right: new Map(),
+    };
+    const carrierCounts = { left: 0, right: 0 };
+    const minionBuckets = arrowBucketW === minionBucketW
+      ? arrowBuckets
+      : {
+          left: new Map(),
+          right: new Map(),
+        };
+
+    for (const minion of this.minions) {
+      if (!minion || minion.removed) continue;
+      const sideName = minion.side === 'right' ? 'right' : 'left';
+      const x = Number.isFinite(minion.x) ? minion.x : 0;
+      if (minion.candleCarrier && (Number(minion.hp) || 0) > 0) {
+        const carrierSide = minion.candleCarrierSide === 'right' ? 'right' : 'left';
+        carrierCounts[carrierSide] += 1;
+      }
+
+      const arrowKey = Math.floor(x / arrowBucketW);
+      const arrowCell = arrowBuckets[sideName].get(arrowKey);
+      if (arrowCell) arrowCell.push(minion);
+      else arrowBuckets[sideName].set(arrowKey, [minion]);
+
+      if (minionBuckets === arrowBuckets) continue;
+      const minionKey = Math.floor(x / minionBucketW);
+      const minionCell = minionBuckets[sideName].get(minionKey);
+      if (minionCell) minionCell.push(minion);
+      else minionBuckets[sideName].set(minionKey, [minion]);
+    }
+
+    return {
+      arrow: arrowBuckets,
+      minion: minionBuckets,
+      carrierCounts,
+    };
+  }
+
   forEachMinionInRadius(centerX, centerY, radius, buckets = null, bucketW = ARROW_TARGET_BUCKET_W, fn = null) {
     if (typeof fn !== 'function') return;
     const x = Number.isFinite(centerX) ? centerX : 0;
@@ -1620,9 +1751,9 @@ class GameRoom {
     this.activePresidents = { left, right };
   }
 
-  tickMinions(dt) {
-    const targetBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
-    const carrierCounts = this.buildCandleCarrierCounts();
+  tickMinions(dt, precomputedTargetBuckets = null, precomputedCarrierCounts = null) {
+    const targetBuckets = precomputedTargetBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
+    const carrierCounts = precomputedCarrierCounts || this.buildCandleCarrierCounts();
 
     for (let i = this.minions.length - 1; i >= 0; i -= 1) {
       const m = this.minions[i];

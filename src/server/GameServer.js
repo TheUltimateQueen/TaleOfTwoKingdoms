@@ -5,10 +5,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
-const { GameRoom } = require('./GameRoom');
-const { PORT, TICK_MS } = require('./constants');
+const { PORT } = require('./constants');
 const AUDIO_FILE_RE = /\.(m4a|mp3|wav|ogg)$/i;
-const STATE_EMIT_MS = 50;
 const CONTROLLER_STATE_EMIT_MS = 66;
 
 function createRoomId() {
@@ -28,6 +26,125 @@ function getLanUrls(port) {
   return out;
 }
 
+class ServerRoom {
+  constructor(id, options = {}) {
+    this.id = id;
+    this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
+    this.archersPerSide = this.mode === '2v2' ? 2 : 1;
+    this.display = null;
+    this.players = { left: [], right: [] };
+    this.started = false;
+    this.gameOver = false;
+    this.winner = null;
+    this.lastHostState = null;
+    this.lastControllerFrame = null;
+    this.nextControllerStateEmitAtMs = null;
+    this.hostAuthoritative = true;
+  }
+
+  requiredPlayers() {
+    return this.archersPerSide * 2;
+  }
+
+  totalPlayers() {
+    return this.players.left.length + this.players.right.length;
+  }
+
+  isReadyToStart() {
+    return this.players.left.length >= this.archersPerSide && this.players.right.length >= this.archersPerSide;
+  }
+
+  attachDisplay(socketId, name) {
+    this.display = { id: socketId, name: name || 'War Screen' };
+  }
+
+  playerBySocket(socketId) {
+    const leftPlayer = this.players.left.find((p) => p.id === socketId);
+    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, player: leftPlayer };
+    const rightPlayer = this.players.right.find((p) => p.id === socketId);
+    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, player: rightPlayer };
+    return null;
+  }
+
+  addPlayer(socketId, name) {
+    const existing = this.playerBySocket(socketId);
+    if (existing) return { side: existing.side, slot: existing.slot, existing: true };
+    if (this.totalPlayers() >= this.requiredPlayers()) return null;
+
+    const leftCount = this.players.left.length;
+    const rightCount = this.players.right.length;
+    const side = leftCount <= rightCount ? 'left' : 'right';
+    const slot = this.players[side].length;
+    if (slot >= this.archersPerSide) {
+      const otherSide = side === 'left' ? 'right' : 'left';
+      const otherSlot = this.players[otherSide].length;
+      if (otherSlot >= this.archersPerSide) return null;
+      const player = {
+        id: socketId,
+        name: name || (otherSide === 'left' ? `West Archer ${otherSlot + 1}` : `East Archer ${otherSlot + 1}`),
+        slot: otherSlot,
+      };
+      this.players[otherSide].push(player);
+      this.started = this.isReadyToStart();
+      return { side: otherSide, slot: otherSlot, existing: false };
+    }
+
+    const player = {
+      id: socketId,
+      name: name || (side === 'left' ? `West Archer ${slot + 1}` : `East Archer ${slot + 1}`),
+      slot,
+    };
+    this.players[side].push(player);
+    this.started = this.isReadyToStart();
+    return { side, slot, existing: false };
+  }
+
+  setMode(mode) {
+    const nextMode = mode === '2v2' ? '2v2' : '1v1';
+    if (this.started) {
+      return { ok: false, message: 'Cannot change room size after the match has started.' };
+    }
+    if (nextMode === this.mode) return { ok: true, changed: false };
+
+    const nextArchersPerSide = nextMode === '2v2' ? 2 : 1;
+    if (this.players.left.length > nextArchersPerSide || this.players.right.length > nextArchersPerSide) {
+      return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+    }
+
+    this.mode = nextMode;
+    this.archersPerSide = nextArchersPerSide;
+    this.started = this.isReadyToStart();
+    return { ok: true, changed: true };
+  }
+
+  removeSocket(socketId) {
+    let changed = false;
+    if (this.display && this.display.id === socketId) {
+      this.display = null;
+      changed = true;
+    }
+    const leftBefore = this.players.left.length;
+    this.players.left = this.players.left.filter((p) => p.id !== socketId);
+    if (this.players.left.length !== leftBefore) {
+      this.players.left.forEach((p, idx) => { p.slot = idx; });
+      changed = true;
+    }
+    const rightBefore = this.players.right.length;
+    this.players.right = this.players.right.filter((p) => p.id !== socketId);
+    if (this.players.right.length !== rightBefore) {
+      this.players.right.forEach((p, idx) => { p.slot = idx; });
+      changed = true;
+    }
+
+    if (changed) this.started = this.isReadyToStart();
+
+    return {
+      changed,
+      empty: this.players.left.length === 0 && this.players.right.length === 0 && !this.display,
+    };
+  }
+}
+
 class GameServer {
   constructor() {
     this.rooms = new Map();
@@ -40,7 +157,6 @@ class GameServer {
     this.app.use(express.static(path.join(process.cwd(), 'public')));
 
     this.setupSocketHandlers();
-    this.setupTicker();
   }
 
   setupApiRoutes() {
@@ -75,28 +191,6 @@ class GameServer {
     });
   }
 
-  setupTicker() {
-    setInterval(() => {
-      const nowMs = Date.now();
-      for (const room of this.rooms.values()) {
-        if (room.hostAuthoritative) continue;
-        room.tick(TICK_MS / 1000);
-        if (room.started) {
-          const sfxEvents = room.consumeSfxEvents();
-          if (sfxEvents.length) this.emitEventToDisplays(room, 'hit_sfx', sfxEvents);
-          const damageEvents = room.consumeDamageEvents();
-          if (damageEvents.length) this.emitEventToDisplays(room, 'damage_text', damageEvents);
-          const lineEvents = room.consumeLineEvents();
-          if (lineEvents.length) this.emitEventToDisplays(room, 'hero_line', lineEvents);
-          if (!Number.isFinite(room.nextStateEmitAtMs) || nowMs >= room.nextStateEmitAtMs) {
-            this.broadcastRoom(room, { forceController: false, nowMs });
-            room.nextStateEmitAtMs = nowMs + STATE_EMIT_MS;
-          }
-        }
-      }
-    }, TICK_MS);
-  }
-
   setupSocketHandlers() {
     this.io.on('connection', (socket) => {
       socket.on('create_room', async ({ name, origin, mode }) => {
@@ -104,10 +198,7 @@ class GameServer {
         while (this.rooms.has(id)) id = createRoomId();
 
         const roomMode = mode === '2v2' ? '2v2' : '1v1';
-        const room = new GameRoom(id, origin || '', { mode: roomMode });
-        room.hostAuthoritative = true;
-        room.lastHostState = null;
-        room.lastControllerFrame = null;
+        const room = new ServerRoom(id, { mode: roomMode });
         room.attachDisplay(socket.id, name || 'War Screen');
 
         this.rooms.set(id, room);
@@ -188,28 +279,15 @@ class GameServer {
           socket.emit('room_restart_error', { message: 'Only the host display can restart the match.' });
           return;
         }
-        if (room.hostAuthoritative) {
-          const gameOver = Boolean(room.lastHostState?.gameOver);
-          if (!gameOver) {
-            socket.emit('room_restart_error', { message: 'Match has not ended yet.' });
-            return;
-          }
-          room.gameOver = false;
-          room.winner = null;
-          room.lastHostState = null;
-          room.lastControllerFrame = null;
-          this.io.to(room.id).emit('room_restarted', {
-            mode: room.mode,
-            requiredPlayers: room.requiredPlayers(),
-          });
-          this.broadcastRoom(room, { forceController: true });
+        const gameOver = Boolean(room.lastHostState?.gameOver || room.lastControllerFrame?.gameOver);
+        if (!gameOver) {
+          socket.emit('room_restart_error', { message: 'Match has not ended yet.' });
           return;
         }
-        const result = room.restartMatch();
-        if (!result?.ok) {
-          socket.emit('room_restart_error', { message: result?.message || 'Unable to restart match.' });
-          return;
-        }
+        room.gameOver = false;
+        room.winner = null;
+        room.lastHostState = null;
+        room.lastControllerFrame = null;
         this.io.to(room.id).emit('room_restarted', {
           mode: room.mode,
           requiredPlayers: room.requiredPlayers(),
@@ -231,7 +309,6 @@ class GameServer {
           });
           return;
         }
-        room.setControlPull(socket.id, x, y);
       });
 
       socket.on('host_state', ({ roomId, snapshot, controllerFrame, sfxEvents, damageEvents, lineEvents }) => {
@@ -313,13 +390,22 @@ class GameServer {
   }
 
   buildControllerState(room, snapshot, side, slot) {
+    const defaultSide = {
+      towerHp: 0,
+      shotCd: 0,
+      pendingShotPower: null,
+      pendingShotPowerShots: 0,
+      arrowsFired: 0,
+      arrowHits: 0,
+      comboHitStreak: 0,
+    };
     const source = snapshot || {
       mode: room.mode,
       started: room.started,
       gameOver: room.gameOver,
       winner: room.winner,
-      left: room.left,
-      right: room.right,
+      left: defaultSide,
+      right: defaultSide,
       requiredPlayers: room.requiredPlayers(),
       playerCount: room.totalPlayers(),
     };
@@ -335,8 +421,8 @@ class GameServer {
       winner: source.winner || null,
       requiredPlayers: Number(source.requiredPlayers) || room.requiredPlayers(),
       playerCount: Number(source.playerCount) || room.totalPlayers(),
-      me: this.compactControllerSide(source[sideName]),
-      enemy: this.compactControllerSide(source[enemySide]),
+      me: this.compactControllerSide(source[sideName] || defaultSide),
+      enemy: this.compactControllerSide(source[enemySide] || defaultSide),
     };
   }
 
@@ -392,20 +478,9 @@ class GameServer {
       forceController = false,
       nowMs = Date.now(),
     } = options;
-    if (room.hostAuthoritative) {
-      this.io.to(room.id).emit('room_roster', this.roomRoster(room));
-      let fallbackSnapshot = null;
-      if (!room.lastHostState || !room.started) fallbackSnapshot = room.serialize();
-      const controllerSource = room.lastControllerFrame || room.lastHostState || fallbackSnapshot;
-      this.emitControllerStates(room, controllerSource, forceController, nowMs);
-      if (!room.started) {
-        this.emitStateToDisplays(room, fallbackSnapshot, { excludeDisplay: true });
-      }
-      return;
-    }
-    const snapshot = room.serialize();
-    this.emitStateToDisplays(room, snapshot);
-    this.emitControllerStates(room, snapshot, forceController, nowMs);
+    this.io.to(room.id).emit('room_roster', this.roomRoster(room));
+    const controllerSource = room.lastControllerFrame || room.lastHostState || null;
+    this.emitControllerStates(room, controllerSource, forceController, nowMs);
   }
 
   listen(port = PORT) {

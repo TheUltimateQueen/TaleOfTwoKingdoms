@@ -1,6 +1,5 @@
 module.exports = {
   PORT: process.env.PORT || 3000,
-  TICK_MS: 1000 / 30,
   WORLD_W: 1600,
   WORLD_H: 900,
   TOWER_X_LEFT: 120,

@@ -192,8 +192,9 @@ export class GameRenderer {
     ctx.fillStyle = '#2d3b53';
     ctx.fillRect(0, world.groundY, w, 4);
 
-    this.drawBarracks('left', snapshot.left, world, snapshot);
-    this.drawBarracks('right', snapshot.right, world, snapshot);
+    const barracksCounts = this.buildBarracksActiveCounts(snapshot);
+    this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left);
+    this.drawBarracks('right', snapshot.right, world, snapshot, barracksCounts.right);
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
@@ -830,14 +831,8 @@ export class GameRenderer {
     return steps === 0 ? every : steps;
   }
 
-  barracksRows(sideState, sideName = 'left', minions = [], candles = []) {
-    const side = sideName === 'right' ? 'right' : 'left';
-    const candleCd = Math.max(0, Number(sideState?.candleCd) || 0);
-    const candleActive = Boolean(sideState?.candleActive);
-    const liveMinions = Array.isArray(minions)
-      ? minions.filter((m) => m && m.side === side && (Number(m.hp) || 0) > 0)
-      : [];
-    const activeCountByType = {
+  emptyBarracksCounts() {
+    return {
       militia: 0,
       necro: 0,
       gunner: 0,
@@ -850,50 +845,127 @@ export class GameRenderer {
       super: 0,
       candle: 0,
     };
-    for (const m of liveMinions) {
+  }
+
+  buildBarracksActiveCounts(snapshot = null) {
+    const counts = {
+      left: this.emptyBarracksCounts(),
+      right: this.emptyBarracksCounts(),
+    };
+    const minions = Array.isArray(snapshot?.minions) ? snapshot.minions : [];
+    for (const m of minions) {
+      if (!m || (Number(m.hp) || 0) <= 0) continue;
+      const side = m.side === 'right' ? 'right' : 'left';
+      const sideCounts = counts[side];
       if (m.super) {
-        activeCountByType.super += 1;
+        sideCounts.super += 1;
         continue;
       }
       if (m.dragon) {
-        activeCountByType.dragon += 1;
+        sideCounts.dragon += 1;
         continue;
       }
       if (m.digger) {
-        activeCountByType.digger += 1;
+        sideCounts.digger += 1;
         continue;
       }
       if (m.gunner) {
-        activeCountByType.gunner += 1;
+        sideCounts.gunner += 1;
         continue;
       }
       if (m.necrominion) {
-        activeCountByType.necro += 1;
+        sideCounts.necro += 1;
         continue;
       }
       if (m.rider) {
-        activeCountByType.rider += 1;
+        sideCounts.rider += 1;
         continue;
       }
       if (m.hero) {
-        activeCountByType.hero += 1;
+        sideCounts.hero += 1;
         continue;
       }
       if (m.monk) {
-        activeCountByType.monk += 1;
+        sideCounts.monk += 1;
         continue;
       }
       if (m.president) {
-        activeCountByType.president += 1;
+        sideCounts.president += 1;
         continue;
       }
-      activeCountByType.militia += 1;
+      sideCounts.militia += 1;
     }
-    if (Array.isArray(candles)) {
-      for (const candle of candles) {
-        if (!candle || candle.destroyed) continue;
-        const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
-        if (candleSide === side) activeCountByType.candle += 1;
+
+    const candles = Array.isArray(snapshot?.candles)
+      ? snapshot.candles
+      : (snapshot?.candle ? [snapshot.candle] : []);
+    for (const candle of candles) {
+      if (!candle || candle.destroyed) continue;
+      const side = candle.spawnSide === 'right' ? 'right' : 'left';
+      counts[side].candle += 1;
+    }
+
+    return counts;
+  }
+
+  barracksRows(sideState, sideName = 'left', minions = [], candles = [], precomputedCounts = null) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const candleCd = Math.max(0, Number(sideState?.candleCd) || 0);
+    const candleActive = Boolean(sideState?.candleActive);
+    const activeCountByType = this.emptyBarracksCounts();
+    if (precomputedCounts && typeof precomputedCounts === 'object') {
+      for (const key of Object.keys(activeCountByType)) {
+        activeCountByType[key] = Math.max(0, Number(precomputedCounts[key]) || 0);
+      }
+    } else {
+      const liveMinions = Array.isArray(minions)
+        ? minions.filter((m) => m && m.side === side && (Number(m.hp) || 0) > 0)
+        : [];
+      for (const m of liveMinions) {
+        if (m.super) {
+          activeCountByType.super += 1;
+          continue;
+        }
+        if (m.dragon) {
+          activeCountByType.dragon += 1;
+          continue;
+        }
+        if (m.digger) {
+          activeCountByType.digger += 1;
+          continue;
+        }
+        if (m.gunner) {
+          activeCountByType.gunner += 1;
+          continue;
+        }
+        if (m.necrominion) {
+          activeCountByType.necro += 1;
+          continue;
+        }
+        if (m.rider) {
+          activeCountByType.rider += 1;
+          continue;
+        }
+        if (m.hero) {
+          activeCountByType.hero += 1;
+          continue;
+        }
+        if (m.monk) {
+          activeCountByType.monk += 1;
+          continue;
+        }
+        if (m.president) {
+          activeCountByType.president += 1;
+          continue;
+        }
+        activeCountByType.militia += 1;
+      }
+      if (Array.isArray(candles)) {
+        for (const candle of candles) {
+          if (!candle || candle.destroyed) continue;
+          const candleSide = candle.spawnSide === 'right' ? 'right' : 'left';
+          if (candleSide === side) activeCountByType.candle += 1;
+        }
       }
     }
     const levelOf = {
@@ -964,7 +1036,7 @@ export class GameRenderer {
     });
   }
 
-  drawBarracks(side, sideState, world, snapshot = null) {
+  drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const panelW = 250;
@@ -1005,7 +1077,8 @@ export class GameRenderer {
       snapshot?.minions,
       Array.isArray(snapshot?.candles)
         ? snapshot.candles
-        : (snapshot?.candle ? [snapshot.candle] : [])
+        : (snapshot?.candle ? [snapshot.candle] : []),
+      precomputedCounts
     );
     const rowH = 17;
 
