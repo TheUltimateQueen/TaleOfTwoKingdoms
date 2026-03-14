@@ -1672,8 +1672,8 @@ export class GameRenderer {
       const life = Math.max(0, Math.min(1, smokeShieldTtl / 3.5));
       const smokeX = x;
       const smokeY = y - 8;
-      const smokeRx = (cartHalf + 18) * 2;
-      const smokeRy = 30 * 2;
+      const smokeRx = (cartHalf + 18) * 3;
+      const smokeRy = 30 * 3;
       const pulseBreathe = Math.sin(time * 6.3 + pulse * 0.6) * 0.06;
       const domeRx = smokeRx * (1 + pulseBreathe * 0.6);
       const domeRy = smokeRy * (1 + pulseBreathe * 0.35);

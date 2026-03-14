@@ -81,11 +81,11 @@ const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22;
 const CANDLE_FIRE_SPLASH_R = 64;
-const CANDLE_SCORCH_DPS_ALLY = 0.025;
+const CANDLE_SCORCH_DPS_ALLY = 0.00625;
 const CANDLE_SCORCH_DPS_ENEMY = 0.25;
 const CANDLE_SMOKE_SHIELD_SECONDS = 3.5;
 const CANDLE_SMOKE_SHIELD_Y_OFFSET = -8;
-const CANDLE_SMOKE_SHIELD_SCALE = 2;
+const CANDLE_SMOKE_SHIELD_SCALE = 3;
 const CANDLE_SMOKE_SHIELD_RY = 30 * CANDLE_SMOKE_SHIELD_SCALE;
 const CANDLE_DESTROYED_SMOKE_SCALE = 2;
 const CANDLE_DESTROYED_SMOKE_RY = CANDLE_SMOKE_SHIELD_RY * CANDLE_DESTROYED_SMOKE_SCALE;
@@ -2881,6 +2881,7 @@ class GameRoom {
         1 - offsetFromCenter * MULTI_SIDE_ARROW_SPEED_STEP
       );
       const arrowSpeed = speed * sideArrowSpeedScale;
+      const arrowTtl = 3.5 / sideArrowSpeedScale;
       const vx = Math.cos(localAngle) * arrowSpeed * forwardSign;
       const vy = -Math.sin(localAngle) * arrowSpeed;
       if (isMainArrow) side.arrowsFired = (side.arrowsFired || 0) + 1;
@@ -2893,7 +2894,7 @@ class GameRoom {
         vx,
         vy,
         dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul * sideArrowMul,
-        ttl: 3.5,
+        ttl: arrowTtl,
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
         powerType,
