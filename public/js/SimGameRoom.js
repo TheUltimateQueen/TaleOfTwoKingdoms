@@ -1472,10 +1472,6 @@ class GameRoom {
 
       if (!sideHolders.length) {
         candle.claimedBy = null;
-        const homeX = Number.isFinite(candle.spawnX) ? candle.spawnX : this.candleSpawnX(sideName);
-        const homeY = Number.isFinite(candle.spawnY) ? candle.spawnY : this.candleSpawnY();
-        candle.x += (homeX - candle.x) * Math.min(1, dt * 0.34);
-        candle.y += (homeY - candle.y) * Math.min(1, dt * 0.34);
         if (candle.wax <= 0) this.burnDownCandle(sideName, null);
         continue;
       }
