@@ -90,6 +90,8 @@ const CANDLE_SMOKE_SHIELD_RY = 30 * CANDLE_SMOKE_SHIELD_SCALE;
 const CANDLE_DESTROYED_SMOKE_SCALE = 2;
 const CANDLE_DESTROYED_SMOKE_RY = CANDLE_SMOKE_SHIELD_RY * CANDLE_DESTROYED_SMOKE_SCALE;
 const CANDLE_DESTROYED_SMOKE_Y_OFFSET = -28;
+const MULTI_SIDE_ARROW_SPEED_STEP = 0.05;
+const MULTI_SIDE_ARROW_SPEED_MIN = 0.2;
 const ARROW_TARGET_BUCKET_W = 120;
 const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
@@ -2873,8 +2875,14 @@ class GameRoom {
         0,
         Math.min(Math.PI / 2, launch.angle + (i - (count - 1) / 2) * spread)
       );
-      const vx = Math.cos(localAngle) * speed * forwardSign;
-      const vy = -Math.sin(localAngle) * speed;
+      const offsetFromCenter = Math.abs(i - mainIndex);
+      const sideArrowSpeedScale = Math.max(
+        MULTI_SIDE_ARROW_SPEED_MIN,
+        1 - offsetFromCenter * MULTI_SIDE_ARROW_SPEED_STEP
+      );
+      const arrowSpeed = speed * sideArrowSpeedScale;
+      const vx = Math.cos(localAngle) * arrowSpeed * forwardSign;
+      const vy = -Math.sin(localAngle) * arrowSpeed;
       if (isMainArrow) side.arrowsFired = (side.arrowsFired || 0) + 1;
       const sideArrowMul = count > 1 && !isMainArrow ? 0.25 : 1;
       this.arrows.push({
@@ -2891,7 +2899,7 @@ class GameRoom {
         powerType,
         flameSplash,
         flameBurn,
-        gravity,
+        gravity: gravity * sideArrowSpeedScale * sideArrowSpeedScale,
         mainArrow: isMainArrow,
         comboTier: comboMul,
       });
