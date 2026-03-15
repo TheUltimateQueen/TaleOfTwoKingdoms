@@ -69,6 +69,7 @@ const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
 const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
+const SHIELD_HEAD_GUARD_TTL = 1.2;
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_SPAWN_QUEUE_ORDER = [
   'dragon',
@@ -369,6 +370,7 @@ class GameRoom {
       shieldBearer: Boolean(m.shieldBearer),
       shieldPushTtl: roundTo(m.shieldPushTtl, 2),
       shieldPushScale: roundTo(m.shieldPushScale, 3),
+      shieldHeadGuardTtl: roundTo(m.shieldHeadGuardTtl, 2),
       hero: Boolean(m.hero),
       monk: Boolean(m.monk),
       monkHealScale: roundTo(m.monkHealScale, 3),
@@ -944,14 +946,16 @@ class GameRoom {
     const dir = minion.side === 'left' ? 1 : -1;
     const baseR = Math.max(18, Number(minion.r) || 20);
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / SHIELD_PUSH_TTL));
+    const guardLife = Math.max(0, Math.min(1, (Number(minion.shieldHeadGuardTtl) || 0) / SHIELD_HEAD_GUARD_TTL));
     const pushScale = 1 + pushLife * (Math.max(1, Number(minion.shieldPushScale) || SHIELD_PUSH_SCALE) - 1);
+    const guardLift = baseR * 0.42 * guardLife;
     return {
       dir,
       x: (Number(minion.x) || 0) + dir * (baseR * 0.82),
-      y: (Number(minion.y) || 0) + baseR * 0.06,
+      y: (Number(minion.y) || 0) + baseR * 0.06 - guardLift,
       rx: (baseR * 0.84 + 10) * pushScale,
       ry: (baseR * 1.18 + 10) * pushScale,
-      topOpenY: (Number(minion.y) || 0) - baseR * 0.9,
+      topOpenY: guardLife > 0 ? ((Number(minion.y) || 0) - baseR * 1.95) : ((Number(minion.y) || 0) - baseR * 0.76),
     };
   }
 
@@ -981,17 +985,18 @@ class GameRoom {
 
     const headX = (Number(minion.x) || 0) - dir * (r * 0.06);
     const headY = (Number(minion.y) || 0) - r * 1.04;
-    const headHitR = r * 0.34 + (Number(arrow.r) || 0) * 0.75;
+    const headHitR = r * 0.38 + (Number(arrow.r) || 0) * 0.78;
     const dxHead = (Number(arrow.x) || 0) - headX;
     const dyHead = (Number(arrow.y) || 0) - headY;
-    if (dxHead * dxHead + dyHead * dyHead <= headHitR * headHitR) return true;
+    if (dxHead * dxHead + dyHead * dyHead <= headHitR * headHitR) return 'head';
 
     const backX = (Number(minion.x) || 0) - dir * (r * 0.56);
     const backY = Number(minion.y) || 0;
     const backHitR = r * 0.42 + (Number(arrow.r) || 0) * 0.7;
     const dxBack = (Number(arrow.x) || 0) - backX;
     const dyBack = (Number(arrow.y) || 0) - backY;
-    return dxBack * dxBack + dyBack * dyBack <= backHitR * backHitR;
+    if (dxBack * dxBack + dyBack * dyBack <= backHitR * backHitR) return 'back';
+    return null;
   }
 
   triggerShieldPush(minion, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
@@ -1748,6 +1753,7 @@ class GameRoom {
         for (let b = bucket.length - 1; b >= 0 && !consumed; b -= 1) {
           const minion = bucket[b];
           if (!minion || minion.removed || minion.side === a.side) continue;
+          let shieldVulnerableHit = null;
           if (minion.shieldBearer) {
             if (this.arrowInsideShieldBearerShield(a, minion)) {
               this.markArrowMiss(a);
@@ -1756,7 +1762,8 @@ class GameRoom {
               consumed = true;
               continue;
             }
-            if (!this.arrowHitsShieldBearerVulnerableZone(a, minion)) continue;
+            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion);
+            if (!shieldVulnerableHit) continue;
           } else {
             const hitR = minion.r + a.r;
             if (dist2(a, minion) > hitR * hitR) continue;
@@ -1803,6 +1810,9 @@ class GameRoom {
           }
 
           this.dealDamageToMinion(minion, damage);
+          if (shieldVulnerableHit === 'head') {
+            minion.shieldHeadGuardTtl = SHIELD_HEAD_GUARD_TTL;
+          }
           this.applyFlameArrowImpact(a, minion, damage, minionBuckets);
           this.applyMaxComboSplash(a, minion, damage, minionBuckets);
           if (minion.hp <= 0) {
@@ -2047,6 +2057,8 @@ class GameRoom {
         if (!Number.isFinite(m.shieldPushTtl)) m.shieldPushTtl = 0;
         m.shieldPushTtl = Math.max(0, m.shieldPushTtl - dt);
         if (!Number.isFinite(m.shieldPushScale) || m.shieldPushScale < 1) m.shieldPushScale = SHIELD_PUSH_SCALE;
+        if (!Number.isFinite(m.shieldHeadGuardTtl)) m.shieldHeadGuardTtl = 0;
+        m.shieldHeadGuardTtl = Math.max(0, m.shieldHeadGuardTtl - dt);
       }
       if (m.president) {
         this.tickPresident(m, dt);
@@ -2956,6 +2968,7 @@ class GameRoom {
         shieldPushCd: 0,
         shieldPushTtl: 0,
         shieldPushScale: 1,
+        shieldHeadGuardTtl: 0,
         digPhase: null,
         digBaseY: null,
         monk: false,
@@ -3251,7 +3264,7 @@ class GameRoom {
       hp *= 10;
       dmg = 0;
       speed *= 0.72;
-      radius = Math.max(30, radius * 2);
+      radius = Math.max(26, radius * 1.7);
       tier = Math.min(3, tier + 1);
       visualPower += 10;
       spawnY = TOWER_Y + (Math.random() * 58 - 29);
@@ -3323,6 +3336,7 @@ class GameRoom {
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      shieldHeadGuardTtl: 0,
       digPhase: isDigger ? Math.random() * Math.PI * 2 : null,
       digBaseY: isDigger ? spawnY : null,
       monk: isMonk,
