@@ -188,6 +188,8 @@ const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const MINION_HIT_FLASH_TTL = 0.18;
+const STONE_GOLEM_SMASH_TTL = 0.45;
+const STONE_GOLEM_SHIELD_TTL = 5;
 
 export class GameRenderer {
   constructor(canvas) {
@@ -535,6 +537,11 @@ export class GameRenderer {
       shieldBearer: Boolean(ghost.shieldBearer),
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      stoneGolem: Boolean(ghost.stoneGolem),
+      golemSmashTtl: 0,
+      golemShieldHp: 0,
+      golemShieldMax: 0,
+      golemShieldTtl: 0,
       president: Boolean(ghost.president),
       presidentSetup: Boolean(ghost.president),
       presidentAuraRadius: 180,
@@ -1166,6 +1173,7 @@ export class GameRenderer {
         sideCounts.president += 1;
         continue;
       }
+      if (m.stoneGolem) continue;
       sideCounts.militia += 1;
     }
 
@@ -1235,6 +1243,7 @@ export class GameRenderer {
           activeCountByType.president += 1;
           continue;
         }
+        if (m.stoneGolem) continue;
         activeCountByType.militia += 1;
       }
       if (Array.isArray(candles)) {
@@ -2391,11 +2400,15 @@ export class GameRenderer {
     const r = Math.max(10, Number(minion?.r) || 14);
     const rxMul = minion.dragon
       ? 2.3
-      : (minion.rider ? 1.86 : (minion.shieldBearer ? 1.6 : (minion.hero ? 1.46 : 1.28)));
+      : (minion.stoneGolem
+          ? 2.05
+          : (minion.rider ? 1.86 : (minion.shieldBearer ? 1.6 : (minion.hero ? 1.46 : 1.28))));
     const ryMul = minion.dragon
       ? 1.55
-      : (minion.shieldBearer ? 1.92 : (minion.hero ? 1.72 : (minion.rider ? 1.38 : 1.34)));
-    const centerY = y - (minion.shieldBearer ? r * 0.34 : (minion.hero ? r * 0.18 : (minion.dragon ? r * 0.2 : 0)));
+      : (minion.stoneGolem
+          ? 1.84
+          : (minion.shieldBearer ? 1.92 : (minion.hero ? 1.72 : (minion.rider ? 1.38 : 1.34))));
+    const centerY = y - (minion.shieldBearer ? r * 0.34 : (minion.hero ? r * 0.18 : (minion.dragon ? r * 0.2 : (minion.stoneGolem ? r * 0.12 : 0))));
     const rx = r * rxMul;
     const ry = r * ryMul;
 
@@ -3109,6 +3122,159 @@ export class GameRenderer {
     }
   }
 
+  drawStoneGolemSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
+    const { ctx } = this;
+    const x = minion.x;
+    const y = minion.y;
+    const dir = minion.side === 'left' ? 1 : -1;
+    const baseR = Math.max(22, Number(minion.r) || 30);
+    const bodyW = baseR * 1.9;
+    const bodyH = baseR * 1.8;
+    const smashLife = Math.max(0, Math.min(1, (Number(minion.golemSmashTtl) || 0) / STONE_GOLEM_SMASH_TTL));
+    const smashProgress = 1 - smashLife;
+    const shieldMax = Math.max(0, Number(minion.golemShieldMax) || 0);
+    const shieldHp = Math.max(0, Number(minion.golemShieldHp) || 0);
+    const shieldTtl = Math.max(0, Number(minion.golemShieldTtl) || 0);
+    const shieldHpPct = shieldMax > 0 ? Math.max(0, Math.min(1, shieldHp / shieldMax)) : 0;
+    const shieldFade = Math.max(0, Math.min(1, shieldTtl / STONE_GOLEM_SHIELD_TTL));
+    const sidePalette = TEAM_COLORS[minion.side] || TEAM_COLORS.left;
+    let jumpLift = 0;
+    if (smashLife > 0) {
+      if (smashProgress < 0.45) {
+        jumpLift = Math.sin((smashProgress / 0.45) * (Math.PI * 0.5)) * (baseR * 0.34);
+      } else {
+        const fallT = Math.max(0, Math.min(1, (smashProgress - 0.45) / 0.55));
+        jumpLift = (1 - fallT) * (baseR * 0.34);
+      }
+    }
+    const impactLife = smashLife > 0 ? Math.max(0, 1 - Math.abs(smashProgress - 0.74) / 0.24) : 0;
+    const drawY = y - jumpLift;
+    const shadowStretch = 1 + Math.max(0, jumpLift / (baseR * 0.72));
+
+    ctx.fillStyle = '#00000033';
+    ctx.beginPath();
+    ctx.ellipse(x, y + bodyH * 0.66, bodyW * 0.84 * shadowStretch, bodyH * 0.24, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (shieldHpPct > 0 && shieldFade > 0) {
+      const auraAlpha = (0.14 + shieldHpPct * 0.2) * (0.45 + shieldFade * 0.55);
+      ctx.fillStyle = this.withAlpha(sidePalette.soft, auraAlpha * 0.55);
+      ctx.beginPath();
+      ctx.ellipse(x, drawY - bodyH * 0.08, bodyW * 0.72, bodyH * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = this.withAlpha('#dcf5ff', auraAlpha + 0.14);
+      ctx.lineWidth = 1.6 + shieldHpPct * 1.6;
+      ctx.beginPath();
+      ctx.ellipse(x, drawY - bodyH * 0.1, bodyW * (0.78 + shieldHpPct * 0.1), bodyH * (0.76 + shieldHpPct * 0.1), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    if (smashLife > 0) {
+      ctx.strokeStyle = this.withAlpha(sidePalette.primary, 0.22 + smashLife * 0.3);
+      ctx.lineWidth = 3 + smashLife * 3;
+      ctx.beginPath();
+      ctx.ellipse(x, y + bodyH * 0.54, bodyW * (0.58 + smashLife * 0.58), bodyH * (0.19 + smashLife * 0.22), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = this.withAlpha('#e7f5ff', 0.18 + smashLife * 0.22);
+      ctx.lineWidth = 1.6 + smashLife * 1.2;
+      ctx.beginPath();
+      ctx.ellipse(x, y + bodyH * 0.56, bodyW * (0.45 + smashLife * 0.44), bodyH * (0.14 + smashLife * 0.15), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (impactLife > 0) {
+        ctx.strokeStyle = this.withAlpha('#f0fbff', 0.2 + impactLife * 0.32);
+        ctx.lineWidth = 2 + impactLife * 2;
+        ctx.beginPath();
+        ctx.ellipse(x, y + bodyH * 0.58, bodyW * (0.52 + impactLife * 0.38), bodyH * (0.12 + impactLife * 0.15), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.save();
+    ctx.translate(x, drawY);
+    if (impactLife > 0) {
+      const sx = 1 + impactLife * 0.06;
+      const sy = 1 - impactLife * 0.08;
+      ctx.scale(sx, sy);
+    }
+
+    ctx.fillStyle = '#6f756f';
+    ctx.beginPath();
+    ctx.moveTo(-bodyW * 0.52, -bodyH * 0.54);
+    ctx.lineTo(-bodyW * 0.64, bodyH * 0.28);
+    ctx.lineTo(-bodyW * 0.36, bodyH * 0.62);
+    ctx.lineTo(bodyW * 0.36, bodyH * 0.62);
+    ctx.lineTo(bodyW * 0.64, bodyH * 0.28);
+    ctx.lineTo(bodyW * 0.52, -bodyH * 0.54);
+    ctx.lineTo(bodyW * 0.12, -bodyH * 0.72);
+    ctx.lineTo(-bodyW * 0.12, -bodyH * 0.72);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#9aa49a';
+    ctx.lineWidth = 2.1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#5d625d';
+    ctx.fillRect(-bodyW * 0.82, -bodyH * 0.26, bodyW * 0.28, bodyH * 0.7);
+    ctx.fillRect(bodyW * 0.54, -bodyH * 0.26, bodyW * 0.28, bodyH * 0.7);
+    ctx.fillStyle = '#7b827b';
+    ctx.fillRect(-bodyW * 0.78, bodyH * 0.32, bodyW * 0.2, bodyH * 0.24);
+    ctx.fillRect(bodyW * 0.58, bodyH * 0.32, bodyW * 0.2, bodyH * 0.24);
+
+    ctx.fillStyle = '#4e524e';
+    ctx.fillRect(-bodyW * 0.36, bodyH * 0.56, bodyW * 0.26, bodyH * 0.28);
+    ctx.fillRect(bodyW * 0.1, bodyH * 0.56, bodyW * 0.26, bodyH * 0.28);
+
+    ctx.fillStyle = '#23282a';
+    const eyeY = -bodyH * 0.3;
+    ctx.fillRect(-bodyW * 0.18, eyeY, bodyW * 0.14, bodyH * 0.08);
+    ctx.fillRect(bodyW * 0.04, eyeY, bodyW * 0.14, bodyH * 0.08);
+    ctx.fillStyle = sidePalette.soft;
+    ctx.fillRect(-bodyW * 0.16, eyeY + bodyH * 0.014, bodyW * 0.1, bodyH * 0.035);
+    ctx.fillRect(bodyW * 0.06, eyeY + bodyH * 0.014, bodyW * 0.1, bodyH * 0.035);
+
+    ctx.strokeStyle = '#aeb7ae';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-bodyW * 0.24, -bodyH * 0.06);
+    ctx.lineTo(-bodyW * 0.08, bodyH * 0.1);
+    ctx.lineTo(bodyW * 0.04, -bodyH * 0.02);
+    ctx.moveTo(bodyW * 0.26, -bodyH * 0.18);
+    ctx.lineTo(bodyW * 0.1, bodyH * 0.02);
+    ctx.stroke();
+
+    if (smashLife > 0) {
+      ctx.strokeStyle = this.withAlpha('#e4f4ff', 0.22 + smashLife * 0.34);
+      ctx.lineWidth = 1.8 + smashLife * 1.8;
+      ctx.beginPath();
+      ctx.moveTo(-bodyW * 0.8 * dir, bodyH * 0.36);
+      ctx.lineTo(-bodyW * 0.96 * dir, bodyH * 0.58);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    if (showHud) {
+      ctx.fillStyle = '#e3eadf';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('GOLEM', x, drawY - bodyH - 20);
+      if (shieldMax > 0 && (shieldHpPct > 0 || shieldFade > 0)) {
+        const barScale = Math.max(1.7, (baseR / 16) * 1.4);
+        const shieldW = 36 * barScale;
+        const shieldX = x - shieldW / 2;
+        const shieldY = (drawY + 8) - (26 * barScale + 2) - 8;
+        ctx.fillStyle = '#101420d9';
+        ctx.fillRect(shieldX, shieldY, shieldW, 4);
+        if (shieldHpPct > 0) {
+          ctx.fillStyle = this.withAlpha('#8de6ff', 0.55 + shieldFade * 0.35);
+          ctx.fillRect(shieldX, shieldY, shieldW * shieldHpPct, 4);
+        }
+      }
+      this.drawMinionHpBar(minion, x, drawY + 8, Math.max(1.7, (baseR / 16) * 1.4));
+    }
+  }
+
   miniFailedSpecialMinion(type, side = 'left') {
     const base = {
       side,
@@ -3134,6 +3300,11 @@ export class GameRenderer {
       shieldBearer: false,
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      stoneGolem: false,
+      golemSmashTtl: 0,
+      golemShieldHp: 0,
+      golemShieldMax: 0,
+      golemShieldTtl: 0,
       president: false,
       presidentSetup: true,
       presidentAuraRadius: 180,
@@ -3279,6 +3450,10 @@ export class GameRenderer {
     }
     if (minion.shieldBearer) {
       this.drawShieldBearerSprite(minion, options);
+      return;
+    }
+    if (minion.stoneGolem) {
+      this.drawStoneGolemSprite(minion, options);
       return;
     }
     if (minion.president) {

@@ -71,6 +71,16 @@ const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
 const SHIELD_HEADSHOT_DAMAGE_MULT = 3;
 const SHIELD_HEADSHOT_RETREAT = 20;
+const STONE_GOLEM_HALF_HP_THRESHOLD = 0.5;
+const STONE_GOLEM_HP_MULT = 15;
+const STONE_GOLEM_DAMAGE_MULT = 0.8;
+const STONE_GOLEM_SPEED_MULT = 0.58;
+const STONE_GOLEM_SMASH_INTERVAL = 3;
+const STONE_GOLEM_SMASH_RADIUS = 108;
+const STONE_GOLEM_SMASH_TOWER_RADIUS = 92;
+const STONE_GOLEM_SMASH_KNOCKBACK = 24;
+const STONE_GOLEM_SMASH_TTL = 0.45;
+const STONE_GOLEM_SHIELD_TTL = 5;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
@@ -239,6 +249,7 @@ function serializeSideState(side) {
     specialRollByType,
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
+    towerGolemRescueUsed: Boolean(state.towerGolemRescueUsed),
   };
 }
 
@@ -307,6 +318,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     specialRollByType: {},
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
+    towerGolemRescueUsed: false,
   };
 }
 
@@ -404,6 +416,11 @@ class GameRoom {
       shieldBearer: Boolean(m.shieldBearer),
       shieldPushTtl: roundTo(m.shieldPushTtl, 2),
       shieldPushScale: roundTo(m.shieldPushScale, 3),
+      stoneGolem: Boolean(m.stoneGolem),
+      golemSmashTtl: roundTo(m.golemSmashTtl, 2),
+      golemShieldHp: roundTo(m.golemShieldHp, 1),
+      golemShieldMax: roundTo(m.golemShieldMax, 1),
+      golemShieldTtl: roundTo(m.golemShieldTtl, 2),
       hitFlashTtl: roundTo(m.hitFlashTtl, 3),
       hero: Boolean(m.hero),
       monk: Boolean(m.monk),
@@ -1171,7 +1188,7 @@ class GameRoom {
     if (minion.summoned || minion.super) return false;
     if (minion.dragon || minion.flying) return false;
     if (minion.explosive || minion.necrominion) return false;
-    if (minion.gunner || minion.rider || minion.digger || minion.shieldBearer) return false;
+    if (minion.gunner || minion.rider || minion.digger || minion.shieldBearer || minion.stoneGolem) return false;
     if (minion.monk || minion.hero || minion.president) return false;
     return true;
   }
@@ -2176,6 +2193,19 @@ class GameRoom {
         m.shieldPushTtl = Math.max(0, m.shieldPushTtl - dt);
         if (!Number.isFinite(m.shieldPushScale) || m.shieldPushScale < 1) m.shieldPushScale = SHIELD_PUSH_SCALE;
       }
+      if (m.stoneGolem) {
+        if (!Number.isFinite(m.golemSmashTtl)) m.golemSmashTtl = 0;
+        m.golemSmashTtl = Math.max(0, m.golemSmashTtl - dt);
+        if (!Number.isFinite(m.golemShieldHp)) m.golemShieldHp = 0;
+        if (!Number.isFinite(m.golemShieldMax)) m.golemShieldMax = Math.max(0, m.golemShieldHp);
+        if (!Number.isFinite(m.golemShieldTtl)) m.golemShieldTtl = 0;
+        if (m.golemShieldTtl > 0) {
+          m.golemShieldTtl = Math.max(0, m.golemShieldTtl - dt);
+          if (m.golemShieldTtl <= 0) m.golemShieldHp = 0;
+        } else {
+          m.golemShieldHp = 0;
+        }
+      }
       if (m.president) {
         this.tickPresident(m, dt);
         continue;
@@ -2208,7 +2238,7 @@ class GameRoom {
         const cdx = enemyCandle.x - m.x;
         const cdy = enemyCandle.y - m.y;
         candleDistSq = cdx * cdx + cdy * cdy;
-        const candleReach = m.shieldBearer
+        const candleReach = (m.shieldBearer || m.stoneGolem)
           ? 0
           : (m.dragon
               ? 176
@@ -2252,13 +2282,15 @@ class GameRoom {
 
       let target = null;
       let bestSq = Infinity;
-      const maxReach = m.shieldBearer
-        ? (SHIELD_PUSH_RANGE + m.r * 0.4)
-        : (m.dragon
-            ? 170
-            : (m.gunner
-                ? (m.gunRange || 220)
-                : m.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0) + MINION_TARGET_RADIUS_PAD));
+      const maxReach = m.stoneGolem
+        ? STONE_GOLEM_SMASH_RADIUS
+        : (m.shieldBearer
+          ? (SHIELD_PUSH_RANGE + m.r * 0.4)
+          : (m.dragon
+              ? 170
+              : (m.gunner
+                  ? (m.gunRange || 220)
+                  : m.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0) + MINION_TARGET_RADIUS_PAD)));
       const scan = Math.max(1, Math.ceil(maxReach / MINION_TARGET_BUCKET_W));
       const centerCell = Math.floor((Number.isFinite(m.x) ? m.x : 0) / MINION_TARGET_BUCKET_W);
       const enemyBuckets = targetBuckets[enemySideName];
@@ -2270,13 +2302,15 @@ class GameRoom {
           const dx = other.x - m.x;
           const dy = other.y - m.y;
           const d2 = dx * dx + dy * dy;
-          const reach = m.shieldBearer
+          const reach = m.stoneGolem
+            ? STONE_GOLEM_SMASH_RADIUS
+            : (m.shieldBearer
             ? Math.max(58, m.r + other.r + 22)
             : (m.dragon
                 ? 170
                 : (m.gunner
                     ? (m.gunRange || 220)
-                    : m.r + other.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0)));
+                    : m.r + other.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0))));
           if (d2 < bestSq && d2 < reach * reach) {
             target = other;
             bestSq = d2;
@@ -2314,7 +2348,15 @@ class GameRoom {
           this.hitCandleWithMinion(enemyCandle, m);
         }
       } else if (target) {
-        if (m.shieldBearer) {
+        if (m.stoneGolem) {
+          const holdDist = Math.max(74, m.r + target.r + 18);
+          if (Math.abs(target.x - m.x) > holdDist) {
+            m.x += dir * m.speed * dt;
+          } else if (m.atkCd === 0) {
+            this.stoneGolemSmash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
+            m.atkCd = STONE_GOLEM_SMASH_INTERVAL;
+          }
+        } else if (m.shieldBearer) {
           if (m.shieldPushCd === 0) this.triggerShieldPush(m, targetBuckets, MINION_TARGET_BUCKET_W);
           const holdDist = Math.max(58, m.r + target.r + 18);
           if (Math.abs(target.x - m.x) > holdDist) {
@@ -2343,8 +2385,13 @@ class GameRoom {
             m.atkCd = 0.8;
           }
         }
-      } else if (Math.abs(m.x - enemyX) < m.r + 20 + (m.flying ? 34 : 0) + (m.dragon ? 50 : 0) + (m.gunner ? Math.max(0, (m.gunRange || 0) - 40) : 0) + (m.rider ? 14 : 0) + (m.digger ? 8 : 0) + (m.hero ? 24 : 0) + (m.shieldBearer ? 26 : 0)) {
-        if (m.shieldBearer) {
+      } else if (Math.abs(m.x - enemyX) < m.r + 20 + (m.flying ? 34 : 0) + (m.dragon ? 50 : 0) + (m.gunner ? Math.max(0, (m.gunRange || 0) - 40) : 0) + (m.rider ? 14 : 0) + (m.digger ? 8 : 0) + (m.hero ? 24 : 0) + (m.shieldBearer ? 26 : 0) + (m.stoneGolem ? 58 : 0)) {
+        if (m.stoneGolem) {
+          if (m.atkCd === 0) {
+            this.stoneGolemSmash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
+            m.atkCd = STONE_GOLEM_SMASH_INTERVAL;
+          }
+        } else if (m.shieldBearer) {
           if (m.shieldPushCd === 0) this.triggerShieldPush(m, targetBuckets, MINION_TARGET_BUCKET_W);
           m.atkCd = Math.max(m.atkCd, 0.35);
         } else if (m.atkCd === 0) {
@@ -2510,7 +2557,18 @@ class GameRoom {
     if (!minion) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
     if (dmg <= 0) return 0;
-    minion.hp -= dmg;
+    let remaining = dmg;
+    if (minion.stoneGolem) {
+      if (!Number.isFinite(minion.golemShieldHp)) minion.golemShieldHp = 0;
+      if (!Number.isFinite(minion.golemShieldMax)) minion.golemShieldMax = Math.max(0, minion.golemShieldHp);
+      if (!Number.isFinite(minion.golemShieldTtl)) minion.golemShieldTtl = 0;
+      if (minion.golemShieldTtl > 0 && minion.golemShieldHp > 0) {
+        const absorbed = Math.min(remaining, minion.golemShieldHp);
+        minion.golemShieldHp -= absorbed;
+        remaining -= absorbed;
+      }
+    }
+    if (remaining > 0) minion.hp -= remaining;
     this.queueDamageNumber(dmg, minion.x, minion.y - Math.max(8, minion.r * 0.25));
     return dmg;
   }
@@ -2596,6 +2654,13 @@ class GameRoom {
     this.queueDamageNumber(dmg, tx, ty);
     if (hitFx === 'unit') this.queueHitSfx('towerhit', tx, ty, sideName);
     if (firstDamage) this.triggerTowerHeroRescue(sideName, tx, ty);
+    if (
+      !side.towerGolemRescueUsed
+      && side.towerHp > 0
+      && side.towerHp <= TOWER_MAX_HP * STONE_GOLEM_HALF_HP_THRESHOLD
+    ) {
+      this.triggerTowerStoneGolem(sideName, tx, ty);
+    }
     return dmg;
   }
 
@@ -2822,6 +2887,49 @@ class GameRoom {
     this.applyMinionTowerDamage(rider, enemySideName, damage, x, y);
   }
 
+  stoneGolemSmash(golem, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!golem || !golem.stoneGolem) return;
+    const sideName = golem.side === 'right' ? 'right' : 'left';
+    const awayFromAllyTowerDir = sideName === 'left' ? 1 : -1;
+    const smashR = Math.max(STONE_GOLEM_SMASH_RADIUS, (Number(golem.r) || 28) * 2.35);
+    const baseDamage = this.minionOutgoingDamage(golem, (Number(golem.dmg) || 0) * STONE_GOLEM_DAMAGE_MULT);
+    const victims = [];
+    let hitAny = false;
+
+    this.forEachEnemyMinionInRadius(
+      sideName,
+      golem.x,
+      golem.y,
+      smashR,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.id === golem.id) return;
+        victims.push(other);
+      }
+    );
+
+    for (const other of victims) {
+      if (!other || other.removed || other.side === sideName || other.id === golem.id) continue;
+      hitAny = true;
+      this.dealMinionDamage(golem, other, baseDamage, 'melee');
+      const knock = STONE_GOLEM_SMASH_KNOCKBACK * (other.dragon ? 0.34 : other.super ? 0.62 : 1);
+      other.x = clamp(other.x + awayFromAllyTowerDir * knock, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+      if (other.flying && Number.isFinite(other.flyBaseY)) {
+        other.flyBaseY += (other.y - other.flyBaseY) * 0.08;
+      }
+      if (other.hp <= 0) this.killMinionByRef(other, sideName, { goldScalar: 0.9 });
+    }
+
+    if (Math.abs(golem.x - enemyX) <= STONE_GOLEM_SMASH_TOWER_RADIUS) {
+      hitAny = true;
+      this.applyMinionTowerDamage(golem, enemySideName, baseDamage * 0.72, enemyX, TOWER_Y - 18);
+    }
+
+    golem.golemSmashTtl = STONE_GOLEM_SMASH_TTL;
+    this.queueHitSfx(hitAny ? 'explosion' : 'powerup', golem.x, golem.y + 4, sideName);
+  }
+
   heroSlash(hero, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!hero || !hero.hero) return;
     const slashR = Math.max(70, Number(hero.heroSlashRadius) || 88);
@@ -2997,6 +3105,28 @@ class GameRoom {
     this.queueLine('I will save the day.', hx, hy - (hero?.r || 16) - 24, sideName);
   }
 
+  triggerTowerStoneGolem(sideName, x, y) {
+    const side = this[sideName];
+    if (!side || side.towerGolemRescueUsed) return;
+    side.towerGolemRescueUsed = true;
+
+    const golem = this.spawnMinion(sideName, { forceType: 'stonegolem', countSpawn: false });
+    const gx = golem?.x ?? (sideName === 'left' ? TOWER_X_LEFT + 64 : TOWER_X_RIGHT - 64);
+    const gy = golem?.y ?? (TOWER_Y + 12);
+    this.queueHitSfx('explosion', gx, gy, sideName);
+    this.queueLine('Stone golem awakened!', gx, gy - (golem?.r || 24) - 24, sideName);
+
+    // Spawn with an immediate smash as requested.
+    if (golem) {
+      const enemySide = sideName === 'left' ? 'right' : 'left';
+      const enemyTowerX = sideName === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+      this.stoneGolemSmash(golem, enemySide, enemyTowerX);
+      golem.atkCd = STONE_GOLEM_SMASH_INTERVAL;
+    }
+
+    this.queueHitSfx('powerup', x, y, sideName);
+  }
+
   awardMinionKillGold(killerSide, scalar = 1) {
     if (killerSide === 'left') this.left.gold += this.goldFromMinionKill(this.left, scalar);
     else if (killerSide === 'right') this.right.gold += this.goldFromMinionKill(this.right, scalar);
@@ -3020,6 +3150,7 @@ class GameRoom {
       riderChargeReady: Boolean(minion.riderChargeReady),
       digger: Boolean(minion.digger),
       shieldBearer: Boolean(minion.shieldBearer),
+      stoneGolem: Boolean(minion.stoneGolem),
       monk: Boolean(minion.monk),
       hero: Boolean(minion.hero),
       president: Boolean(minion.president),
@@ -3036,6 +3167,10 @@ class GameRoom {
       gunFlashTtl: 0,
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      golemSmashTtl: 0,
+      golemShieldHp: 0,
+      golemShieldMax: 0,
+      golemShieldTtl: 0,
       hitFlashTtl: 0,
       monkHealScale: Number.isFinite(minion.monkHealScale) ? minion.monkHealScale : 1,
     };
@@ -3153,6 +3288,11 @@ class GameRoom {
         shieldPushCd: 0,
         shieldPushTtl: 0,
         shieldPushScale: 1,
+        stoneGolem: false,
+        golemSmashTtl: 0,
+        golemShieldHp: 0,
+        golemShieldMax: 0,
+        golemShieldTtl: 0,
         hitFlashTtl: 0,
         digPhase: null,
         digBaseY: null,
@@ -3394,6 +3534,7 @@ class GameRoom {
     const isGunner = spawnType === 'gunner';
     const isRider = spawnType === 'rider';
     const isMonk = spawnType === 'monk';
+    const isStoneGolem = spawnType === 'stonegolem';
     const isHero = spawnType === 'hero';
     const isPresident = spawnType === 'president';
     const isSuper = spawnType === 'super';
@@ -3471,6 +3612,16 @@ class GameRoom {
       spawnY = TOWER_Y + (Math.random() * 58 - 29);
     }
 
+    if (isStoneGolem) {
+      hp *= STONE_GOLEM_HP_MULT;
+      dmg *= STONE_GOLEM_DAMAGE_MULT;
+      speed *= STONE_GOLEM_SPEED_MULT;
+      radius = Math.max(30, radius * 2.05);
+      tier = Math.min(3, tier + 1);
+      visualPower += 14;
+      spawnY = TOWER_Y + 20 + (Math.random() * 30 - 15);
+    }
+
     if (isHero) {
       hp *= 1.12 * HERO_HP_MULT * HERO_HP_BOOST_MULT;
       dmg *= 0.9;
@@ -3537,6 +3688,11 @@ class GameRoom {
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      stoneGolem: isStoneGolem,
+      golemSmashTtl: 0,
+      golemShieldHp: isStoneGolem ? hp : 0,
+      golemShieldMax: isStoneGolem ? hp : 0,
+      golemShieldTtl: isStoneGolem ? STONE_GOLEM_SHIELD_TTL : 0,
       hitFlashTtl: 0,
       digPhase: isDigger ? Math.random() * Math.PI * 2 : null,
       digBaseY: isDigger ? spawnY : null,
