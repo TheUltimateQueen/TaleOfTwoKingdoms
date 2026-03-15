@@ -69,6 +69,7 @@ const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
 const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
+const MINION_HIT_FLASH_TTL = 0.18;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
@@ -401,6 +402,7 @@ class GameRoom {
       shieldBearer: Boolean(m.shieldBearer),
       shieldPushTtl: roundTo(m.shieldPushTtl, 2),
       shieldPushScale: roundTo(m.shieldPushScale, 3),
+      hitFlashTtl: roundTo(m.hitFlashTtl, 3),
       hero: Boolean(m.hero),
       monk: Boolean(m.monk),
       monkHealScale: roundTo(m.monkHealScale, 3),
@@ -507,8 +509,10 @@ class GameRoom {
     };
   }
 
-  queueHitSfx(type, x, y, side) {
-    this.sfxEvents.push({ type, x, y, side });
+  queueHitSfx(type, x, y, side, extra = null) {
+    const event = { type, x, y, side };
+    if (extra && typeof extra === 'object') Object.assign(event, extra);
+    this.sfxEvents.push(event);
   }
 
   queueDamageNumber(amount, x, y) {
@@ -1915,6 +1919,7 @@ class GameRoom {
           }
 
           this.dealDamageToMinion(minion, damage);
+          minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
           this.applyFlameArrowImpact(a, minion, damage, minionBuckets);
           this.applyMaxComboSplash(a, minion, damage, minionBuckets);
           if (minion.hp <= 0) {
@@ -2139,6 +2144,8 @@ class GameRoom {
       if (!m) continue;
       if (!Number.isFinite(m.candleBurnTtl)) m.candleBurnTtl = 0;
       if (!Number.isFinite(m.candleBurnTick)) m.candleBurnTick = 0;
+      if (!Number.isFinite(m.hitFlashTtl)) m.hitFlashTtl = 0;
+      m.hitFlashTtl = Math.max(0, m.hitFlashTtl - dt);
       if (typeof m.candleCarrier !== 'boolean') m.candleCarrier = false;
       if (m.candleCarrierSide !== 'left' && m.candleCarrierSide !== 'right') m.candleCarrierSide = null;
       if (!m.candleCarrier) m.candleCarrierSide = null;
@@ -2451,6 +2458,7 @@ class GameRoom {
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
       this.dealDamageToMinion(victim, splash);
+      victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75 });
     }
   }
@@ -2460,6 +2468,7 @@ class GameRoom {
 
     const burnDamage = Math.max(1, baseDamage * (Number(arrow.flameBurn) || 0.18));
     this.dealDamageToMinion(target, burnDamage);
+    target.hitFlashTtl = Math.max(Number(target.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
 
     const splashDamage = Math.max(1, baseDamage * (Number(arrow.flameSplash) || 0.24));
     const splashR = 68;
@@ -2483,6 +2492,7 @@ class GameRoom {
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
       this.dealDamageToMinion(victim, splashDamage);
+      victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8 });
     }
   }
@@ -2983,6 +2993,47 @@ class GameRoom {
     else if (killerSide === 'right') this.right.gold += this.goldFromMinionKill(this.right, scalar);
   }
 
+  queueMinionDeathGhost(minion, killerSide = null) {
+    if (!minion) return;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const ghost = {
+      side: sideName,
+      x: roundTo(minion.x, 1),
+      y: roundTo(minion.y, 1),
+      r: roundTo(Math.max(8, Number(minion.r) || 14), 2),
+      tier: Math.max(0, Math.round(Number(minion.tier) || 0)),
+      level: Math.max(0, Math.round(Number(minion.level) || 0)),
+      super: Boolean(minion.super),
+      summoned: Boolean(minion.summoned),
+      explosive: Boolean(minion.explosive),
+      gunner: Boolean(minion.gunner),
+      rider: Boolean(minion.rider),
+      riderChargeReady: Boolean(minion.riderChargeReady),
+      digger: Boolean(minion.digger),
+      shieldBearer: Boolean(minion.shieldBearer),
+      monk: Boolean(minion.monk),
+      hero: Boolean(minion.hero),
+      president: Boolean(minion.president),
+      dragon: Boolean(minion.dragon),
+      flying: Boolean(minion.flying),
+      necrominion: Boolean(minion.necrominion),
+      failedSpecialType: typeof minion.failedSpecialType === 'string' ? minion.failedSpecialType : null,
+      digPhase: Number.isFinite(minion.digPhase) ? minion.digPhase : (Math.random() * Math.PI * 2),
+      flyPhase: Number.isFinite(minion.flyPhase) ? minion.flyPhase : (Math.random() * Math.PI * 2),
+      heroSwing: Number.isFinite(minion.heroSwing) ? minion.heroSwing : (Math.random() * Math.PI * 2),
+      dragonBreathTtl: 0,
+      dragonBreathToX: null,
+      dragonBreathToY: null,
+      gunFlashTtl: 0,
+      shieldPushTtl: 0,
+      shieldPushScale: 1,
+      hitFlashTtl: 0,
+      monkHealScale: Number.isFinite(minion.monkHealScale) ? minion.monkHealScale : 1,
+    };
+    const killer = killerSide === 'left' || killerSide === 'right' ? killerSide : null;
+    this.queueHitSfx('ghostfall', ghost.x, ghost.y, sideName, { killerSide: killer, ghost });
+  }
+
   killMinion(index, killerSide = null, options = {}) {
     const minion = this.minions[index];
     if (!minion) return;
@@ -2995,6 +3046,7 @@ class GameRoom {
 
     this.awardMinionKillGold(killerSide, goldScalar);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
+    this.queueMinionDeathGhost(minion, killerSide);
     minion.removed = true;
     this.minions.splice(index, 1);
 
@@ -3092,6 +3144,7 @@ class GameRoom {
         shieldPushCd: 0,
         shieldPushTtl: 0,
         shieldPushScale: 1,
+        hitFlashTtl: 0,
         digPhase: null,
         digBaseY: null,
         monk: false,
@@ -3475,6 +3528,7 @@ class GameRoom {
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      hitFlashTtl: 0,
       digPhase: isDigger ? Math.random() * Math.PI * 2 : null,
       digBaseY: isDigger ? spawnY : null,
       monk: isMonk,

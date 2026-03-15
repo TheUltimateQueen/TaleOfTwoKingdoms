@@ -187,6 +187,7 @@ const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
+const MINION_HIT_FLASH_TTL = 0.18;
 
 export class GameRenderer {
   constructor(canvas) {
@@ -196,6 +197,7 @@ export class GameRenderer {
     this.diggerDustMarks = new Map();
     this.damageTexts = [];
     this.heroLines = [];
+    this.deathGhosts = [];
     this.towerShake = {
       left: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
       right: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
@@ -283,6 +285,9 @@ export class GameRenderer {
       : (snapshot.candleScorch ? [snapshot.candleScorch] : []);
     for (const scorch of candleScorches) this.drawCandleScorch(scorch);
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
+    this.drawMinionHitFlashes(snapshot.minions);
+    this.updateDeathGhosts(dt);
+    this.drawDeathGhosts();
     const candles = Array.isArray(snapshot.candles)
       ? snapshot.candles
       : (snapshot.candle ? [snapshot.candle] : []);
@@ -330,18 +335,27 @@ export class GameRenderer {
     }
   }
 
-  emitHitParticles(type, x, y, side) {
-    const palette = TEAM_COLORS[side] || TEAM_COLORS.left;
+  emitHitParticles(typeOrEvent, x, y, side) {
+    const event = (typeOrEvent && typeof typeOrEvent === 'object') ? typeOrEvent : null;
+    const type = event ? event.type : typeOrEvent;
+    const px = event ? event.x : x;
+    const py = event ? event.y : y;
+    const pside = event ? event.side : side;
+    if (type === 'ghostfall') {
+      this.emitDeathGhost(event);
+      return;
+    }
+    const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;
     if (type === 'towerhit') {
       const half = (this.canvas?.width || 1600) * 0.5;
-      const towerSide = side === 'left' || side === 'right' ? side : (x < half ? 'left' : 'right');
-      this.registerTowerImpact(towerSide, x, y, 1);
+      const towerSide = pside === 'left' || pside === 'right' ? pside : (px < half ? 'left' : 'right');
+      this.registerTowerImpact(towerSide, px, py, 1);
       for (let i = 0; i < 20; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = 90 + Math.random() * 220;
         this.particles.push({
-          x: x + (Math.random() * 8 - 4),
-          y: y + (Math.random() * 6 - 3),
+          x: px + (Math.random() * 8 - 4),
+          y: py + (Math.random() * 6 - 3),
           vx: Math.cos(ang) * mag,
           vy: Math.sin(ang) * mag - 24,
           life: 0.42 + Math.random() * 0.22,
@@ -358,8 +372,8 @@ export class GameRenderer {
         const ang = Math.random() * Math.PI * 2;
         const mag = 80 + Math.random() * 140;
         this.particles.push({
-          x: x + (Math.random() * 6 - 3),
-          y: y + (Math.random() * 4 - 2),
+          x: px + (Math.random() * 6 - 3),
+          y: py + (Math.random() * 4 - 2),
           vx: Math.cos(ang) * mag,
           vy: Math.sin(ang) * mag - 16,
           life: 0.34 + Math.random() * 0.2,
@@ -377,8 +391,8 @@ export class GameRenderer {
         const ang = Math.random() * Math.PI * 2;
         const mag = 120 + Math.random() * 250;
         this.particles.push({
-          x: x + (Math.random() * 4 - 2),
-          y: y + (Math.random() * 3 - 1.5),
+          x: px + (Math.random() * 4 - 2),
+          y: py + (Math.random() * 3 - 1.5),
           vx: Math.cos(ang) * mag,
           vy: Math.sin(ang) * mag - 45,
           life: 0.34 + Math.random() * 0.16,
@@ -393,8 +407,8 @@ export class GameRenderer {
         const ang = -Math.PI / 2 + (Math.random() * 0.85 - 0.425);
         const mag = 200 + Math.random() * 170;
         this.particles.push({
-          x: x + (Math.random() * 8 - 4),
-          y: y + 8 + (Math.random() * 3 - 1.5),
+          x: px + (Math.random() * 8 - 4),
+          y: py + 8 + (Math.random() * 3 - 1.5),
           vx: Math.cos(ang) * mag * 0.46,
           vy: Math.sin(ang) * mag - 35,
           life: 0.42 + Math.random() * 0.16,
@@ -409,8 +423,8 @@ export class GameRenderer {
         const ang = -Math.PI / 2 + (Math.random() * 1.8 - 0.9);
         const mag = 110 + Math.random() * 180;
         this.particles.push({
-          x: x + (Math.random() * 8 - 4),
-          y: y + 10 + (Math.random() * 5 - 2.5),
+          x: px + (Math.random() * 8 - 4),
+          y: py + 10 + (Math.random() * 5 - 2.5),
           vx: Math.cos(ang) * mag,
           vy: Math.sin(ang) * mag - 10,
           life: 0.64 + Math.random() * 0.3,
@@ -481,8 +495,8 @@ export class GameRenderer {
       const ang = Math.random() * Math.PI * 2;
       const mag = speed * (0.45 + Math.random() * 0.65);
       this.particles.push({
-        x,
-        y,
+        x: px,
+        y: py,
         vx: Math.cos(ang) * mag,
         vy: Math.sin(ang) * mag - 40,
         life,
@@ -492,6 +506,74 @@ export class GameRenderer {
         gravity,
       });
     }
+  }
+
+  createGhostMinion(ghost, side, x, y) {
+    if (!ghost || typeof ghost !== 'object') return null;
+    const sideName = ghost.side === 'right' ? 'right' : (side === 'right' ? 'right' : 'left');
+    return {
+      side: sideName,
+      x: Number.isFinite(ghost.x) ? ghost.x : (Number.isFinite(x) ? x : 0),
+      y: Number.isFinite(ghost.y) ? ghost.y : (Number.isFinite(y) ? y : 0),
+      r: Math.max(8, Number(ghost.r) || 14),
+      hp: 100,
+      maxHp: 100,
+      tier: Math.max(0, Number(ghost.tier) || 0),
+      level: Math.max(0, Number(ghost.level) || 1),
+      super: Boolean(ghost.super),
+      summoned: Boolean(ghost.summoned),
+      explosive: Boolean(ghost.explosive),
+      gunner: Boolean(ghost.gunner),
+      rider: Boolean(ghost.rider),
+      riderChargeReady: Boolean(ghost.riderChargeReady),
+      digger: Boolean(ghost.digger),
+      digPhase: Number.isFinite(ghost.digPhase) ? ghost.digPhase : 0.8,
+      monk: Boolean(ghost.monk),
+      monkHealScale: Number.isFinite(ghost.monkHealScale) ? ghost.monkHealScale : 1,
+      hero: Boolean(ghost.hero),
+      heroSwing: Number.isFinite(ghost.heroSwing) ? ghost.heroSwing : 1.1,
+      shieldBearer: Boolean(ghost.shieldBearer),
+      shieldPushTtl: 0,
+      shieldPushScale: 1,
+      president: Boolean(ghost.president),
+      presidentSetup: Boolean(ghost.president),
+      presidentAuraRadius: 180,
+      dragon: Boolean(ghost.dragon),
+      flying: Boolean(ghost.flying),
+      flyPhase: Number.isFinite(ghost.flyPhase) ? ghost.flyPhase : 0.8,
+      dragonBreathTtl: 0,
+      dragonBreathToX: null,
+      dragonBreathToY: null,
+      gunFlashTtl: 0,
+      necrominion: Boolean(ghost.necrominion),
+      failedSpecialType: typeof ghost.failedSpecialType === 'string' ? ghost.failedSpecialType : null,
+      hitFlashTtl: 0,
+    };
+  }
+
+  emitDeathGhost(event) {
+    if (!event || typeof event !== 'object') return;
+    const ghostMinion = this.createGhostMinion(event.ghost, event.side, event.x, event.y);
+    if (!ghostMinion) return;
+    const life = 0.72 + Math.random() * 0.24;
+    const killerSide = event.killerSide === 'left' || event.killerSide === 'right' ? event.killerSide : null;
+    const fallbackTilt = Math.random() < 0.5 ? -1 : 1;
+    const tiltSign = killerSide
+      ? (killerSide === 'left' ? 1 : -1)
+      : fallbackTilt;
+    this.deathGhosts.push({
+      minion: ghostMinion,
+      x: ghostMinion.x,
+      y: ghostMinion.y,
+      vx: Math.random() * 12 - 6,
+      vy: -24 - Math.random() * 20,
+      gravity: 168 + Math.random() * 90,
+      rot: 0,
+      rotV: tiltSign * (1.55 + Math.random() * 1.25),
+      life,
+      maxLife: life,
+    });
+    if (this.deathGhosts.length > 110) this.deathGhosts.splice(0, this.deathGhosts.length - 110);
   }
 
   emitDiggerDirt(minion, x, y, dir, phase, shovelSwing) {
@@ -558,6 +640,25 @@ export class GameRenderer {
       p.y += p.vy * dt;
       p.life -= dt;
       if (p.life <= 0) this.particles.splice(i, 1);
+    }
+  }
+
+  updateDeathGhosts(dt) {
+    for (let i = this.deathGhosts.length - 1; i >= 0; i -= 1) {
+      const g = this.deathGhosts[i];
+      g.vy += g.gravity * dt;
+      g.vx *= 0.985;
+      g.vy *= 0.985;
+      g.rotV *= 0.986;
+      g.x += g.vx * dt;
+      g.y += g.vy * dt;
+      g.rot += g.rotV * dt;
+      g.life -= dt;
+      if (g.minion) {
+        g.minion.x = g.x;
+        g.minion.y = g.y;
+      }
+      if (g.life <= 0) this.deathGhosts.splice(i, 1);
     }
   }
 
@@ -796,6 +897,44 @@ export class GameRenderer {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+
+  drawDeathGhosts() {
+    const { ctx } = this;
+    for (const g of this.deathGhosts) {
+      if (!g?.minion) continue;
+      const life = Math.max(0, g.life / g.maxLife);
+      const fade = life ** 0.8;
+      const sway = Math.sin((1 - life) * Math.PI * 1.2) * 0.07;
+      const sideName = g.minion.side === 'right' ? 'right' : 'left';
+      const tintFill = sideName === 'right' ? '#ff7474' : '#5db5ff';
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.rot + sway);
+      ctx.translate(-g.x, -g.y);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.16 + fade * 0.4;
+      ctx.filter = 'grayscale(1) saturate(0) brightness(2.3)';
+      this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+
+      // Team tint as a sprite-shaped glow, avoiding rectangular overlays.
+      ctx.filter = 'grayscale(1) saturate(0) brightness(2.5)';
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.12 + fade * 0.2;
+      ctx.shadowColor = tintFill;
+      ctx.shadowBlur = 12 + fade * 20;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+      ctx.filter = 'none';
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   sideArcherPulls(sideName, sideState) {
@@ -2219,6 +2358,69 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+  }
+
+  minionHitFlashLife(minion) {
+    if (!minion) return 0;
+    const ttl = Math.max(0, Number(minion.hitFlashTtl) || 0);
+    return Math.max(0, Math.min(1, ttl / MINION_HIT_FLASH_TTL));
+  }
+
+  drawMinionHitFlashes(minions) {
+    if (!Array.isArray(minions) || !minions.length) return;
+    for (const minion of minions) {
+      const life = this.minionHitFlashLife(minion);
+      if (life <= 0) continue;
+      this.drawMinionHitFlash(minion, life);
+    }
+  }
+
+  drawMinionHitFlash(minion, life) {
+    const { ctx } = this;
+    const x = Number(minion?.x) || 0;
+    const y = Number(minion?.y) || 0;
+    const sideName = minion?.side === 'right' ? 'right' : 'left';
+    const sidePalette = TEAM_COLORS[sideName] || TEAM_COLORS.left;
+    const hitCore = sideName === 'right' ? '#ffdede' : '#e6f4ff';
+    const hitMid = sideName === 'right' ? '#ff8f8f' : '#72bcff';
+    const hitStroke = sideName === 'right' ? '#ff6d6d' : '#4da7ff';
+    const r = Math.max(10, Number(minion?.r) || 14);
+    const rxMul = minion.dragon
+      ? 2.3
+      : (minion.rider ? 1.86 : (minion.shieldBearer ? 1.6 : (minion.hero ? 1.46 : 1.28)));
+    const ryMul = minion.dragon
+      ? 1.55
+      : (minion.shieldBearer ? 1.92 : (minion.hero ? 1.72 : (minion.rider ? 1.38 : 1.34)));
+    const centerY = y - (minion.shieldBearer ? r * 0.34 : (minion.hero ? r * 0.18 : (minion.dragon ? r * 0.2 : 0)));
+    const rx = r * rxMul;
+    const ry = r * ryMul;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.25 + life * 0.34;
+    const glow = ctx.createRadialGradient(x, centerY - ry * 0.12, 2, x, centerY, Math.max(rx, ry) * 1.06);
+    glow.addColorStop(0, hitCore);
+    glow.addColorStop(0.56, hitMid);
+    glow.addColorStop(1, this.withAlpha(hitMid, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(x, centerY, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.24 + life * 0.31;
+    ctx.strokeStyle = this.withAlpha(hitStroke, 0.9);
+    ctx.lineWidth = 1.6 + life * 2.2;
+    ctx.beginPath();
+    ctx.ellipse(x, centerY, rx * 0.92, ry * 0.88, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.16 + life * 0.22;
+    ctx.strokeStyle = this.withAlpha(sidePalette.primary, 0.92);
+    ctx.lineWidth = 1.2 + life * 1.45;
+    ctx.beginPath();
+    ctx.ellipse(x, centerY, rx * 1.06, ry * 1.02, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawGunnerSprite(minion, options = {}) {
