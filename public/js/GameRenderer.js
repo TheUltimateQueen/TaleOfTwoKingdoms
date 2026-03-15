@@ -2805,14 +2805,13 @@ export class GameRenderer {
     const bodyH = baseR * 1.78;
     const headR = baseR * 0.36;
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / 0.75));
-    const headGuardLife = Math.max(0, Math.min(1, (Number(minion.shieldHeadGuardTtl) || 0) / 2));
-    const shieldScale = 1 + pushLife * 0.45 + headGuardLife * 0.08;
+    const shieldScale = 1 + pushLife * 0.45;
     const shieldW = (baseR * 1.14 + 10) * shieldScale;
     const shieldH = (baseR * 1.9 + 10) * shieldScale;
     const shieldX = x + dir * (baseR * 0.88);
-    const shieldY = y + baseR * 0.06 - baseR * 0.38 * headGuardLife;
+    const shieldY = y + baseR * 0.06;
     const headX = x - dir * (baseR * 0.06);
-    const headY = y - baseR * 1.3;
+    const headY = y - baseR * 2;
 
     ctx.fillStyle = '#0000002c';
     ctx.beginPath();
@@ -2824,13 +2823,6 @@ export class GameRenderer {
       ctx.lineWidth = 2 + pushLife * 2;
       ctx.beginPath();
       ctx.ellipse(shieldX, shieldY, shieldW * 0.6, shieldH * 0.5, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    if (headGuardLife > 0) {
-      ctx.strokeStyle = this.withAlpha('#dff0ff', 0.3 + headGuardLife * 0.42);
-      ctx.lineWidth = 1.6 + headGuardLife * 1.4;
-      ctx.beginPath();
-      ctx.ellipse(shieldX, shieldY - shieldH * 0.28, shieldW * 0.46, shieldH * 0.18, 0, Math.PI * 0.9, Math.PI * 2.1);
       ctx.stroke();
     }
 
@@ -2936,7 +2928,6 @@ export class GameRenderer {
       shieldBearer: false,
       shieldPushTtl: 0,
       shieldPushScale: 1,
-      shieldHeadGuardTtl: 0,
       president: false,
       presidentSetup: true,
       presidentAuraRadius: 180,
