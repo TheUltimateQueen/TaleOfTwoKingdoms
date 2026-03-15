@@ -55,6 +55,7 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'resourceLevel', code: 'RS', base: 1 },
   { type: 'bountyLevel', code: 'KG', base: 1 },
   { type: 'powerLevel', code: 'PW', base: 1 },
+  { type: 'specialRateLevel', code: 'SR', base: 1 },
   { type: 'dragonLevel', code: 'DR', base: 0 },
   { type: 'superMinionLevel', code: 'SU', base: 0 },
 ];
@@ -69,6 +70,7 @@ const UPGRADE_CATEGORY_BY_TYPE = {
   resourceLevel: 'economy',
   bountyLevel: 'economy',
   powerLevel: 'power',
+  specialRateLevel: 'special',
   dragonLevel: 'special',
   superMinionLevel: 'special',
 };
@@ -134,6 +136,45 @@ const UPGRADE_CATEGORY_STYLE = {
     cost: '#ffe3a5',
     badge: '#d8be86',
   },
+};
+
+const ROW_TO_SPECIAL_TYPE = {
+  necro: 'necrominion',
+  gunner: 'gunner',
+  rider: 'rider',
+  digger: 'digger',
+  monk: 'monk',
+  shield: 'shield',
+  hero: 'hero',
+  president: 'president',
+  dragon: 'dragon',
+  super: 'super',
+};
+
+const SPECIAL_SPAWN_BASE_CHANCE = {
+  necrominion: 0.56,
+  gunner: 0.52,
+  rider: 0.5,
+  digger: 0.5,
+  monk: 0.46,
+  shield: 0.44,
+  hero: 0.34,
+  president: 0.41,
+  dragon: 0.33,
+  super: 0.3,
+};
+
+const FAILED_SPECIAL_HAT_STYLES = {
+  dragon: { code: 'DR', cap: '#5f86b3', brim: '#aec8e7' },
+  shield: { code: 'SH', cap: '#4f6688', brim: '#d4e5fa' },
+  digger: { code: 'DG', cap: '#6f5a43', brim: '#bca07e' },
+  necrominion: { code: 'NC', cap: '#2b5f4f', brim: '#8ef0c9' },
+  gunner: { code: 'GN', cap: '#655447', brim: '#ffd6a1' },
+  rider: { code: 'RD', cap: '#7f5f44', brim: '#e8d0b0' },
+  monk: { code: 'MK', cap: '#486345', brim: '#c5f2b5' },
+  hero: { code: 'HR', cap: '#6a4f2d', brim: '#ffe2a0' },
+  president: { code: 'PR', cap: '#6f4632', brim: '#f1c7a2' },
+  super: { code: 'SU', cap: '#7f7537', brim: '#fff2aa' },
 };
 
 function upgradeCategory(type) {
@@ -816,6 +857,47 @@ export class GameRenderer {
     return Math.max(0.65, 2.2 - spawnLevel * 0.09);
   }
 
+  specialSpawnRateBonus(sideState) {
+    const level = Math.max(1, Number(sideState?.specialRateLevel) || 1);
+    return Math.min(0.24, (level - 1) * 0.03);
+  }
+
+  specialSpawnChanceForType(sideState, specialType) {
+    const base = Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
+    if (!Number.isFinite(base)) return null;
+    let chance = base + this.specialSpawnRateBonus(sideState);
+    if (specialType === 'dragon') {
+      const dragonLevel = Math.max(0, Number(sideState?.dragonLevel) || 0);
+      chance += Math.max(0, dragonLevel - 1) * 0.014;
+    }
+    if (specialType === 'super') {
+      const superLevel = Math.max(0, Number(sideState?.superMinionLevel) || 0);
+      chance += Math.max(0, superLevel - 1) * 0.018;
+    }
+    return Math.max(0.08, Math.min(0.92, chance));
+  }
+
+  specialSpawnChanceForRow(sideState, rowType) {
+    const specialType = ROW_TO_SPECIAL_TYPE[rowType];
+    if (!specialType) return null;
+    if (specialType === 'hero' && !sideState?.towerDamagedOnce) return 0;
+    return this.specialSpawnChanceForType(sideState, specialType);
+  }
+
+  failedSpecialLabel(type) {
+    if (type === 'necrominion') return 'Necro';
+    if (type === 'gunner') return 'Gunner';
+    if (type === 'rider') return 'Rider';
+    if (type === 'digger') return 'Digger';
+    if (type === 'monk') return 'Monk';
+    if (type === 'shield') return 'Shield';
+    if (type === 'hero') return 'Hero';
+    if (type === 'president') return 'President';
+    if (type === 'dragon') return 'Dragon';
+    if (type === 'super') return 'Super';
+    return 'Special';
+  }
+
   trainingEveryForType(sideState, type) {
     const s = sideState || {};
     const unit = Math.max(1, Number(s.unitLevel) || 1);
@@ -827,16 +909,21 @@ export class GameRenderer {
     const eco = Math.max(0, Number(s.economyLevel) || 0);
     const dragon = Math.max(0, Number(s.dragonLevel) || 0);
     const sup = Math.max(0, Number(s.superMinionLevel) || 0);
+    const mythicPressure = Math.floor((power + eco) / 6);
     if (type === 'militia') return 1;
-    if (type === 'necro') return 8;
-    if (type === 'gunner') return Math.max(9, 13 - Math.floor((unit + arrow + eco) / 6));
-    if (type === 'rider') return Math.max(7, 12 - Math.floor((unit + spawn + eco) / 5));
-    if (type === 'digger') return Math.max(9, 16 - Math.floor((hp + spawn + eco) / 6));
-    if (type === 'monk') return Math.max(11, 19 - Math.floor((hp + power + resource) / 7));
-    if (type === 'hero') return Math.max(15, 24 - Math.floor((unit + power + eco) / 7));
-    if (type === 'president') return Math.max(17, 27 - Math.floor((eco + resource + power) / 6));
-    if (type === 'dragon') return dragon <= 0 ? Infinity : Math.max(12, 28 - dragon * 3);
-    if (type === 'super') return sup <= 0 ? Infinity : Math.max(3, 11 - sup * 2);
+    if (type === 'necro') return 12;
+    if (type === 'gunner') return Math.max(14, 22 - Math.floor((unit + arrow + eco) / 6));
+    if (type === 'rider') return Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5));
+    if (type === 'digger') return Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6));
+    if (type === 'monk') return Math.max(20, 30 - Math.floor((hp + power + resource) / 7));
+    if (type === 'shield') return Math.max(17, 26 - Math.floor((hp + power + spawn) / 6));
+    if (type === 'hero') {
+      if (!s.towerDamagedOnce) return Infinity;
+      return Math.max(38, 56 - Math.floor((unit + power + eco) / 7));
+    }
+    if (type === 'president') return Math.max(36, 54 - Math.floor((eco + resource + power) / 6));
+    if (type === 'dragon') return dragon <= 0 ? Infinity : Math.max(34, 68 - dragon * 5 - mythicPressure * 2);
+    if (type === 'super') return sup <= 0 ? Infinity : Math.max(28, 58 - sup * 4);
     return Infinity;
   }
 
@@ -857,6 +944,7 @@ export class GameRenderer {
       rider: 0,
       digger: 0,
       monk: 0,
+      shield: 0,
       hero: 0,
       president: 0,
       dragon: 0,
@@ -905,6 +993,10 @@ export class GameRenderer {
       }
       if (m.monk) {
         sideCounts.monk += 1;
+        continue;
+      }
+      if (m.shieldBearer) {
+        sideCounts.shield += 1;
         continue;
       }
       if (m.president) {
@@ -972,6 +1064,10 @@ export class GameRenderer {
           activeCountByType.monk += 1;
           continue;
         }
+        if (m.shieldBearer) {
+          activeCountByType.shield += 1;
+          continue;
+        }
         if (m.president) {
           activeCountByType.president += 1;
           continue;
@@ -993,6 +1089,7 @@ export class GameRenderer {
       rider: Math.max(1, Number(sideState?.unitLevel) || 1),
       digger: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       monk: Math.max(1, Number(sideState?.powerLevel) || 1),
+      shield: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       hero: Math.max(1, Number(sideState?.powerLevel) || 1),
       president: Math.max(1, Number(sideState?.resourceLevel) || 1),
       dragon: Math.max(0, Number(sideState?.dragonLevel) || 0),
@@ -1006,7 +1103,8 @@ export class GameRenderer {
       { type: 'rider', label: 'Rider', color: '#d7c2a1', unlockHint: '' },
       { type: 'digger', label: 'Digger', color: '#b79a74', unlockHint: '' },
       { type: 'monk', label: 'Monk', color: '#cbffb6', unlockHint: '' },
-      { type: 'hero', label: 'Hero', color: '#ffe2a0', unlockHint: '' },
+      { type: 'shield', label: 'Shield', color: '#b0d7ff', unlockHint: '' },
+      { type: 'hero', label: 'Hero', color: '#ffe2a0', unlockHint: 'after first hit' },
       { type: 'president', label: 'President', color: '#f1c7a2', unlockHint: '' },
       { type: 'dragon', label: 'Dragon', color: '#ff9c7b', unlockHint: 'need DR1' },
       { type: 'super', label: 'Super', color: '#fff2aa', unlockHint: 'need SU1' },
@@ -1017,6 +1115,7 @@ export class GameRenderer {
     const minionCd = Math.max(0, Number(sideState?.minionCd) || 0);
 
     return rows.map((row) => {
+      const rollChance = this.specialSpawnChanceForRow(sideState, row.type);
       if (row.type === 'candle') {
         const etaSec = candleActive ? 0 : candleCd;
         const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / 90));
@@ -1030,6 +1129,7 @@ export class GameRenderer {
           progress,
           etaSec,
           candleActive,
+          rollChance,
         };
       }
       const every = this.trainingEveryForType(sideState, row.type);
@@ -1050,6 +1150,7 @@ export class GameRenderer {
         inSpawns,
         progress,
         etaSec,
+        rollChance,
       };
     });
   }
@@ -1058,11 +1159,15 @@ export class GameRenderer {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const panelW = 250;
-    const panelH = 254;
+    const panelH = 266;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
     const bx = side === 'left' ? 220 : world.w - 220;
     const by = world.groundY - 8;
+    const specialRateLevel = Math.max(1, Number(sideState?.specialRateLevel) || 1);
+    const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
+    const failType = typeof sideState?.specialFailType === 'string' ? sideState.specialFailType : null;
+    const failTtl = Math.max(0, Number(sideState?.specialFailTtl) || 0);
 
     // Barracks building silhouette.
     ctx.fillStyle = side === 'left' ? '#213650cc' : '#4a2830cc';
@@ -1117,10 +1222,23 @@ export class GameRenderer {
       px + 10,
       py + 28
     );
+    ctx.fillStyle = '#9ec0e7';
+    ctx.fillText(`Special Chance L${specialRateLevel} (+${specialBonusPct}%)`, px + 10, py + 38);
+    if (failType && failTtl > 0) {
+      ctx.fillStyle = '#ffb9a9';
+      ctx.fillText(
+        `Last fail: ${this.failedSpecialLabel(failType)} -> Militia (${Math.ceil(failTtl)}s)`,
+        px + 10,
+        py + 48
+      );
+    } else {
+      ctx.fillStyle = '#8ea2bf';
+      ctx.fillText('Last fail: none', px + 10, py + 48);
+    }
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
-      const ry = py + 39 + i * rowH;
+      const ry = py + 58 + i * rowH;
 
       ctx.fillStyle = i % 2 === 0 ? '#162033a8' : '#121a2ba8';
       ctx.fillRect(px + 6, ry - 10, panelW - 12, rowH - 1);
@@ -1164,7 +1282,11 @@ export class GameRenderer {
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
         const active = Math.max(0, Number(row.activeCount) || 0);
-        const tag = row.inSpawns === 1 ? `x${active} NEXT ${eta}s` : `x${active} ${row.inSpawns}sp ${eta}s`;
+        const rollChance = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
+        const chanceTag = rollChance == null ? '' : `${rollChance}% `;
+        const tag = row.inSpawns === 1
+          ? `x${active} ${chanceTag}NEXT ${eta}s`
+          : `x${active} ${row.inSpawns}sp ${chanceTag}${eta}s`;
         ctx.fillStyle = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
         ctx.fillText(tag, px + panelW - 10, ry + 1);
       }
@@ -2185,7 +2307,7 @@ export class GameRenderer {
     const x = minion.x;
     const y = minion.y;
     const dir = minion.side === 'left' ? 1 : -1;
-    const scale = minion.super ? 1.26 : 1.08;
+    const scale = (minion.super ? 1.26 : 1.08) * 1.5;
     const bodyR = 14 * scale;
     const swing = Math.sin((Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0) * 1.4);
     const dramaPulse = 0.65 + Math.abs(swing) * 0.55;
@@ -2498,6 +2620,147 @@ export class GameRenderer {
     this.drawMinionHpBar(minion, x, y, scale);
   }
 
+  drawShieldBearerSprite(minion) {
+    const { ctx } = this;
+    const x = minion.x;
+    const y = minion.y;
+    const dir = minion.side === 'left' ? 1 : -1;
+    const baseR = Math.max(18, Number(minion.r) || 20);
+    const scale = 1.18;
+    const bodyW = baseR * 1.05;
+    const bodyH = baseR * 1.78;
+    const headR = baseR * 0.38;
+    const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / 0.75));
+    const shieldScale = 1 + pushLife * 0.45;
+    const shieldW = (baseR * 1.25 + 12) * shieldScale;
+    const shieldH = (baseR * 2.18 + 12) * shieldScale;
+    const shieldX = x + dir * (baseR * 0.88);
+    const shieldY = y + baseR * 0.06;
+
+    ctx.fillStyle = '#0000002c';
+    ctx.beginPath();
+    ctx.ellipse(x, y + bodyH + 6, bodyW * 1.08, 7.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (pushLife > 0) {
+      ctx.strokeStyle = this.withAlpha('#c7e3ff', 0.28 + pushLife * 0.35);
+      ctx.lineWidth = 2 + pushLife * 2;
+      ctx.beginPath();
+      ctx.ellipse(shieldX, shieldY, shieldW * 0.6, shieldH * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = '#384e6f';
+    ctx.beginPath();
+    ctx.moveTo(-bodyW * 0.64, -bodyH * 0.92);
+    ctx.lineTo(-bodyW * 0.82, bodyH * 0.9);
+    ctx.lineTo(bodyW * 0.62, bodyH * 0.9);
+    ctx.lineTo(bodyW * 0.48, -bodyH * 0.92);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#a9c5e6';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    ctx.fillStyle = '#efcfb1';
+    ctx.beginPath();
+    ctx.arc(-dir * (headR * 0.08), -bodyH * 1.12, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2f1f1a';
+    ctx.beginPath();
+    ctx.ellipse(-dir * (headR * 0.1), -bodyH * 1.2, headR * 0.65, headR * 0.38, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#25364f';
+    ctx.fillRect(-bodyW * 0.74, -bodyH * 0.5, bodyW * 1.48, bodyH * 0.22);
+    ctx.fillStyle = '#6f86a9';
+    ctx.fillRect(-bodyW * 0.72, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
+    ctx.fillRect(bodyW * 0.14, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(shieldX, shieldY);
+    ctx.scale(dir, 1);
+    const shW = shieldW;
+    const shH = shieldH;
+    const r = Math.max(8, baseR * 0.42);
+    ctx.fillStyle = '#4f6688';
+    ctx.beginPath();
+    ctx.moveTo(-shW * 0.5 + r, -shH * 0.5);
+    ctx.lineTo(shW * 0.5 - r, -shH * 0.5);
+    ctx.quadraticCurveTo(shW * 0.5, -shH * 0.5, shW * 0.5, -shH * 0.5 + r);
+    ctx.lineTo(shW * 0.5, shH * 0.5 - r);
+    ctx.quadraticCurveTo(shW * 0.5, shH * 0.5, shW * 0.5 - r, shH * 0.5);
+    ctx.lineTo(-shW * 0.5 + r, shH * 0.5);
+    ctx.quadraticCurveTo(-shW * 0.5, shH * 0.5, -shW * 0.5, shH * 0.5 - r);
+    ctx.lineTo(-shW * 0.5, -shH * 0.5 + r);
+    ctx.quadraticCurveTo(-shW * 0.5, -shH * 0.5, -shW * 0.5 + r, -shH * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#d4e5fa';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#8eb4de';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-shW * 0.3, -shH * 0.36);
+    ctx.lineTo(shW * 0.26, -shH * 0.36);
+    ctx.moveTo(-shW * 0.3, 0);
+    ctx.lineTo(shW * 0.26, 0);
+    ctx.moveTo(-shW * 0.3, shH * 0.36);
+    ctx.lineTo(shW * 0.26, shH * 0.36);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = '#d9ecff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('SHIELD', x, y - bodyH - headR - 18);
+    this.drawMinionHpBar(minion, x, y + 2, Math.max(1.4, (baseR / 16) * 1.25));
+  }
+
+  drawFailedSpecialHat(minion, x, y, bodyR, scale = 1) {
+    const type = typeof minion?.failedSpecialType === 'string' ? minion.failedSpecialType : null;
+    if (!type) return;
+    const style = FAILED_SPECIAL_HAT_STYLES[type] || null;
+    if (!style) return;
+    const { ctx } = this;
+    const hatW = Math.max(14, bodyR * scale * 1.1);
+    const hatH = Math.max(8, bodyR * scale * 0.68);
+    const brimW = hatW + 7;
+    const brimH = Math.max(3, bodyR * scale * 0.2);
+    const topY = y - bodyR * scale - 9;
+
+    ctx.fillStyle = '#00000025';
+    ctx.beginPath();
+    ctx.ellipse(x, topY + brimH + 1, brimW * 0.58, brimH * 0.65, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = style.cap;
+    ctx.beginPath();
+    ctx.moveTo(x - hatW * 0.46, topY);
+    ctx.lineTo(x + hatW * 0.46, topY);
+    ctx.lineTo(x, topY - hatH);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = style.brim;
+    ctx.fillRect(x - brimW * 0.5, topY, brimW, brimH);
+    ctx.strokeStyle = '#182233';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - brimW * 0.5, topY, brimW, brimH);
+
+    ctx.fillStyle = '#f8fbff';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(style.code, x, topY + brimH - 0.5);
+  }
+
   drawMinionSprite(minion) {
     if (minion.dragon) {
       this.drawDragonSprite(minion);
@@ -2525,6 +2788,10 @@ export class GameRenderer {
     }
     if (minion.monk) {
       this.drawMonkSprite(minion);
+      return;
+    }
+    if (minion.shieldBearer) {
+      this.drawShieldBearerSprite(minion);
       return;
     }
     if (minion.president) {
@@ -2836,6 +3103,7 @@ export class GameRenderer {
     }
 
     ctx.restore();
+    this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
 
     if (minion.super) {
       ctx.fillStyle = '#ffe6a8';

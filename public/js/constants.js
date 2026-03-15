@@ -10,6 +10,7 @@ export const UPGRADE_LABELS = {
   resourceLevel: 'Resource Gold+',
   bountyLevel: 'Kill Gold+',
   powerLevel: 'Power Shot+',
+  specialRateLevel: 'Special Chance+',
   dragonLevel: 'Dragon Rate+',
   superMinionLevel: 'Super Rate+',
 };
@@ -24,6 +25,7 @@ export const UPGRADE_HINTS = {
   resourceLevel: '+resource gold',
   bountyLevel: '+kill gold',
   powerLevel: '+power shot scale',
+  specialRateLevel: '+special spawn chance',
   dragonLevel: '+dragon spawn rate',
   superMinionLevel: '+super spawn rate',
 };

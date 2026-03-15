@@ -17,6 +17,7 @@ export const UPGRADE_TYPES = [
   'resourceLevel',
   'bountyLevel',
   'powerLevel',
+  'specialRateLevel',
   'dragonLevel',
   'superMinionLevel',
 ];
