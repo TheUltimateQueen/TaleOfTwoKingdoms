@@ -69,6 +69,8 @@ const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
 const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
+const SHIELD_HEADSHOT_DAMAGE_MULT = 3;
+const SHIELD_HEADSHOT_RETREAT = 20;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
@@ -94,7 +96,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   rider: 0.5,
   digger: 0.5,
   monk: 0.46,
-  shield: 0.44,
+  shield: 0.1,
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
@@ -1881,6 +1883,8 @@ class GameRoom {
           this.markArrowHit(a);
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
+          const shieldHeadshot = Boolean(minion.shieldBearer && shieldVulnerableHit === 'head');
+          if (shieldHeadshot) damage *= SHIELD_HEADSHOT_DAMAGE_MULT;
           const core = this.dragonHeartCore(minion);
           if (core) {
             const coreHitR = core.r + a.r;
@@ -1920,6 +1924,11 @@ class GameRoom {
 
           this.dealDamageToMinion(minion, damage);
           minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+          if (shieldHeadshot && minion.hp > 0) {
+            const retreatDir = minion.side === 'left' ? -1 : 1;
+            minion.x = clamp(minion.x + retreatDir * SHIELD_HEADSHOT_RETREAT, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+            minion.atkCd = Math.max(Number(minion.atkCd) || 0, 0.2);
+          }
           this.applyFlameArrowImpact(a, minion, damage, minionBuckets);
           this.applyMaxComboSplash(a, minion, damage, minionBuckets);
           if (minion.hp <= 0) {
@@ -2683,7 +2692,7 @@ class GameRoom {
   statShieldEvery(side) {
     const wallTech = Math.floor((side.unitHpLevel + side.powerLevel + side.spawnLevel) / 6);
     const baseEvery = Math.max(17, 26 - wallTech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery * 4);
   }
 
   statHeroEvery(side) {

@@ -157,7 +157,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   rider: 0.5,
   digger: 0.5,
   monk: 0.46,
-  shield: 0.44,
+  shield: 0.1,
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
@@ -1079,7 +1079,7 @@ export class GameRenderer {
     if (type === 'rider') return this.scaledSpecialEveryForUi(Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)), matchTimeSec);
     if (type === 'digger') return this.scaledSpecialEveryForUi(Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)), matchTimeSec);
     if (type === 'monk') return this.scaledSpecialEveryForUi(Math.max(20, 30 - Math.floor((hp + power + resource) / 7)), matchTimeSec);
-    if (type === 'shield') return this.scaledSpecialEveryForUi(Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)), matchTimeSec);
+    if (type === 'shield') return this.scaledSpecialEveryForUi(Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)) * 4, matchTimeSec);
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
       return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
@@ -1434,7 +1434,8 @@ export class GameRenderer {
 
     const colLabelX = px + 24;
     const colStatusX = px + 62;
-    const colMetaX = px + 96;
+    const colChanceX = px + 86;
+    const colMetaX = px + 116;
     const barX = px + 162;
     const barYOff = -8;
     const barW = 78;
@@ -1467,6 +1468,11 @@ export class GameRenderer {
       }
       ctx.fillStyle = rowStatusColor;
       ctx.fillText(rowStatusTag, colStatusX, ry + 1);
+      const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
+      if (rowChancePct != null && row.type !== 'militia' && row.type !== 'candle') {
+        ctx.fillStyle = '#9fc8ef';
+        ctx.fillText(`${rowChancePct}%`, colChanceX, ry + 1);
+      }
       ctx.fillStyle = '#c7d4e9';
       const active = Math.max(0, Number(row.activeCount) || 0);
       ctx.fillText(`L${row.level} A${active}`, colMetaX, ry + 1);
@@ -1494,11 +1500,9 @@ export class GameRenderer {
         ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
-        const rollChance = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
-        const chanceTag = rollChance == null ? '' : `${rollChance}% `;
         const tag = row.inSpawns === 1
-          ? `x${active} ${chanceTag}next ${eta}s`
-          : `x${active} ${row.inSpawns}sp ${chanceTag}${eta}s`;
+          ? `x${active} next ${eta}s`
+          : `x${active} ${row.inSpawns}sp ${eta}s`;
         ctx.fillStyle = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
         ctx.fillText(tag, px + panelW - 10, ry + 1);
       }
