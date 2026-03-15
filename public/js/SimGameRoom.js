@@ -69,7 +69,11 @@ const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
 const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
-const SHIELD_HEAD_GUARD_TTL = 1.2;
+const SHIELD_HEAD_GUARD_TTL = 2;
+const SPECIAL_COOLDOWN_START_MULT = 1.5;
+const SPECIAL_COOLDOWN_END_MULT = 1;
+const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
+const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_ROLL_TTL = 6;
 const SPECIAL_SPAWN_QUEUE_ORDER = [
@@ -111,8 +115,7 @@ const CANDLE_PICKUP_RANGE = 28;
 const CANDLE_RECRUIT_RANGE = 210;
 const CANDLE_SPAWN_OFFSET = 56;
 const CANDLE_CART_HALF_W = 34;
-const CANDLE_RARE_CD_MIN = 52;
-const CANDLE_RARE_CD_MAX = 92;
+const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22;
@@ -222,6 +225,7 @@ function serializeSideState(side) {
     minionCd: roundTo(state.minionCd, 2),
     spawnCount: Math.max(0, Math.round(Number(state.spawnCount) || 0)),
     candleCd: roundTo(state.candleCd, 2),
+    candleSpawnInSpawns: Math.max(0, Math.round(Number(state.candleSpawnInSpawns) || 0)),
     candleActive: Boolean(state.candleActive),
     specialFailType: typeof state.specialFailType === 'string' ? state.specialFailType : null,
     specialFailTtl: roundTo(state.specialFailTtl, 2),
@@ -289,6 +293,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     minionCd: 0,
     spawnCount: 0,
     candleCd: 0,
+    candleSpawnInSpawns: 0,
     candleActive: false,
     specialFailType: null,
     specialFailTtl: 0,
@@ -342,8 +347,10 @@ class GameRoom {
       right: null,
     };
     this.candleScorches = [];
-    this.left.candleCd = this.candleRareCooldown('left');
-    this.right.candleCd = this.candleRareCooldown('right');
+    this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
+    this.right.candleSpawnInSpawns = this.statCandleEvery(this.right);
+    this.left.candleCd = this.candleSpawnEtaSeconds('left');
+    this.right.candleCd = this.candleSpawnEtaSeconds('right');
     this.left.candleActive = false;
     this.right.candleActive = false;
 
@@ -638,8 +645,10 @@ class GameRoom {
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
     this.seq = 1;
-    this.left.candleCd = this.candleRareCooldown('left');
-    this.right.candleCd = this.candleRareCooldown('right');
+    this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
+    this.right.candleSpawnInSpawns = this.statCandleEvery(this.right);
+    this.left.candleCd = this.candleSpawnEtaSeconds('left');
+    this.right.candleCd = this.candleSpawnEtaSeconds('right');
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.seedUpgradeCards();
@@ -866,18 +875,40 @@ class GameRoom {
     return TOWER_Y + (Math.random() * 80 - 40);
   }
 
-  candleRetrainSeconds(sideName, delivered = false) {
-    void delivered;
-    return this.candleRareCooldown(sideName);
+  statCandleEvery(side) {
+    const spawnTech = Math.max(1, Number(side?.spawnLevel) || 1);
+    const resourceTech = Math.max(1, Number(side?.resourceLevel) || 1);
+    const eco = Math.max(0, Number(side?.economyLevel) || 0);
+    const tech = Math.floor((spawnTech + resourceTech + eco) / 6);
+    const baseEvery = Math.max(24, 35 - tech);
+    return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
   }
 
-  candleRareCooldown(sideName = 'left') {
+  candleSpawnEtaSeconds(sideName = 'left') {
     const side = sideName === 'right' ? 'right' : 'left';
-    const spawnLevel = Math.max(1, Number(this[side]?.spawnLevel) || 1);
-    const range = Math.max(10, CANDLE_RARE_CD_MAX - CANDLE_RARE_CD_MIN);
-    const roll = CANDLE_RARE_CD_MIN + Math.random() * range;
-    const spawnReduction = Math.min(10, (spawnLevel - 1) * 0.8);
-    return Math.max(35, roll - spawnReduction);
+    const sideState = this[side];
+    if (!sideState) return 0;
+    if (this.candles?.[side]) return 0;
+    const spawnEvery = this.statSpawnEvery(sideState);
+    const minionCd = Math.max(0, Number(sideState.minionCd) || 0);
+    const inSpawns = Math.max(1, Math.floor(Number(sideState.candleSpawnInSpawns) || this.statCandleEvery(sideState)));
+    return minionCd + Math.max(0, inSpawns - 1) * spawnEvery;
+  }
+
+  stepCandleSpawnCycle(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const sideState = this[side];
+    if (!sideState) return;
+    if (this.candles?.[side]) return;
+    if (!Number.isFinite(sideState.candleSpawnInSpawns) || sideState.candleSpawnInSpawns <= 0) {
+      sideState.candleSpawnInSpawns = this.statCandleEvery(sideState);
+    }
+    sideState.candleSpawnInSpawns = Math.max(0, Math.floor(sideState.candleSpawnInSpawns) - 1);
+    if (sideState.candleSpawnInSpawns <= 0) {
+      this.spawnCandleUnit(side);
+      sideState.candleSpawnInSpawns = this.statCandleEvery(sideState);
+    }
+    sideState.candleCd = this.candleSpawnEtaSeconds(side);
   }
 
   createCandle(sideName = 'left') {
@@ -983,8 +1014,39 @@ class GameRoom {
       y: (Number(minion.y) || 0) + baseR * 0.06 - guardLift,
       rx: (baseR * 0.84 + 10) * pushScale,
       ry: (baseR * 1.18 + 10) * pushScale,
-      topOpenY: guardLife > 0 ? ((Number(minion.y) || 0) - baseR * 1.95) : ((Number(minion.y) || 0) - baseR * 0.76),
+      // Guarded head state should substantially close the top opening.
+      topOpenY: guardLife > 0 ? ((Number(minion.y) || 0) - baseR * 2.45) : ((Number(minion.y) || 0) - baseR * 0.76),
     };
+  }
+
+  shieldBearerHeadCircle(minion, arrow = null) {
+    if (!minion || !minion.shieldBearer) return null;
+    const dir = minion.side === 'left' ? 1 : -1;
+    const baseR = Math.max(18, Number(minion.r) || 20);
+    // Exact match for drawShieldBearerSprite head circle in GameRenderer.
+    const headR = baseR * 0.36;
+    const arrowR = Math.max(0, Number(arrow?.r) || 0);
+    return {
+      x: (Number(minion.x) || 0) - dir * (baseR * 0.06),
+      y: (Number(minion.y) || 0) - baseR * 1.3,
+      r: headR + arrowR,
+    };
+  }
+
+  segmentIntersectsCircle(x1, y1, x2, y2, cx, cy, r) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq <= 0.000001) {
+      const px = x1 - cx;
+      const py = y1 - cy;
+      return px * px + py * py <= r * r;
+    }
+    let t = ((cx - x1) * dx + (cy - y1) * dy) / lenSq;
+    t = clamp(t, 0, 1);
+    const nx = x1 + dx * t - cx;
+    const ny = y1 + dy * t - cy;
+    return nx * nx + ny * ny <= r * r;
   }
 
   arrowInsideShieldBearerShield(arrow, minion) {
@@ -1005,29 +1067,36 @@ class GameRoom {
     return nx * nx + ny * ny <= 1;
   }
 
-  arrowHitsShieldBearerVulnerableZone(arrow, minion) {
+  arrowHitsShieldBearerVulnerableZone(arrow, minion, prevX = null, prevY = null) {
     if (!arrow || !minion || !minion.shieldBearer) return false;
     if (arrow.side === minion.side) return false;
     const dir = minion.side === 'left' ? 1 : -1;
     const r = Math.max(18, Number(minion.r) || 20);
     const headGuardActive = (Number(minion.shieldHeadGuardTtl) || 0) > 0;
+    const arrowX = Number(arrow.x) || 0;
+    const arrowY = Number(arrow.y) || 0;
+    const fromX = Number.isFinite(prevX) ? prevX : arrowX;
+    const fromY = Number.isFinite(prevY) ? prevY : arrowY;
 
-    const headX = (Number(minion.x) || 0) - dir * (r * 0.06);
-    const headY = (Number(minion.y) || 0) - r * 1.04;
-    const headHitR = r * 0.38 + (Number(arrow.r) || 0) * 0.78;
-    const dxHead = (Number(arrow.x) || 0) - headX;
-    const dyHead = (Number(arrow.y) || 0) - headY;
-    if (dxHead * dxHead + dyHead * dyHead <= headHitR * headHitR) {
-      if (headGuardActive) return null;
-      return 'head';
+    const head = this.shieldBearerHeadCircle(minion, arrow);
+    if (head) {
+      const dxHead = arrowX - head.x;
+      const dyHead = arrowY - head.y;
+      const directHit = dxHead * dxHead + dyHead * dyHead <= head.r * head.r;
+      const sweptHit = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, head.x, head.y, head.r);
+      if (directHit || sweptHit) {
+        if (headGuardActive) return 'head_guard';
+        return 'head';
+      }
     }
 
     const backX = (Number(minion.x) || 0) - dir * (r * 0.56);
     const backY = Number(minion.y) || 0;
     const backHitR = r * 0.42 + (Number(arrow.r) || 0) * 0.7;
-    const dxBack = (Number(arrow.x) || 0) - backX;
-    const dyBack = (Number(arrow.y) || 0) - backY;
+    const dxBack = arrowX - backX;
+    const dyBack = arrowY - backY;
     if (dxBack * dxBack + dyBack * dyBack <= backHitR * backHitR) return 'back';
+    if (this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, backX, backY, backHitR)) return 'back';
     return null;
   }
 
@@ -1489,7 +1558,8 @@ class GameRoom {
 
     this.candles[sideName] = null;
     this[sideName].candleActive = false;
-    this[sideName].candleCd = this.candleRetrainSeconds(sideName, false);
+    this[sideName].candleSpawnInSpawns = this.statCandleEvery(this[sideName]);
+    this[sideName].candleCd = this.candleSpawnEtaSeconds(sideName);
 
     this.queueHitSfx('explosion', candle.x, candle.y, hitSide);
     this.queueHitSfx('dragonfire', candle.x - 10, candle.y - 10, hitSide);
@@ -1536,7 +1606,8 @@ class GameRoom {
 
     this.candles[sideName] = null;
     this[sideName].candleActive = false;
-    this[sideName].candleCd = this.candleRetrainSeconds(sideName, true);
+    this[sideName].candleSpawnInSpawns = this.statCandleEvery(this[sideName]);
+    this[sideName].candleCd = this.candleSpawnEtaSeconds(sideName);
   }
 
   deliverCandle(candleSide) {
@@ -1598,9 +1669,7 @@ class GameRoom {
     for (const sideName of ROOM_SIDES) {
       if (!this.candles[sideName]) {
         this[sideName].candleActive = false;
-        this[sideName].candleCd = Math.max(0, Number(this[sideName].candleCd) || 0);
-        if (this[sideName].candleCd > 0) this[sideName].candleCd = Math.max(0, this[sideName].candleCd - dt);
-        if (this[sideName].candleCd === 0) this.spawnCandleUnit(sideName);
+        this[sideName].candleCd = this.candleSpawnEtaSeconds(sideName);
       }
       const candle = this.candles[sideName];
       if (!candle) continue;
@@ -1676,6 +1745,8 @@ class GameRoom {
 
     for (let i = this.arrows.length - 1; i >= 0; i -= 1) {
       const a = this.arrows[i];
+      const prevX = Number(a.x) || 0;
+      const prevY = Number(a.y) || 0;
       let stepDt = dt;
       if ((Number(a.launchDelay) || 0) > 0) {
         a.launchDelay -= dt;
@@ -1787,7 +1858,14 @@ class GameRoom {
           if (!minion || minion.removed || minion.side === a.side) continue;
           let shieldVulnerableHit = null;
           if (minion.shieldBearer) {
-            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion);
+            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion, prevX, prevY);
+            if (shieldVulnerableHit === 'head_guard') {
+              this.markArrowMiss(a);
+              this.queueLine('BLOCKED', a.x, a.y - 12, minion.side);
+              this.queueHitSfx('blocked', a.x, a.y, minion.side);
+              consumed = true;
+              continue;
+            }
             if (!shieldVulnerableHit && this.arrowInsideShieldBearerShield(a, minion)) {
               this.markArrowMiss(a);
               this.queueLine('BLOCKED', a.x, a.y - 12, minion.side);
@@ -2556,54 +2634,78 @@ class GameRoom {
     return Math.max(0.65, 2.2 - side.spawnLevel * 0.09);
   }
 
+  statSpecialCooldownMultiplier(matchTimeSec = null) {
+    const t = Number.isFinite(matchTimeSec) ? matchTimeSec : this.t;
+    const safeT = Math.max(0, Number(t) || 0);
+    const totalSteps = Math.max(1, Math.round(SPECIAL_COOLDOWN_RAMP_SECONDS / SPECIAL_COOLDOWN_STEP_SECONDS));
+    const elapsedSteps = Math.min(totalSteps, Math.floor(safeT / SPECIAL_COOLDOWN_STEP_SECONDS));
+    const dropPerStep = (SPECIAL_COOLDOWN_START_MULT - SPECIAL_COOLDOWN_END_MULT) / totalSteps;
+    const mult = SPECIAL_COOLDOWN_START_MULT - elapsedSteps * dropPerStep;
+    return clamp(mult, SPECIAL_COOLDOWN_END_MULT, SPECIAL_COOLDOWN_START_MULT);
+  }
+
+  scaleSpecialCooldownEvery(baseEvery) {
+    if (!Number.isFinite(baseEvery)) return baseEvery;
+    return Math.max(1, Math.round(baseEvery * this.statSpecialCooldownMultiplier()));
+  }
+
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
     const mythicPressure = Math.floor((side.powerLevel + side.economyLevel) / 6);
-    return Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2);
+    const baseEvery = Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statGunnerEvery(side) {
     const tech = Math.floor((side.unitLevel + side.arrowLevel + side.economyLevel) / 6);
-    return Math.max(14, 22 - tech);
+    const baseEvery = Math.max(14, 22 - tech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statRiderEvery(side) {
     const cavalryTech = Math.floor((side.unitLevel + side.spawnLevel + side.economyLevel) / 5);
-    return Math.max(15, 23 - cavalryTech);
+    const baseEvery = Math.max(15, 23 - cavalryTech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statDiggerEvery(side) {
     const burrowTech = Math.floor((side.unitHpLevel + side.spawnLevel + side.economyLevel) / 6);
-    return Math.max(14, 24 - burrowTech);
+    const baseEvery = Math.max(14, 24 - burrowTech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statMonkEvery(side) {
     const supportTech = Math.floor((side.unitHpLevel + side.powerLevel + side.resourceLevel) / 7);
-    return Math.max(20, 30 - supportTech);
+    const baseEvery = Math.max(20, 30 - supportTech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statShieldEvery(side) {
     const wallTech = Math.floor((side.unitHpLevel + side.powerLevel + side.spawnLevel) / 6);
-    return Math.max(17, 26 - wallTech);
+    const baseEvery = Math.max(17, 26 - wallTech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statHeroEvery(side) {
     const mythicTech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 7);
-    return Math.max(38, 56 - mythicTech) * 10;
+    const baseEvery = Math.max(38, 56 - mythicTech) * 10;
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statPresidentEvery(side) {
     const civicTech = Math.floor((side.economyLevel + side.resourceLevel + side.powerLevel) / 6);
-    return Math.max(36, 54 - civicTech);
+    const baseEvery = Math.max(36, 54 - civicTech);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statNecroEvery() {
-    return 12;
+    return this.scaleSpecialCooldownEvery(12);
   }
 
   statSuperEvery(side) {
     if (side.superMinionLevel <= 0) return Infinity;
-    return Math.max(28, 58 - side.superMinionLevel * 4);
+    const baseEvery = Math.max(28, 58 - side.superMinionLevel * 4);
+    return this.scaleSpecialCooldownEvery(baseEvery);
   }
 
   statSpecialRateBonus(side) {
@@ -3188,6 +3290,7 @@ class GameRoom {
     const superEvery = this.statSuperEvery(side);
 
     if (naturalSpawn) {
+      this.stepCandleSpawnCycle(sideName);
       const dueByType = {
         dragon: Number.isFinite(dragonEvery) && side.spawnCount % dragonEvery === 0,
         shield: side.spawnCount % shieldEvery === 0,

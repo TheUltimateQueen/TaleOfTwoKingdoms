@@ -163,6 +163,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   dragon: 0.33,
   super: 0.3,
 };
+const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 
 const FAILED_SPECIAL_HAT_STYLES = {
   dragon: { code: 'DR', cap: '#5f86b3', brim: '#aec8e7' },
@@ -182,6 +183,10 @@ function upgradeCategory(type) {
 }
 
 const GAME_OVER_CINEMATIC_MS = 4000;
+const SPECIAL_COOLDOWN_START_MULT = 1.5;
+const SPECIAL_COOLDOWN_END_MULT = 1;
+const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
+const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 
 export class GameRenderer {
   constructor(canvas) {
@@ -884,6 +889,20 @@ export class GameRenderer {
     return this.specialSpawnChanceForType(sideState, specialType);
   }
 
+  specialCooldownMultiplierAt(matchTimeSec = 0) {
+    const safeT = Math.max(0, Number(matchTimeSec) || 0);
+    const totalSteps = Math.max(1, Math.round(SPECIAL_COOLDOWN_RAMP_SECONDS / SPECIAL_COOLDOWN_STEP_SECONDS));
+    const elapsedSteps = Math.min(totalSteps, Math.floor(safeT / SPECIAL_COOLDOWN_STEP_SECONDS));
+    const dropPerStep = (SPECIAL_COOLDOWN_START_MULT - SPECIAL_COOLDOWN_END_MULT) / totalSteps;
+    const mult = SPECIAL_COOLDOWN_START_MULT - elapsedSteps * dropPerStep;
+    return Math.max(SPECIAL_COOLDOWN_END_MULT, Math.min(SPECIAL_COOLDOWN_START_MULT, mult));
+  }
+
+  scaledSpecialEveryForUi(baseEvery, matchTimeSec = 0) {
+    if (!Number.isFinite(baseEvery)) return baseEvery;
+    return Math.max(1, Math.round(baseEvery * this.specialCooldownMultiplierAt(matchTimeSec)));
+  }
+
   failedSpecialLabel(type) {
     if (type === 'necrominion') return 'Necro';
     if (type === 'gunner') return 'Gunner';
@@ -898,7 +917,7 @@ export class GameRenderer {
     return 'Special';
   }
 
-  trainingEveryForType(sideState, type) {
+  trainingEveryForType(sideState, type, matchTimeSec = 0) {
     const s = sideState || {};
     const unit = Math.max(1, Number(s.unitLevel) || 1);
     const hp = Math.max(1, Number(s.unitHpLevel) || 1);
@@ -911,19 +930,24 @@ export class GameRenderer {
     const sup = Math.max(0, Number(s.superMinionLevel) || 0);
     const mythicPressure = Math.floor((power + eco) / 6);
     if (type === 'militia') return 1;
-    if (type === 'necro') return 12;
-    if (type === 'gunner') return Math.max(14, 22 - Math.floor((unit + arrow + eco) / 6));
-    if (type === 'rider') return Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5));
-    if (type === 'digger') return Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6));
-    if (type === 'monk') return Math.max(20, 30 - Math.floor((hp + power + resource) / 7));
-    if (type === 'shield') return Math.max(17, 26 - Math.floor((hp + power + spawn) / 6));
+    if (type === 'candle') {
+      const tech = Math.floor((spawn + resource + eco) / 6);
+      const baseEvery = Math.max(24, 35 - tech);
+      return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
+    }
+    if (type === 'necro') return this.scaledSpecialEveryForUi(12, matchTimeSec);
+    if (type === 'gunner') return this.scaledSpecialEveryForUi(Math.max(14, 22 - Math.floor((unit + arrow + eco) / 6)), matchTimeSec);
+    if (type === 'rider') return this.scaledSpecialEveryForUi(Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)), matchTimeSec);
+    if (type === 'digger') return this.scaledSpecialEveryForUi(Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)), matchTimeSec);
+    if (type === 'monk') return this.scaledSpecialEveryForUi(Math.max(20, 30 - Math.floor((hp + power + resource) / 7)), matchTimeSec);
+    if (type === 'shield') return this.scaledSpecialEveryForUi(Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)), matchTimeSec);
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
-      return Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10;
+      return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
     }
-    if (type === 'president') return Math.max(36, 54 - Math.floor((eco + resource + power) / 6));
-    if (type === 'dragon') return dragon <= 0 ? Infinity : Math.max(34, 68 - dragon * 5 - mythicPressure * 2);
-    if (type === 'super') return sup <= 0 ? Infinity : Math.max(28, 58 - sup * 4);
+    if (type === 'president') return this.scaledSpecialEveryForUi(Math.max(36, 54 - Math.floor((eco + resource + power) / 6)), matchTimeSec);
+    if (type === 'dragon') return dragon <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(34, 68 - dragon * 5 - mythicPressure * 2), matchTimeSec);
+    if (type === 'super') return sup <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(28, 58 - sup * 4), matchTimeSec);
     return Infinity;
   }
 
@@ -1018,7 +1042,7 @@ export class GameRenderer {
     return counts;
   }
 
-  barracksRows(sideState, sideName = 'left', minions = [], candles = [], precomputedCounts = null) {
+  barracksRows(sideState, sideName = 'left', minions = [], candles = [], precomputedCounts = null, matchTimeSec = 0) {
     const side = sideName === 'right' ? 'right' : 'left';
     const candleCd = Math.max(0, Number(sideState?.candleCd) || 0);
     const candleActive = Boolean(sideState?.candleActive);
@@ -1123,15 +1147,18 @@ export class GameRenderer {
       const lastRollEntry = specialType ? specialRollByType[specialType] : null;
       const lastRollSuccess = typeof lastRollEntry?.success === 'boolean' ? lastRollEntry.success : null;
       if (row.type === 'candle') {
+        const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
+        const inSpawns = Math.max(1, Math.floor(Number(sideState?.candleSpawnInSpawns) || every));
         const etaSec = candleActive ? 0 : candleCd;
-        const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / 90));
+        const cycleSeconds = Math.max(1, this.spawnEveryForSide(sideState) * Math.max(1, every));
+        const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / cycleSeconds));
         return {
           ...row,
           level: levelOf[row.type],
           activeCount: activeCountByType[row.type] || 0,
           unlocked: true,
-          every: 1,
-          inSpawns: 1,
+          every,
+          inSpawns,
           progress,
           etaSec,
           candleActive,
@@ -1139,7 +1166,7 @@ export class GameRenderer {
           lastRollSuccess,
         };
       }
-      const every = this.trainingEveryForType(sideState, row.type);
+      const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
       const unlocked = Number.isFinite(every);
       const inSpawns = unlocked ? this.trainingInSpawns(sideState, every) : Infinity;
       const progress = unlocked && every > 1
@@ -1213,7 +1240,8 @@ export class GameRenderer {
       Array.isArray(snapshot?.candles)
         ? snapshot.candles
         : (snapshot?.candle ? [snapshot.candle] : []),
-      precomputedCounts
+      precomputedCounts,
+      Math.max(0, Number(snapshot?.t) || 0)
     );
     const rowH = 17;
 
@@ -2775,14 +2803,16 @@ export class GameRenderer {
     const scale = 1.1;
     const bodyW = baseR * 1.05;
     const bodyH = baseR * 1.78;
-    const headR = baseR * 0.38;
+    const headR = baseR * 0.36;
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / 0.75));
-    const headGuardLife = Math.max(0, Math.min(1, (Number(minion.shieldHeadGuardTtl) || 0) / 1.2));
+    const headGuardLife = Math.max(0, Math.min(1, (Number(minion.shieldHeadGuardTtl) || 0) / 2));
     const shieldScale = 1 + pushLife * 0.45 + headGuardLife * 0.08;
     const shieldW = (baseR * 1.14 + 10) * shieldScale;
     const shieldH = (baseR * 1.9 + 10) * shieldScale;
     const shieldX = x + dir * (baseR * 0.88);
     const shieldY = y + baseR * 0.06 - baseR * 0.38 * headGuardLife;
+    const headX = x - dir * (baseR * 0.06);
+    const headY = y - baseR * 1.3;
 
     ctx.fillStyle = '#0000002c';
     ctx.beginPath();
@@ -2819,15 +2849,6 @@ export class GameRenderer {
     ctx.strokeStyle = '#a9c5e6';
     ctx.lineWidth = 1.8;
     ctx.stroke();
-
-    ctx.fillStyle = '#efcfb1';
-    ctx.beginPath();
-    ctx.arc(-dir * (headR * 0.08), -bodyH * 1.12, headR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2f1f1a';
-    ctx.beginPath();
-    ctx.ellipse(-dir * (headR * 0.1), -bodyH * 1.2, headR * 0.65, headR * 0.38, 0, Math.PI, Math.PI * 2);
-    ctx.fill();
 
     ctx.fillStyle = '#25364f';
     ctx.fillRect(-bodyW * 0.74, -bodyH * 0.5, bodyW * 1.48, bodyH * 0.22);
@@ -2870,6 +2891,16 @@ export class GameRenderer {
     ctx.lineTo(shW * 0.26, shH * 0.36);
     ctx.stroke();
     ctx.restore();
+
+    // Head is drawn above the shield top so players can target it.
+    ctx.fillStyle = '#efcfb1';
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2f1f1a';
+    ctx.beginPath();
+    ctx.ellipse(headX - dir * (headR * 0.12), headY - headR * 0.36, headR * 0.66, headR * 0.42, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
 
     if (showHud) {
       ctx.fillStyle = '#d9ecff';
