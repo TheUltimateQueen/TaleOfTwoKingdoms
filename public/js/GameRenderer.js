@@ -158,7 +158,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   digger: 0.5,
   monk: 0.46,
   shield: 0.44,
-  hero: 0.34,
+  hero: 0.1,
   president: 0.41,
   dragon: 0.33,
   super: 0.3,
@@ -919,7 +919,7 @@ export class GameRenderer {
     if (type === 'shield') return Math.max(17, 26 - Math.floor((hp + power + spawn) / 6));
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
-      return Math.max(38, 56 - Math.floor((unit + power + eco) / 7));
+      return Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10;
     }
     if (type === 'president') return Math.max(36, 54 - Math.floor((eco + resource + power) / 6));
     if (type === 'dragon') return dragon <= 0 ? Infinity : Math.max(34, 68 - dragon * 5 - mythicPressure * 2);

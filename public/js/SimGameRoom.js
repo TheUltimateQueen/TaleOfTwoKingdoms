@@ -91,7 +91,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   digger: 0.5,
   monk: 0.46,
   shield: 0.44,
-  hero: 0.34,
+  hero: 0.1,
   president: 0.41,
   dragon: 0.33,
   super: 0.3,
@@ -1010,13 +1010,17 @@ class GameRoom {
     if (arrow.side === minion.side) return false;
     const dir = minion.side === 'left' ? 1 : -1;
     const r = Math.max(18, Number(minion.r) || 20);
+    const headGuardActive = (Number(minion.shieldHeadGuardTtl) || 0) > 0;
 
     const headX = (Number(minion.x) || 0) - dir * (r * 0.06);
     const headY = (Number(minion.y) || 0) - r * 1.04;
     const headHitR = r * 0.38 + (Number(arrow.r) || 0) * 0.78;
     const dxHead = (Number(arrow.x) || 0) - headX;
     const dyHead = (Number(arrow.y) || 0) - headY;
-    if (dxHead * dxHead + dyHead * dyHead <= headHitR * headHitR) return 'head';
+    if (dxHead * dxHead + dyHead * dyHead <= headHitR * headHitR) {
+      if (headGuardActive) return null;
+      return 'head';
+    }
 
     const backX = (Number(minion.x) || 0) - dir * (r * 0.56);
     const backY = Number(minion.y) || 0;
@@ -1783,14 +1787,14 @@ class GameRoom {
           if (!minion || minion.removed || minion.side === a.side) continue;
           let shieldVulnerableHit = null;
           if (minion.shieldBearer) {
-            if (this.arrowInsideShieldBearerShield(a, minion)) {
+            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion);
+            if (!shieldVulnerableHit && this.arrowInsideShieldBearerShield(a, minion)) {
               this.markArrowMiss(a);
               this.queueLine('BLOCKED', a.x, a.y - 12, minion.side);
               this.queueHitSfx('blocked', a.x, a.y, minion.side);
               consumed = true;
               continue;
             }
-            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion);
             if (!shieldVulnerableHit) continue;
           } else {
             const hitR = minion.r + a.r;
@@ -2585,7 +2589,7 @@ class GameRoom {
 
   statHeroEvery(side) {
     const mythicTech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 7);
-    return Math.max(38, 56 - mythicTech);
+    return Math.max(38, 56 - mythicTech) * 10;
   }
 
   statPresidentEvery(side) {
@@ -3307,7 +3311,7 @@ class GameRoom {
       hp *= 10;
       dmg = 0;
       speed *= 0.72;
-      radius = Math.max(26, radius * 1.7);
+      radius = Math.max(26, radius * 1.7) * 0.8;
       tier = Math.min(3, tier + 1);
       visualPower += 10;
       spawnY = TOWER_Y + (Math.random() * 58 - 29);

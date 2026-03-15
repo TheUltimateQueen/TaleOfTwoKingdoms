@@ -138,6 +138,13 @@ button:hover {
   color: #221507;
 }
 
+.local-test-btn {
+  background: linear-gradient(180deg, #4dbf86 0%, #2f875e 100%);
+  border-color: #67d49e;
+  color: #052114;
+  font-weight: 700;
+}
+
 #roomInput {
   width: 92px;
   text-transform: uppercase;

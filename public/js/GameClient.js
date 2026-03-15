@@ -21,6 +21,17 @@ const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
 const GAME_OVER_CINEMATIC_MS = 4000;
 const HOST_TICK_MS = 1000 / 30;
 const HOST_STATE_EMIT_MS = 50;
+const LOCAL_KEYBOARD_AIM_SPEED = 0.51;
+const LOCAL_KEYBOARD_CODES = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+]);
 
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
@@ -101,6 +112,8 @@ export class GameClient {
     this.hostTickTimer = null;
     this.nextHostStateEmitAt = 0;
     this.remoteDisplayCount = 0;
+    this.localKeyboardTestActive = false;
+    this.localPressedKeys = new Set();
 
     this.bindDom();
     this.bindEvents();
@@ -132,6 +145,8 @@ export class GameClient {
     this.joinLink = document.getElementById('joinLink');
     this.lobbyMode2PlayersBtn = document.getElementById('lobbyMode2PlayersBtn');
     this.lobbyMode4PlayersBtn = document.getElementById('lobbyMode4PlayersBtn');
+    this.localKeyboardTestBtn = document.getElementById('localKeyboardTestBtn');
+    this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
 
@@ -166,7 +181,13 @@ export class GameClient {
       });
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
+      this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest());
       this.setCreateMode(this.state.createMode);
+      window.addEventListener('keydown', (event) => this.handleLocalKeyboardKey(event, true));
+      window.addEventListener('keyup', (event) => this.handleLocalKeyboardKey(event, false));
+      window.addEventListener('blur', () => {
+        this.localPressedKeys.clear();
+      });
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -181,6 +202,8 @@ export class GameClient {
     });
 
     this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative }) => {
+      this.localKeyboardTestActive = false;
+      this.localPressedKeys.clear();
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
       this.hostAuthoritative = Boolean(hostAuthoritative) && !this.isController;
@@ -193,6 +216,8 @@ export class GameClient {
       }
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
+      if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Local-only quick test: West aims with WASD, East aims with arrow keys.';
+      if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Start Local Keyboard Test';
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
@@ -268,6 +293,7 @@ export class GameClient {
 
     this.socket.on('host_control_pull', ({ side, slot, x, y }) => {
       if (!this.hostAuthoritative || this.isController || !this.localRoom) return;
+      if (this.localKeyboardTestActive) return;
       const sideName = side === 'right' ? 'right' : 'left';
       const lane = Number.isFinite(slot) ? slot : 0;
       const pull = this.localRoom.normalizePull(sideName, x, y);
@@ -321,6 +347,7 @@ export class GameClient {
 
   applyHostRoster(payload = {}) {
     if (!this.localRoom) return;
+    if (this.localKeyboardTestActive) return;
     if (payload.roomId && payload.roomId !== this.state.roomId) return;
     const mode = payload.mode === '2v2' ? '2v2' : '1v1';
     if (this.localRoom.mode !== mode) this.localRoom.setMode(mode);
@@ -345,6 +372,7 @@ export class GameClient {
     if (this.isController || !this.hostAuthoritative || !this.localRoom || this.hostTickTimer) return;
     this.hostTickTimer = window.setInterval(() => {
       if (!this.localRoom) return;
+      this.updateLocalKeyboardAiming(HOST_TICK_MS / 1000);
       this.localRoom.tick(HOST_TICK_MS / 1000);
       this.pushHostState(false);
     }, HOST_TICK_MS);
@@ -354,6 +382,92 @@ export class GameClient {
     if (!this.hostTickTimer) return;
     window.clearInterval(this.hostTickTimer);
     this.hostTickTimer = null;
+  }
+
+  startLocalKeyboardTest() {
+    if (this.isController) return;
+    if (!this.hostAuthoritative) return;
+    if (!this.state.roomId) {
+      if (this.menuMsg) this.menuMsg.textContent = 'Waiting for host room setup...';
+      return;
+    }
+
+    this.state.mode = '1v1';
+    this.setCreateMode('1v1');
+    this.requestRoomModeChange('1v1');
+
+    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, { mode: '1v1' });
+    this.localRoom.players = {
+      left: [{ id: '__LOCAL_WEST__', name: 'West Keyboard', slot: 0 }],
+      right: [{ id: '__LOCAL_EAST__', name: 'East Keyboard', slot: 0 }],
+    };
+    this.localRoom.started = true;
+    this.localRoom.gameOver = false;
+    this.localRoom.winner = null;
+
+    const leftControl = this.localRoom.ensureArcherControl('left', 0);
+    const rightControl = this.localRoom.ensureArcherControl('right', 0);
+    if (leftControl) {
+      leftControl.pullX = -0.82;
+      leftControl.pullY = -0.08;
+    }
+    if (rightControl) {
+      rightControl.pullX = 0.82;
+      rightControl.pullY = -0.08;
+    }
+    this.localRoom.syncSidePrimaryPull('left');
+    this.localRoom.syncSidePrimaryPull('right');
+
+    this.localPressedKeys.clear();
+    this.localKeyboardTestActive = true;
+    if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Local keyboard test active. Hold keys to smoothly move each side aim cursor.';
+    if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Restart Local Keyboard Test';
+
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Local keyboard test started. West: WASD | East: Arrow keys.';
+    if (this.lobbyMsg) this.lobbyMsg.textContent = 'Local-only test active on this computer.';
+
+    this.resetGameOverPresentation();
+    this.setPostGamePanel(false);
+    this.setDisplayMode('game');
+    this.startHostAuthorityLoop();
+    this.pushHostState(true);
+  }
+
+  handleLocalKeyboardKey(event, pressed) {
+    if (this.isController || !this.localKeyboardTestActive) return;
+    if (!LOCAL_KEYBOARD_CODES.has(event.code)) return;
+    event.preventDefault();
+    if (pressed) this.localPressedKeys.add(event.code);
+    else this.localPressedKeys.delete(event.code);
+  }
+
+  updateLocalKeyboardAiming(dt) {
+    if (!this.localKeyboardTestActive || !this.localRoom || this.localRoom.gameOver) return;
+    if (!this.localPressedKeys.size) return;
+
+    const delta = Math.max(0.01, dt) * LOCAL_KEYBOARD_AIM_SPEED;
+    const left = this.localRoom.ensureArcherControl('left', 0);
+    const right = this.localRoom.ensureArcherControl('right', 0);
+    if (!left || !right) return;
+
+    const leftDx = (this.localPressedKeys.has('KeyA') ? 1 : 0) - (this.localPressedKeys.has('KeyD') ? 1 : 0);
+    const leftDy = (this.localPressedKeys.has('KeyS') ? 1 : 0) - (this.localPressedKeys.has('KeyW') ? 1 : 0);
+    const rightDx = (this.localPressedKeys.has('ArrowLeft') ? 1 : 0) - (this.localPressedKeys.has('ArrowRight') ? 1 : 0);
+    const rightDy = (this.localPressedKeys.has('ArrowDown') ? 1 : 0) - (this.localPressedKeys.has('ArrowUp') ? 1 : 0);
+
+    if (leftDx || leftDy) {
+      const next = this.localRoom.normalizePull('left', left.pullX + leftDx * delta, left.pullY + leftDy * delta);
+      left.pullX = next.x;
+      left.pullY = next.y;
+    }
+    if (rightDx || rightDy) {
+      const next = this.localRoom.normalizePull('right', right.pullX + rightDx * delta, right.pullY + rightDy * delta);
+      right.pullX = next.x;
+      right.pullY = next.y;
+    }
+
+    this.localRoom.syncSidePrimaryPull('left');
+    this.localRoom.syncSidePrimaryPull('right');
   }
 
   pushHostState(force = false) {
@@ -905,10 +1019,12 @@ export class GameClient {
     if (s.gameOver) {
       const leftSummary = arrowAccuracySummary('West', s.left);
       const rightSummary = arrowAccuracySummary('East', s.right);
-      this.centerHud.textContent = `Final | Winner ${sideName(s.winner)} | ${leftSummary} | ${rightSummary}`;
+      const localHint = this.localKeyboardTestActive ? ' | Local Keyboard Test' : '';
+      this.centerHud.textContent = `Final | Winner ${sideName(s.winner)}${localHint} | ${leftSummary} | ${rightSummary}`;
       return;
     }
-    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()} | Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
+    const localHint = this.localKeyboardTestActive ? ' | Aim: West WASD / East Arrows' : '';
+    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
   }
 
   initFromUrl() {
