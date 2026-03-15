@@ -71,6 +71,7 @@ const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
 const SHIELD_HEAD_GUARD_TTL = 1.2;
 const SPECIAL_FAIL_TTL = 5;
+const SPECIAL_ROLL_TTL = 6;
 const SPECIAL_SPAWN_QUEUE_ORDER = [
   'dragon',
   'shield',
@@ -170,6 +171,18 @@ function finiteOrNull(value, places = 1) {
 function serializeSideState(side) {
   const state = side || {};
   const archerPulls = Array.isArray(state.archerPulls) ? state.archerPulls : [];
+  const specialRollByTypeRaw = state.specialRollByType && typeof state.specialRollByType === 'object'
+    ? state.specialRollByType
+    : {};
+  const specialRollByType = {};
+  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+    const entry = specialRollByTypeRaw[type];
+    specialRollByType[type] = {
+      success: typeof entry?.success === 'boolean' ? entry.success : null,
+      chance: finiteOrNull(entry?.chance, 3),
+      roll: finiteOrNull(entry?.roll, 3),
+    };
+  }
   return {
     towerHp: roundTo(state.towerHp, 1),
     gold: roundTo(state.gold, 1),
@@ -212,6 +225,12 @@ function serializeSideState(side) {
     candleActive: Boolean(state.candleActive),
     specialFailType: typeof state.specialFailType === 'string' ? state.specialFailType : null,
     specialFailTtl: roundTo(state.specialFailTtl, 2),
+    specialRollType: typeof state.specialRollType === 'string' ? state.specialRollType : null,
+    specialRollSuccess: typeof state.specialRollSuccess === 'boolean' ? state.specialRollSuccess : null,
+    specialRollChance: finiteOrNull(state.specialRollChance, 3),
+    specialRollValue: finiteOrNull(state.specialRollValue, 3),
+    specialRollTtl: roundTo(state.specialRollTtl, 2),
+    specialRollByType,
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
   };
@@ -273,6 +292,12 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     candleActive: false,
     specialFailType: null,
     specialFailTtl: 0,
+    specialRollType: null,
+    specialRollSuccess: null,
+    specialRollChance: null,
+    specialRollValue: null,
+    specialRollTtl: 0,
+    specialRollByType: {},
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
   };
@@ -762,8 +787,22 @@ class GameRoom {
     this.right.minionCd = Math.max(0, this.right.minionCd - dt);
     this.left.specialFailTtl = Math.max(0, (Number(this.left.specialFailTtl) || 0) - dt);
     this.right.specialFailTtl = Math.max(0, (Number(this.right.specialFailTtl) || 0) - dt);
+    this.left.specialRollTtl = Math.max(0, (Number(this.left.specialRollTtl) || 0) - dt);
+    this.right.specialRollTtl = Math.max(0, (Number(this.right.specialRollTtl) || 0) - dt);
     if (this.left.specialFailTtl === 0) this.left.specialFailType = null;
     if (this.right.specialFailTtl === 0) this.right.specialFailType = null;
+    if (this.left.specialRollTtl === 0) {
+      this.left.specialRollType = null;
+      this.left.specialRollSuccess = null;
+      this.left.specialRollChance = null;
+      this.left.specialRollValue = null;
+    }
+    if (this.right.specialRollTtl === 0) {
+      this.right.specialRollType = null;
+      this.right.specialRollSuccess = null;
+      this.right.specialRollChance = null;
+      this.right.specialRollValue = null;
+    }
 
     if (this.sharedShotCd === 0) {
       if (this.archersPerSide > 1) {
@@ -3136,6 +3175,7 @@ class GameRoom {
     const side = this[sideName];
     if (countSpawn) side.spawnCount += 1;
     if (!Array.isArray(side.pendingSpecialSpawns)) side.pendingSpecialSpawns = [];
+    if (!side.specialRollByType || typeof side.specialRollByType !== 'object') side.specialRollByType = {};
     const x = sideName === 'left' ? TOWER_X_LEFT + 56 : TOWER_X_RIGHT - 56;
     let hp = this.statMinionHp(side);
     let dmg = this.statMinionDamage(side);
@@ -3181,8 +3221,18 @@ class GameRoom {
     let spawnType = forceType;
     if (!spawnType && queuedType) {
       const chance = this.statSpecialSuccessChance(side, queuedType);
-      if (Math.random() <= chance) {
+      const roll = Math.random();
+      const success = roll <= chance;
+      side.specialRollType = queuedType;
+      side.specialRollSuccess = success;
+      side.specialRollChance = chance;
+      side.specialRollValue = roll;
+      side.specialRollTtl = SPECIAL_ROLL_TTL;
+      side.specialRollByType[queuedType] = { success, chance, roll };
+      if (success) {
         spawnType = queuedType;
+        side.specialFailType = null;
+        side.specialFailTtl = 0;
       } else {
         failedSpecialType = queuedType;
         side.specialFailType = queuedType;
@@ -3204,6 +3254,10 @@ class GameRoom {
     let radius = 16;
     let visualPower = power;
     let spawnY = TOWER_Y + (Math.random() * 110 - 55);
+    if (failedSpecialType) {
+      hp *= 1.5;
+      visualPower += 2;
+    }
 
     if (isSuper) {
       const levelBoost = Math.max(1, side.superMinionLevel);

@@ -1113,9 +1113,15 @@ export class GameRenderer {
 
     const spawnEvery = this.spawnEveryForSide(sideState);
     const minionCd = Math.max(0, Number(sideState?.minionCd) || 0);
+    const specialRollByType = sideState?.specialRollByType && typeof sideState.specialRollByType === 'object'
+      ? sideState.specialRollByType
+      : {};
 
     return rows.map((row) => {
       const rollChance = this.specialSpawnChanceForRow(sideState, row.type);
+      const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
+      const lastRollEntry = specialType ? specialRollByType[specialType] : null;
+      const lastRollSuccess = typeof lastRollEntry?.success === 'boolean' ? lastRollEntry.success : null;
       if (row.type === 'candle') {
         const etaSec = candleActive ? 0 : candleCd;
         const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / 90));
@@ -1130,6 +1136,7 @@ export class GameRenderer {
           etaSec,
           candleActive,
           rollChance,
+          lastRollSuccess,
         };
       }
       const every = this.trainingEveryForType(sideState, row.type);
@@ -1151,6 +1158,7 @@ export class GameRenderer {
         progress,
         etaSec,
         rollChance,
+        lastRollSuccess,
       };
     });
   }
@@ -1159,7 +1167,7 @@ export class GameRenderer {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const panelW = 250;
-    const panelH = 266;
+    const panelH = 286;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
     const bx = side === 'left' ? 220 : world.w - 220;
@@ -1168,6 +1176,11 @@ export class GameRenderer {
     const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
     const failType = typeof sideState?.specialFailType === 'string' ? sideState.specialFailType : null;
     const failTtl = Math.max(0, Number(sideState?.specialFailTtl) || 0);
+    const rollType = typeof sideState?.specialRollType === 'string' ? sideState.specialRollType : null;
+    const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
+    const rollChance = Number(sideState?.specialRollChance);
+    const rollValue = Number(sideState?.specialRollValue);
+    const rollTtl = Math.max(0, Number(sideState?.specialRollTtl) || 0);
 
     // Barracks building silhouette.
     ctx.fillStyle = side === 'left' ? '#213650cc' : '#4a2830cc';
@@ -1224,21 +1237,38 @@ export class GameRenderer {
     );
     ctx.fillStyle = '#9ec0e7';
     ctx.fillText(`Special Chance L${specialRateLevel} (+${specialBonusPct}%)`, px + 10, py + 38);
-    if (failType && failTtl > 0) {
-      ctx.fillStyle = '#ffb9a9';
+    if (
+      rollType
+      && rollTtl > 0
+      && Number.isFinite(rollChance)
+      && Number.isFinite(rollValue)
+      && rollSuccess != null
+    ) {
+      const rollChancePct = Math.round(rollChance * 100);
+      const rollValuePct = Math.round(rollValue * 100);
+      const statusTag = rollSuccess ? '[OK]' : '[X]';
+      const outcomeText = rollSuccess ? 'spawned' : 'failed -> militia hat';
+      ctx.fillStyle = rollSuccess ? '#97f2c2' : '#ffb9a9';
       ctx.fillText(
-        `Last fail: ${this.failedSpecialLabel(failType)} -> Militia (${Math.ceil(failTtl)}s)`,
+        `Last roll ${statusTag} ${this.failedSpecialLabel(rollType)} ${rollSuccess ? 'SUCCESS' : 'FAIL'}`,
         px + 10,
         py + 48
       );
+      ctx.fillStyle = '#b8c8e2';
+      ctx.fillText(`Chance ${rollChancePct}% | Roll ${rollValuePct}% | ${outcomeText}`, px + 10, py + 58);
     } else {
+      const fallbackText = failType && failTtl > 0
+        ? `Last fail: ${this.failedSpecialLabel(failType)} (${Math.ceil(failTtl)}s)`
+        : 'Last roll: waiting on next special';
       ctx.fillStyle = '#8ea2bf';
-      ctx.fillText('Last fail: none', px + 10, py + 48);
+      ctx.fillText(fallbackText, px + 10, py + 48);
+      ctx.fillStyle = '#8ea2bf';
+      ctx.fillText('Chance vs roll appears when a special attempt happens', px + 10, py + 58);
     }
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
-      const ry = py + 58 + i * rowH;
+      const ry = py + 68 + i * rowH;
 
       ctx.fillStyle = i % 2 === 0 ? '#162033a8' : '#121a2ba8';
       ctx.fillRect(px + 6, ry - 10, panelW - 12, rowH - 1);
@@ -1252,8 +1282,19 @@ export class GameRenderer {
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(row.label, px + 24, ry + 1);
+      let rowStatusTag = '[ ]';
+      let rowStatusColor = '#9da8ba';
+      if (row.lastRollSuccess === true) {
+        rowStatusTag = '[OK]';
+        rowStatusColor = '#8affcf';
+      } else if (row.lastRollSuccess === false) {
+        rowStatusTag = '[X]';
+        rowStatusColor = '#ffb9a9';
+      }
+      ctx.fillStyle = rowStatusColor;
+      ctx.fillText(rowStatusTag, px + 58, ry + 1);
       ctx.fillStyle = '#c7d4e9';
-      ctx.fillText(`L${row.level} A${Math.max(0, Number(row.activeCount) || 0)}`, px + 76, ry + 1);
+      ctx.fillText(`L${row.level} A${Math.max(0, Number(row.activeCount) || 0)}`, px + 94, ry + 1);
 
       const barX = px + 108;
       const barY = ry - 8;
@@ -2059,7 +2100,8 @@ export class GameRenderer {
     const hpPct = Math.max(0, minion.hp / minion.maxHp);
     const hpW = 36 * scale;
     const hpX = x - hpW / 2;
-    const hpY = y - (26 * scale + 2);
+    const hatLift = minion.failedSpecialType ? 12 : 0;
+    const hpY = y - (26 * scale + 2 + hatLift);
     ctx.fillStyle = '#101420cc';
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
@@ -2732,17 +2774,170 @@ export class GameRenderer {
     this.drawMinionHpBar(minion, x, y + 2, Math.max(1.4, (baseR / 16) * 1.25));
   }
 
+  drawFailedSpecialMini(type, x, y, size = 3, style = null) {
+    const { ctx } = this;
+    const s = Math.max(2, size);
+    const cap = style?.cap || '#6f7f97';
+    const brim = style?.brim || '#d6e3f6';
+    ctx.save();
+    ctx.translate(x, y);
+
+    if (type === 'dragon') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s * 1.25, s * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.4, -s * 0.5);
+      ctx.lineTo(-s * 1.8, -s * 1.2);
+      ctx.lineTo(-s * 1.1, -s * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(s * 0.4, -s * 0.5);
+      ctx.lineTo(s * 1.8, -s * 1.2);
+      ctx.lineTo(s * 1.1, -s * 0.2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (type === 'shield') {
+      ctx.fillStyle = cap;
+      ctx.fillRect(-s * 1.1, -s * 1.35, s * 2.2, s * 2.4);
+      ctx.strokeStyle = brim;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-s * 1.1, -s * 1.35, s * 2.2, s * 2.4);
+      ctx.strokeStyle = brim;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 1.2);
+      ctx.lineTo(0, s * 1.05);
+      ctx.moveTo(-s * 0.9, -s * 0.1);
+      ctx.lineTo(s * 0.9, -s * 0.1);
+      ctx.stroke();
+    } else if (type === 'digger') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.4, s * 1, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#c9b18f';
+      ctx.fillRect(s * 0.5, -s * 0.6, s * 0.35, s * 1.6);
+      ctx.fillStyle = brim;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.75, s * 1.1);
+      ctx.lineTo(s * 1.45, s * 0.75);
+      ctx.lineTo(s * 0.75, s * 0.4);
+      ctx.closePath();
+      ctx.fill();
+    } else if (type === 'necrominion') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0f1520';
+      ctx.beginPath();
+      ctx.arc(-s * 0.35, -s * 0.2, s * 0.2, 0, Math.PI * 2);
+      ctx.arc(s * 0.35, -s * 0.2, s * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = brim;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.5, s * 0.4);
+      ctx.lineTo(s * 0.5, s * 0.4);
+      ctx.stroke();
+    } else if (type === 'gunner') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.45, s * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(-s * 0.7, s * 0.1, s * 1.4, s * 0.95);
+      ctx.strokeStyle = brim;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.2, s * 0.35);
+      ctx.lineTo(s * 1.8, s * 0.05);
+      ctx.stroke();
+    } else if (type === 'rider') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.ellipse(0, s * 0.2, s * 1.45, s * 0.72, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = brim;
+      ctx.beginPath();
+      ctx.arc(-s * 0.1, -s * 0.7, s * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#2d3d5f';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(s * 0.75, -s * 0.35);
+      ctx.lineTo(s * 1.55, -s * 0.95);
+      ctx.stroke();
+    } else if (type === 'monk') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 1.15);
+      ctx.lineTo(-s * 1, s * 1);
+      ctx.lineTo(s * 1, s * 1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = brim;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, -s * 1.05, s * 0.45, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (type === 'hero') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.45, s * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = brim;
+      ctx.beginPath();
+      ctx.moveTo(-s * 1.1, -s * 0.25);
+      ctx.lineTo(-s * 0.1, s * 1.25);
+      ctx.lineTo(s * 0.95, -s * 0.25);
+      ctx.closePath();
+      ctx.fill();
+    } else if (type === 'president') {
+      ctx.fillStyle = '#4a2d1f';
+      ctx.fillRect(-s * 1.05, s * 0.05, s * 2.1, s * 1.05);
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.65, s * 0.58, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = brim;
+      ctx.fillRect(-s * 0.18, s * 0.2, s * 0.36, s * 0.82);
+    } else if (type === 'super') {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = brim;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#fff6bf';
+      ctx.font = `${Math.max(5, Math.floor(s * 1.6))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('S', 0, s * 0.45);
+    } else {
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, 0, s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
   drawFailedSpecialHat(minion, x, y, bodyR, scale = 1) {
     const type = typeof minion?.failedSpecialType === 'string' ? minion.failedSpecialType : null;
     if (!type) return;
     const style = FAILED_SPECIAL_HAT_STYLES[type] || null;
     if (!style) return;
     const { ctx } = this;
-    const hatW = Math.max(14, bodyR * scale * 1.1);
-    const hatH = Math.max(8, bodyR * scale * 0.68);
-    const brimW = hatW + 7;
-    const brimH = Math.max(3, bodyR * scale * 0.2);
-    const topY = y - bodyR * scale - 9;
+    const hatW = Math.max(16, bodyR * scale * 1.34);
+    const hatH = Math.max(9, bodyR * scale * 0.82);
+    const brimW = hatW + 10;
+    const brimH = Math.max(3.4, bodyR * scale * 0.28);
+    const topY = y - bodyR * scale - 12;
 
     ctx.fillStyle = '#00000025';
     ctx.beginPath();
@@ -2751,9 +2946,10 @@ export class GameRenderer {
 
     ctx.fillStyle = style.cap;
     ctx.beginPath();
-    ctx.moveTo(x - hatW * 0.46, topY);
-    ctx.lineTo(x + hatW * 0.46, topY);
-    ctx.lineTo(x, topY - hatH);
+    ctx.moveTo(x - hatW * 0.55, topY);
+    ctx.lineTo(x + hatW * 0.35, topY);
+    ctx.lineTo(x + hatW * 0.15, topY - hatH);
+    ctx.lineTo(x - hatW * 0.45, topY - hatH);
     ctx.closePath();
     ctx.fill();
 
@@ -2762,11 +2958,7 @@ export class GameRenderer {
     ctx.strokeStyle = '#182233';
     ctx.lineWidth = 1;
     ctx.strokeRect(x - brimW * 0.5, topY, brimW, brimH);
-
-    ctx.fillStyle = '#f8fbff';
-    ctx.font = 'bold 7px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(style.code, x, topY + brimH - 0.5);
+    this.drawFailedSpecialMini(type, x - hatW * 0.08, topY - hatH - 2.5, Math.max(3.8, bodyR * scale * 0.24), style);
   }
 
   drawMinionSprite(minion) {
