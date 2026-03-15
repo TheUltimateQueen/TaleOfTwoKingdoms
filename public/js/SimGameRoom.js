@@ -791,18 +791,7 @@ class GameRoom {
     this.right.specialRollTtl = Math.max(0, (Number(this.right.specialRollTtl) || 0) - dt);
     if (this.left.specialFailTtl === 0) this.left.specialFailType = null;
     if (this.right.specialFailTtl === 0) this.right.specialFailType = null;
-    if (this.left.specialRollTtl === 0) {
-      this.left.specialRollType = null;
-      this.left.specialRollSuccess = null;
-      this.left.specialRollChance = null;
-      this.left.specialRollValue = null;
-    }
-    if (this.right.specialRollTtl === 0) {
-      this.right.specialRollType = null;
-      this.right.specialRollSuccess = null;
-      this.right.specialRollChance = null;
-      this.right.specialRollValue = null;
-    }
+    // Keep last special roll result visible for UI history; TTL controls recency only.
 
     if (this.sharedShotCd === 0) {
       if (this.archersPerSide > 1) {

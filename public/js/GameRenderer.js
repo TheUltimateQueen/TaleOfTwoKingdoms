@@ -1166,8 +1166,8 @@ export class GameRenderer {
   drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
-    const panelW = 250;
-    const panelH = 286;
+    const panelW = 336;
+    const panelH = 304;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
     const bx = side === 'left' ? 220 : world.w - 220;
@@ -1180,7 +1180,6 @@ export class GameRenderer {
     const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
     const rollChance = Number(sideState?.specialRollChance);
     const rollValue = Number(sideState?.specialRollValue);
-    const rollTtl = Math.max(0, Number(sideState?.specialRollTtl) || 0);
 
     // Barracks building silhouette.
     ctx.fillStyle = side === 'left' ? '#213650cc' : '#4a2830cc';
@@ -1239,36 +1238,44 @@ export class GameRenderer {
     ctx.fillText(`Special Chance L${specialRateLevel} (+${specialBonusPct}%)`, px + 10, py + 38);
     if (
       rollType
-      && rollTtl > 0
       && Number.isFinite(rollChance)
       && Number.isFinite(rollValue)
       && rollSuccess != null
     ) {
-      const rollChancePct = Math.round(rollChance * 100);
-      const rollValuePct = Math.round(rollValue * 100);
       const statusTag = rollSuccess ? '[OK]' : '[X]';
-      const outcomeText = rollSuccess ? 'spawned' : 'failed -> militia hat';
       ctx.fillStyle = rollSuccess ? '#97f2c2' : '#ffb9a9';
       ctx.fillText(
-        `Last roll ${statusTag} ${this.failedSpecialLabel(rollType)} ${rollSuccess ? 'SUCCESS' : 'FAIL'}`,
+        `Last roll ${statusTag} ${this.failedSpecialLabel(rollType)}`,
         px + 10,
         py + 48
       );
-      ctx.fillStyle = '#b8c8e2';
-      ctx.fillText(`Chance ${rollChancePct}% | Roll ${rollValuePct}% | ${outcomeText}`, px + 10, py + 58);
+      this.drawSpecialRollOutcomeBar(px + 10, py + 52, panelW - 52, 9, rollChance, rollValue, rollSuccess);
+      this.drawSpecialRollTypeBadge(rollType, px + panelW - 20, py + 56, side);
     } else {
       const fallbackText = failType && failTtl > 0
         ? `Last fail: ${this.failedSpecialLabel(failType)} (${Math.ceil(failTtl)}s)`
-        : 'Last roll: waiting on next special';
+        : 'Last roll: waiting on first special attempt';
       ctx.fillStyle = '#8ea2bf';
-      ctx.fillText(fallbackText, px + 10, py + 48);
-      ctx.fillStyle = '#8ea2bf';
-      ctx.fillText('Chance vs roll appears when a special attempt happens', px + 10, py + 58);
+      ctx.fillText(
+        fallbackText,
+        px + 10,
+        py + 48
+      );
+      this.drawSpecialRollOutcomeBar(px + 10, py + 52, panelW - 52, 9, null, null, null);
+      if (failType && failTtl > 0) this.drawSpecialRollTypeBadge(failType, px + panelW - 20, py + 56, side);
     }
+
+    const colLabelX = px + 24;
+    const colStatusX = px + 62;
+    const colMetaX = px + 96;
+    const barX = px + 162;
+    const barYOff = -8;
+    const barW = 78;
+    const barH = 6;
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
-      const ry = py + 68 + i * rowH;
+      const ry = py + 76 + i * rowH;
 
       ctx.fillStyle = i % 2 === 0 ? '#162033a8' : '#121a2ba8';
       ctx.fillRect(px + 6, ry - 10, panelW - 12, rowH - 1);
@@ -1281,7 +1288,7 @@ export class GameRenderer {
       ctx.fillStyle = '#eaf0fc';
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(row.label, px + 24, ry + 1);
+      ctx.fillText(row.label, colLabelX, ry + 1);
       let rowStatusTag = '[ ]';
       let rowStatusColor = '#9da8ba';
       if (row.lastRollSuccess === true) {
@@ -1292,14 +1299,12 @@ export class GameRenderer {
         rowStatusColor = '#ffb9a9';
       }
       ctx.fillStyle = rowStatusColor;
-      ctx.fillText(rowStatusTag, px + 58, ry + 1);
+      ctx.fillText(rowStatusTag, colStatusX, ry + 1);
       ctx.fillStyle = '#c7d4e9';
-      ctx.fillText(`L${row.level} A${Math.max(0, Number(row.activeCount) || 0)}`, px + 94, ry + 1);
+      const active = Math.max(0, Number(row.activeCount) || 0);
+      ctx.fillText(`L${row.level} A${active}`, colMetaX, ry + 1);
 
-      const barX = px + 108;
-      const barY = ry - 8;
-      const barW = 66;
-      const barH = 6;
+      const barY = ry + barYOff;
       ctx.fillStyle = '#1f2940';
       ctx.fillRect(barX, barY, barW, barH);
       ctx.fillStyle = row.unlocked ? this.withAlpha(sidePalette.primary, 0.95) : '#6f7688';
@@ -1309,24 +1314,23 @@ export class GameRenderer {
       if (row.type === 'candle') {
         if (row.candleActive) {
           ctx.fillStyle = '#ffe8a6';
-          ctx.fillText(`active x${Math.max(0, Number(row.activeCount) || 0)}`, px + panelW - 10, ry + 1);
+          ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
         } else {
           ctx.fillStyle = '#b8c8e2';
-          ctx.fillText(`x${Math.max(0, Number(row.activeCount) || 0)} train ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
+          ctx.fillText(`x${active} train ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
         }
       } else if (!row.unlocked) {
         ctx.fillStyle = '#9da8ba';
-        ctx.fillText(`x${Math.max(0, Number(row.activeCount) || 0)} ${row.unlockHint || 'locked'}`, px + panelW - 10, ry + 1);
+        ctx.fillText(`x${active} ${row.unlockHint || 'locked'}`, px + panelW - 10, ry + 1);
       } else if (row.every <= 1) {
         ctx.fillStyle = '#8affcf';
-        ctx.fillText(`active x${Math.max(0, Number(row.activeCount) || 0)}`, px + panelW - 10, ry + 1);
+        ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
-        const active = Math.max(0, Number(row.activeCount) || 0);
         const rollChance = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
         const chanceTag = rollChance == null ? '' : `${rollChance}% `;
         const tag = row.inSpawns === 1
-          ? `x${active} ${chanceTag}NEXT ${eta}s`
+          ? `x${active} ${chanceTag}next ${eta}s`
           : `x${active} ${row.inSpawns}sp ${chanceTag}${eta}s`;
         ctx.fillStyle = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
         ctx.fillText(tag, px + panelW - 10, ry + 1);
@@ -1343,6 +1347,87 @@ export class GameRenderer {
     ctx.font = '8px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
+  }
+
+  drawSpecialRollOutcomeBar(x, y, w, h, chance, roll, success) {
+    const { ctx } = this;
+    const chanceClamped = Number.isFinite(chance) ? Math.max(0, Math.min(1, chance)) : null;
+    const rollClamped = Number.isFinite(roll) ? Math.max(0, Math.min(1, roll)) : null;
+
+    ctx.fillStyle = '#162133';
+    ctx.fillRect(x, y, w, h);
+
+    if (chanceClamped == null) {
+      ctx.strokeStyle = '#2b3a56';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = '#73839f';
+      ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('No roll yet', x + w * 0.5, y + h - 1);
+      return;
+    }
+
+    const splitX = x + w * chanceClamped;
+    ctx.fillStyle = '#6e2b34';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#2d784f';
+    ctx.fillRect(x, y, Math.max(0, splitX - x), h);
+
+    ctx.strokeStyle = '#f4f8ffcc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(splitX + 0.5, y - 1);
+    ctx.lineTo(splitX + 0.5, y + h + 1);
+    ctx.stroke();
+
+    if (rollClamped != null) {
+      const rollX = x + w * rollClamped;
+      const marker = success === true ? '#86ffd3' : '#ff9f92';
+      ctx.strokeStyle = marker;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(rollX + 0.5, y - 2);
+      ctx.lineTo(rollX + 0.5, y + h + 2);
+      ctx.stroke();
+
+      ctx.fillStyle = marker;
+      ctx.beginPath();
+      ctx.moveTo(rollX, y - 4);
+      ctx.lineTo(rollX - 3, y - 1);
+      ctx.lineTo(rollX + 3, y - 1);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = '#2b3a56';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = '#b8c8e2';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`spawn ${Math.round(chanceClamped * 100)}%`, x + 3, y + h - 1);
+    if (rollClamped != null) {
+      ctx.textAlign = 'right';
+      ctx.fillText(`roll ${Math.round(rollClamped * 100)}%`, x + w - 3, y + h - 1);
+    }
+  }
+
+  drawSpecialRollTypeBadge(type, x, y, side = 'left') {
+    if (!type || !FAILED_SPECIAL_HAT_STYLES[type]) return;
+    const { ctx } = this;
+    const style = FAILED_SPECIAL_HAT_STYLES[type];
+    ctx.fillStyle = '#0f1727';
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = style.brim;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, Math.PI * 2);
+    ctx.stroke();
+    this.drawFailedSpecialMini(type, x, y + 1, 8.2, side);
   }
 
   drawCastle(side, x, y, hp, sideState = null, archerPulls = null) {
@@ -2108,7 +2193,8 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
   }
 
-  drawGunnerSprite(minion) {
+  drawGunnerSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2189,14 +2275,17 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#ffd7aa';
-    ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('GUNNER', x, y - bodyH * 1.18);
-    this.drawMinionHpBar(minion, x, y, scale);
+    if (showHud) {
+      ctx.fillStyle = '#ffd7aa';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('GUNNER', x, y - bodyH * 1.18);
+      this.drawMinionHpBar(minion, x, y, scale);
+    }
   }
 
-  drawNecroSprite(minion) {
+  drawNecroSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2281,14 +2370,17 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#a9ffe0';
-    ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('NECRO', x, y - bodyR - (minion.super ? 26 : 20));
-    this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.95));
+    if (showHud) {
+      ctx.fillStyle = '#a9ffe0';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('NECRO', x, y - bodyR - (minion.super ? 26 : 20));
+      this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.95));
+    }
   }
 
-  drawBomberSprite(minion) {
+  drawBomberSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2336,14 +2428,17 @@ export class GameRenderer {
     ctx.arc(bombX + dir * 12.4, bombY - bombR - 8.2, 1.5, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#f5d39f';
-    ctx.font = `bold ${minion.super ? 12 : 10}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('BOMBER', x, y - r - 16);
-    this.drawMinionHpBar(minion, x, y, scale);
+    if (showHud) {
+      ctx.fillStyle = '#f5d39f';
+      ctx.font = `bold ${minion.super ? 12 : 10}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('BOMBER', x, y - r - 16);
+      this.drawMinionHpBar(minion, x, y, scale);
+    }
   }
 
-  drawHeroSprite(minion) {
+  drawHeroSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2454,17 +2549,20 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.strokeStyle = '#311707';
-    ctx.lineWidth = 2.6;
-    ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.strokeText('HERO!!!', x, y - bodyR - 20);
-    ctx.fillStyle = '#ffe4b0';
-    ctx.fillText('HERO!!!', x, y - bodyR - 20);
-    this.drawMinionHpBar(minion, x, y, scale);
+    if (showHud) {
+      ctx.strokeStyle = '#311707';
+      ctx.lineWidth = 2.6;
+      ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.strokeText('HERO!!!', x, y - bodyR - 20);
+      ctx.fillStyle = '#ffe4b0';
+      ctx.fillText('HERO!!!', x, y - bodyR - 20);
+      this.drawMinionHpBar(minion, x, y, scale);
+    }
   }
 
-  drawMonkSprite(minion) {
+  drawMonkSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2549,14 +2647,17 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#ddffcb';
-    ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('MONK', x, y - bodyR - 18);
-    this.drawMinionHpBar(minion, x, y, scale);
+    if (showHud) {
+      ctx.fillStyle = '#ddffcb';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('MONK', x, y - bodyR - 18);
+      this.drawMinionHpBar(minion, x, y, scale);
+    }
   }
 
-  drawPresidentSprite(minion) {
+  drawPresidentSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -2655,14 +2756,17 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#ffe3b9';
-    ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('PRESIDENT', x, y - bodyR - 18);
-    this.drawMinionHpBar(minion, x, y, scale);
+    if (showHud) {
+      ctx.fillStyle = '#ffe3b9';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('PRESIDENT', x, y - bodyR - 18);
+      this.drawMinionHpBar(minion, x, y, scale);
+    }
   }
 
-  drawShieldBearerSprite(minion) {
+  drawShieldBearerSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const x = minion.x;
     const y = minion.y;
@@ -2767,163 +2871,111 @@ export class GameRenderer {
     ctx.stroke();
     ctx.restore();
 
-    ctx.fillStyle = '#d9ecff';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('SHIELD', x, y - bodyH - headR - 18);
-    this.drawMinionHpBar(minion, x, y + 2, Math.max(1.4, (baseR / 16) * 1.25));
+    if (showHud) {
+      ctx.fillStyle = '#d9ecff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('SHIELD', x, y - bodyH - headR - 18);
+      this.drawMinionHpBar(minion, x, y + 2, Math.max(1.4, (baseR / 16) * 1.25));
+    }
   }
 
-  drawFailedSpecialMini(type, x, y, size = 3, style = null) {
-    const { ctx } = this;
-    const s = Math.max(2, size);
-    const cap = style?.cap || '#6f7f97';
-    const brim = style?.brim || '#d6e3f6';
-    ctx.save();
-    ctx.translate(x, y);
-
+  miniFailedSpecialMinion(type, side = 'left') {
+    const base = {
+      side,
+      x: 0,
+      y: 0,
+      r: 16,
+      hp: 100,
+      maxHp: 100,
+      tier: 1,
+      level: 8,
+      super: false,
+      summoned: false,
+      explosive: false,
+      gunner: false,
+      rider: false,
+      riderChargeReady: false,
+      digger: false,
+      digPhase: 0.8,
+      monk: false,
+      monkHealScale: 1,
+      hero: false,
+      heroSwing: 1.1,
+      shieldBearer: false,
+      shieldPushTtl: 0,
+      shieldPushScale: 1,
+      shieldHeadGuardTtl: 0,
+      president: false,
+      presidentSetup: true,
+      presidentAuraRadius: 180,
+      dragon: false,
+      flying: false,
+      flyPhase: 0.8,
+      dragonBreathTtl: 0,
+      dragonBreathToX: null,
+      dragonBreathToY: null,
+      gunFlashTtl: 0,
+      necrominion: false,
+      failedSpecialType: null,
+    };
     if (type === 'dragon') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, s * 1.25, s * 0.75, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.4, -s * 0.5);
-      ctx.lineTo(-s * 1.8, -s * 1.2);
-      ctx.lineTo(-s * 1.1, -s * 0.2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(s * 0.4, -s * 0.5);
-      ctx.lineTo(s * 1.8, -s * 1.2);
-      ctx.lineTo(s * 1.1, -s * 0.2);
-      ctx.closePath();
-      ctx.fill();
+      base.dragon = true;
+      base.flying = true;
+      base.r = 23;
+      base.level = 14;
     } else if (type === 'shield') {
-      ctx.fillStyle = cap;
-      ctx.fillRect(-s * 1.1, -s * 1.35, s * 2.2, s * 2.4);
-      ctx.strokeStyle = brim;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-s * 1.1, -s * 1.35, s * 2.2, s * 2.4);
-      ctx.strokeStyle = brim;
-      ctx.beginPath();
-      ctx.moveTo(0, -s * 1.2);
-      ctx.lineTo(0, s * 1.05);
-      ctx.moveTo(-s * 0.9, -s * 0.1);
-      ctx.lineTo(s * 0.9, -s * 0.1);
-      ctx.stroke();
+      base.shieldBearer = true;
+      base.r = 26;
     } else if (type === 'digger') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, -s * 0.4, s * 1, Math.PI, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#c9b18f';
-      ctx.fillRect(s * 0.5, -s * 0.6, s * 0.35, s * 1.6);
-      ctx.fillStyle = brim;
-      ctx.beginPath();
-      ctx.moveTo(s * 0.75, s * 1.1);
-      ctx.lineTo(s * 1.45, s * 0.75);
-      ctx.lineTo(s * 0.75, s * 0.4);
-      ctx.closePath();
-      ctx.fill();
+      base.digger = true;
+      base.r = 13;
     } else if (type === 'necrominion') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, 0, s * 1.05, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#0f1520';
-      ctx.beginPath();
-      ctx.arc(-s * 0.35, -s * 0.2, s * 0.2, 0, Math.PI * 2);
-      ctx.arc(s * 0.35, -s * 0.2, s * 0.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = brim;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.5, s * 0.4);
-      ctx.lineTo(s * 0.5, s * 0.4);
-      ctx.stroke();
+      base.necrominion = true;
+      base.r = 20;
     } else if (type === 'gunner') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, -s * 0.45, s * 0.62, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(-s * 0.7, s * 0.1, s * 1.4, s * 0.95);
-      ctx.strokeStyle = brim;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(s * 0.2, s * 0.35);
-      ctx.lineTo(s * 1.8, s * 0.05);
-      ctx.stroke();
+      base.gunner = true;
+      base.r = 15;
+      base.level = 9;
     } else if (type === 'rider') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.ellipse(0, s * 0.2, s * 1.45, s * 0.72, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = brim;
-      ctx.beginPath();
-      ctx.arc(-s * 0.1, -s * 0.7, s * 0.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#2d3d5f';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(s * 0.75, -s * 0.35);
-      ctx.lineTo(s * 1.55, -s * 0.95);
-      ctx.stroke();
+      base.rider = true;
+      base.riderChargeReady = true;
+      base.r = 18;
+      base.level = 10;
     } else if (type === 'monk') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.moveTo(0, -s * 1.15);
-      ctx.lineTo(-s * 1, s * 1);
-      ctx.lineTo(s * 1, s * 1);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = brim;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(0, -s * 1.05, s * 0.45, 0, Math.PI * 2);
-      ctx.stroke();
+      base.monk = true;
+      base.r = 18;
+      base.level = 10;
     } else if (type === 'hero') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, -s * 0.45, s * 0.62, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = brim;
-      ctx.beginPath();
-      ctx.moveTo(-s * 1.1, -s * 0.25);
-      ctx.lineTo(-s * 0.1, s * 1.25);
-      ctx.lineTo(s * 0.95, -s * 0.25);
-      ctx.closePath();
-      ctx.fill();
+      base.hero = true;
+      base.r = 23;
+      base.level = 16;
+      base.tier = 2;
     } else if (type === 'president') {
-      ctx.fillStyle = '#4a2d1f';
-      ctx.fillRect(-s * 1.05, s * 0.05, s * 2.1, s * 1.05);
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, -s * 0.65, s * 0.58, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = brim;
-      ctx.fillRect(-s * 0.18, s * 0.2, s * 0.36, s * 0.82);
+      base.president = true;
+      base.r = 18;
+      base.level = 12;
     } else if (type === 'super') {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, 0, s * 1.1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = brim;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(0, 0, s * 1.5, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = '#fff6bf';
-      ctx.font = `${Math.max(5, Math.floor(s * 1.6))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('S', 0, s * 0.45);
+      base.super = true;
+      base.r = 20;
+      base.tier = 2;
+      base.level = 14;
     } else {
-      ctx.fillStyle = cap;
-      ctx.beginPath();
-      ctx.arc(0, 0, s, 0, Math.PI * 2);
-      ctx.fill();
+      return null;
     }
+    return base;
+  }
 
+  drawFailedSpecialMini(type, x, y, size = 3, side = 'left') {
+    const mini = this.miniFailedSpecialMinion(type, side);
+    if (!mini) return;
+    const { ctx } = this;
+    const s = Math.max(3, size);
+    const scale = s / 22;
+    ctx.save();
+    ctx.translate(x, y + 1.5);
+    ctx.scale(scale, scale);
+    this.drawMinionSprite(mini, { showHud: false, allowEffects: false });
     ctx.restore();
   }
 
@@ -2958,44 +3010,51 @@ export class GameRenderer {
     ctx.strokeStyle = '#182233';
     ctx.lineWidth = 1;
     ctx.strokeRect(x - brimW * 0.5, topY, brimW, brimH);
-    this.drawFailedSpecialMini(type, x - hatW * 0.08, topY - hatH - 2.5, Math.max(3.8, bodyR * scale * 0.24), style);
+    this.drawFailedSpecialMini(
+      type,
+      x - hatW * 0.08,
+      topY - hatH - 4,
+      Math.max(5.6, bodyR * scale * 0.34),
+      minion.side
+    );
   }
 
-  drawMinionSprite(minion) {
+  drawMinionSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     if (minion.dragon) {
-      this.drawDragonSprite(minion);
+      this.drawDragonSprite(minion, options);
       return;
     }
     if (minion.digger) {
-      this.drawDiggerSprite(minion);
+      this.drawDiggerSprite(minion, options);
       return;
     }
     if (minion.gunner) {
-      this.drawGunnerSprite(minion);
+      this.drawGunnerSprite(minion, options);
       return;
     }
     if (minion.necrominion) {
-      this.drawNecroSprite(minion);
+      this.drawNecroSprite(minion, options);
       return;
     }
     if (minion.explosive) {
-      this.drawBomberSprite(minion);
+      this.drawBomberSprite(minion, options);
       return;
     }
     if (minion.hero) {
-      this.drawHeroSprite(minion);
+      this.drawHeroSprite(minion, options);
       return;
     }
     if (minion.monk) {
-      this.drawMonkSprite(minion);
+      this.drawMonkSprite(minion, options);
       return;
     }
     if (minion.shieldBearer) {
-      this.drawShieldBearerSprite(minion);
+      this.drawShieldBearerSprite(minion, options);
       return;
     }
     if (minion.president) {
-      this.drawPresidentSprite(minion);
+      this.drawPresidentSprite(minion, options);
       return;
     }
 
@@ -3303,47 +3362,51 @@ export class GameRenderer {
     }
 
     ctx.restore();
-    this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
+    if (showHud) {
+      this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
 
-    if (minion.super) {
-      ctx.fillStyle = '#ffe6a8';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('SUPER', x, y - bodyR * scale - 18);
+      if (minion.super) {
+        ctx.fillStyle = '#ffe6a8';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SUPER', x, y - bodyR * scale - 18);
+      }
+
+      if (isNecro) {
+        ctx.fillStyle = '#a9ffe0';
+        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('NECRO', x, y - bodyR * scale - (minion.super ? 34 : 20));
+      }
+
+      if (isGunner) {
+        ctx.fillStyle = '#ffd6a1';
+        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('GUNNER', x, y - bodyR * scale - (minion.super ? 34 : 20));
+      }
+
+      if (isRider) {
+        ctx.fillStyle = '#ffe5bf';
+        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('RIDER', x, y - bodyR * scale - (minion.super ? 34 : 20));
+      }
+
+      const hpPct = Math.max(0, minion.hp / minion.maxHp);
+      const hpW = 36 * scale;
+      const hpX = x - hpW / 2;
+      const hpY = y - (26 * scale + 2);
+      ctx.fillStyle = '#101420cc';
+      ctx.fillRect(hpX, hpY, hpW, 5);
+      ctx.fillStyle = '#6bff95';
+      ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
     }
-
-    if (isNecro) {
-      ctx.fillStyle = '#a9ffe0';
-      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('NECRO', x, y - bodyR * scale - (minion.super ? 34 : 20));
-    }
-
-    if (isGunner) {
-      ctx.fillStyle = '#ffd6a1';
-      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('GUNNER', x, y - bodyR * scale - (minion.super ? 34 : 20));
-    }
-
-    if (isRider) {
-      ctx.fillStyle = '#ffe5bf';
-      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('RIDER', x, y - bodyR * scale - (minion.super ? 34 : 20));
-    }
-
-    const hpPct = Math.max(0, minion.hp / minion.maxHp);
-    const hpW = 36 * scale;
-    const hpX = x - hpW / 2;
-    const hpY = y - (26 * scale + 2);
-    ctx.fillStyle = '#101420cc';
-    ctx.fillRect(hpX, hpY, hpW, 5);
-    ctx.fillStyle = '#6bff95';
-    ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
   }
 
-  drawDiggerSprite(minion) {
+  drawDiggerSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
+    const allowEffects = options.allowEffects !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
@@ -3428,21 +3491,23 @@ export class GameRenderer {
     ctx.arc(dirtX + dir * 3.4, dirtY - 1.6, 1.8, 0, Math.PI * 2);
     ctx.arc(dirtX + dir * 6.4, dirtY - 2.6, 1.4, 0, Math.PI * 2);
     ctx.fill();
-    this.emitDiggerDirt(minion, x, topY, dir, phase, shovelSwing);
+    if (allowEffects) this.emitDiggerDirt(minion, x, topY, dir, phase, shovelSwing);
 
-    ctx.fillStyle = '#e3d0ab';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('DIGGER', x, topY - r - 14);
+    if (showHud) {
+      ctx.fillStyle = '#e3d0ab';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DIGGER', x, topY - r - 14);
 
-    const hpPct = Math.max(0, minion.hp / minion.maxHp);
-    const hpW = 28;
-    const hpX = x - hpW / 2;
-    const hpY = topY - r - 9;
-    ctx.fillStyle = '#101420cc';
-    ctx.fillRect(hpX, hpY, hpW, 4);
-    ctx.fillStyle = '#6bff95';
-    ctx.fillRect(hpX, hpY, hpW * hpPct, 4);
+      const hpPct = Math.max(0, minion.hp / minion.maxHp);
+      const hpW = 28;
+      const hpX = x - hpW / 2;
+      const hpY = topY - r - 9;
+      ctx.fillStyle = '#101420cc';
+      ctx.fillRect(hpX, hpY, hpW, 4);
+      ctx.fillStyle = '#6bff95';
+      ctx.fillRect(hpX, hpY, hpW * hpPct, 4);
+    }
   }
 
   dragonHeartCore(minion) {
@@ -3454,7 +3519,8 @@ export class GameRenderer {
     };
   }
 
-  drawDragonSprite(minion) {
+  drawDragonSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
     const { ctx } = this;
     const palette = TEAM_COLORS[minion.side];
     const dir = minion.side === 'left' ? 1 : -1;
@@ -3558,10 +3624,12 @@ export class GameRenderer {
 
     ctx.restore();
 
-    ctx.fillStyle = '#ffc78d';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('DRAGON', x, y - bodyH - 18);
+    if (showHud) {
+      ctx.fillStyle = '#ffc78d';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DRAGON', x, y - bodyH - 18);
+    }
 
     if ((minion.dragonBreathTtl || 0) > 0) {
       const toX = Number.isFinite(minion.dragonBreathToX) ? minion.dragonBreathToX : mouthX + dir * 120;
@@ -3596,14 +3664,16 @@ export class GameRenderer {
       ctx.restore();
     }
 
-    const hpPct = Math.max(0, minion.hp / minion.maxHp);
-    const hpW = 48 * scale;
-    const hpX = x - hpW / 2;
-    const hpY = y - (bodyH + 12);
-    ctx.fillStyle = '#101420cc';
-    ctx.fillRect(hpX, hpY, hpW, 6);
-    ctx.fillStyle = '#6bff95';
-    ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
+    if (showHud) {
+      const hpPct = Math.max(0, minion.hp / minion.maxHp);
+      const hpW = 48 * scale;
+      const hpX = x - hpW / 2;
+      const hpY = y - (bodyH + 12);
+      ctx.fillStyle = '#101420cc';
+      ctx.fillRect(hpX, hpY, hpW, 6);
+      ctx.fillStyle = '#6bff95';
+      ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
+    }
   }
 
   drawArrow(arrow) {
