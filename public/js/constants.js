@@ -1,10 +1,9 @@
 export const SHOT_INTERVAL = 1;
 
 export const UPGRADE_LABELS = {
-  arrowLevel: 'Arrow Dmg+',
+  arrowLevel: 'Arrow Damage+',
   unitLevel: 'Unit Dmg+',
-  multiShotLevel: 'Arrow Count+',
-  volleyLevel: 'Volley+',
+  volleyLevel: 'Arrow Count+',
   spawnLevel: 'Spawn Speed+',
   unitHpLevel: 'Unit HP+',
   resourceLevel: 'Resource Gold+',
@@ -18,8 +17,7 @@ export const UPGRADE_LABELS = {
 export const UPGRADE_HINTS = {
   arrowLevel: '+arrow damage',
   unitLevel: '+unit damage',
-  multiShotLevel: '+shot arrows',
-  volleyLevel: '+volley arrows',
+  volleyLevel: '+extra arrows per shot',
   spawnLevel: '+spawn speed',
   unitHpLevel: '+unit hp',
   resourceLevel: '+resource gold',

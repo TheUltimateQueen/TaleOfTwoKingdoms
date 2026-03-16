@@ -10,7 +10,6 @@ export const CARD_H = 44;
 export const UPGRADE_TYPES = [
   'arrowLevel',
   'unitLevel',
-  'multiShotLevel',
   'volleyLevel',
   'spawnLevel',
   'unitHpLevel',

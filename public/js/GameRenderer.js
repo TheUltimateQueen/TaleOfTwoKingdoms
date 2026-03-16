@@ -48,7 +48,6 @@ function arrowAccuracy(sideState) {
 const UPGRADE_BADGE_SPECS = [
   { type: 'arrowLevel', code: 'AR', base: 1 },
   { type: 'unitLevel', code: 'AT', base: 1 },
-  { type: 'multiShotLevel', code: 'MS', base: 1 },
   { type: 'volleyLevel', code: 'VO', base: 0 },
   { type: 'spawnLevel', code: 'SP', base: 1 },
   { type: 'unitHpLevel', code: 'HP', base: 1 },
@@ -62,7 +61,6 @@ const UPGRADE_BADGE_SPECS = [
 
 const UPGRADE_CATEGORY_BY_TYPE = {
   arrowLevel: 'arrow',
-  multiShotLevel: 'arrow',
   volleyLevel: 'arrow',
   unitLevel: 'unit',
   unitHpLevel: 'unit',

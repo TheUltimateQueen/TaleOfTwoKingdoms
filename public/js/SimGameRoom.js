@@ -18,13 +18,11 @@ const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
   arrowLevel: { base: 130, growth: 18, start: 1 },
   unitLevel: { base: 138, growth: 18, start: 1 },
-  multiShotLevel: { base: 340, growth: 44, start: 1 },
   volleyLevel: { base: 190, growth: 24, start: 0 },
   spawnLevel: { base: 150, growth: 16, start: 1 },
   unitHpLevel: { base: 138, growth: 16, start: 1 },
   resourceLevel: { base: 122, growth: 14, start: 1 },
   bountyLevel: { base: 118, growth: 14, start: 1 },
-  explosiveLevel: { base: 166, growth: 18, start: 1 },
   powerLevel: { base: 164, growth: 20, start: 1 },
   specialRateLevel: { base: 182, growth: 22, start: 1 },
   dragonLevel: { base: 236, growth: 26, start: 0 },
@@ -32,7 +30,6 @@ const UPGRADE_COST_RULES = {
 };
 const UPGRADE_PATH_BY_TYPE = {
   arrowLevel: 'arrow',
-  multiShotLevel: 'arrow',
   volleyLevel: 'arrow',
   unitLevel: 'unit',
   unitHpLevel: 'unit',
@@ -214,12 +211,10 @@ function serializeSideState(side) {
     unitLevel: Math.max(0, Math.round(Number(state.unitLevel) || 0)),
     unitHpLevel: Math.max(0, Math.round(Number(state.unitHpLevel) || 0)),
     arrowLevel: Math.max(0, Math.round(Number(state.arrowLevel) || 0)),
-    multiShotLevel: Math.max(0, Math.round(Number(state.multiShotLevel) || 0)),
     volleyLevel: Math.max(0, Math.round(Number(state.volleyLevel) || 0)),
     spawnLevel: Math.max(0, Math.round(Number(state.spawnLevel) || 0)),
     resourceLevel: Math.max(0, Math.round(Number(state.resourceLevel) || 0)),
     bountyLevel: Math.max(0, Math.round(Number(state.bountyLevel) || 0)),
-    explosiveLevel: Math.max(0, Math.round(Number(state.explosiveLevel) || 0)),
     powerLevel: Math.max(0, Math.round(Number(state.powerLevel) || 0)),
     specialRateLevel: Math.max(0, Math.round(Number(state.specialRateLevel) || 0)),
     dragonLevel: Math.max(0, Math.round(Number(state.dragonLevel) || 0)),
@@ -286,12 +281,10 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     unitLevel: 1,
     unitHpLevel: 1,
     arrowLevel: 1,
-    multiShotLevel: 1,
     volleyLevel: 0,
     spawnLevel: 1,
     resourceLevel: 1,
     bountyLevel: 1,
-    explosiveLevel: 1,
     powerLevel: 1,
     specialRateLevel: 1,
     dragonLevel: 0,
@@ -2550,7 +2543,7 @@ class GameRoom {
   }
 
   statArrowCount(side) {
-    return 1 + Math.floor((side.multiShotLevel - 1) / 2) + Math.max(0, side.volleyLevel || 0);
+    return 1 + Math.max(0, side.volleyLevel || 0);
   }
 
   comboProgress(side) {
@@ -3772,7 +3765,7 @@ class GameRoom {
       level: visualPower,
       super: isSuper,
       explosive,
-      explosiveLevel: side.explosiveLevel,
+      explosiveLevel: 1,
       necrominion: isNecrominion,
       summoned: false,
       dragon: isDragon,
@@ -4031,7 +4024,7 @@ class GameRoom {
     }
 
     // For non-summon upgrades, accelerate the relevant cooldown so impact is immediate.
-    if (type === 'arrowLevel' || type === 'multiShotLevel' || type === 'volleyLevel' || type === 'powerLevel') {
+    if (type === 'arrowLevel' || type === 'volleyLevel' || type === 'powerLevel') {
       this.sharedShotCd = Math.min(this.sharedShotCd, 0.16);
       this.left.shotCd = this.sharedShotCd;
       this.right.shotCd = this.sharedShotCd;

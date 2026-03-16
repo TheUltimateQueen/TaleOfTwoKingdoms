@@ -12,7 +12,6 @@ module.exports = {
   UPGRADE_TYPES: [
     'arrowLevel',
     'unitLevel',
-    'multiShotLevel',
     'volleyLevel',
     'spawnLevel',
     'unitHpLevel',
