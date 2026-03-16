@@ -41,6 +41,9 @@ const UPGRADE_PATH_BY_TYPE = {
   dragonLevel: 'special',
   superMinionLevel: 'special',
 };
+const UPGRADE_LEVEL_CAPS = {
+  volleyLevel: 4,
+};
 const HERO_LINES = [
   'Justice is my cardio!',
   'Hope you brought a villain permit!',
@@ -3498,8 +3501,12 @@ class GameRoom {
       powerType = 'flameShot';
     }
     count = Math.min(29, count);
-    if (count > 1 && count % 2 === 0) count += 1;
-    const mainIndex = Math.floor(count / 2);
+    const angleSteps = [0];
+    for (let step = 1; angleSteps.length < count; step += 1) {
+      // Add upper arc first, then fill the lower matching arc on the next Arrow Count upgrade.
+      angleSteps.push(step);
+      if (angleSteps.length < count) angleSteps.push(-step);
+    }
     if (activePower) {
       side.pendingShotPowerShots = Math.max(0, side.pendingShotPowerShots - 1);
       if (side.pendingShotPowerShots === 0) side.pendingShotPower = null;
@@ -3508,14 +3515,15 @@ class GameRoom {
       side.pendingShotPowerShots = 0;
     }
 
-    for (let i = 0; i < count; i += 1) {
-      const isMainArrow = i === mainIndex;
+    for (let i = 0; i < angleSteps.length; i += 1) {
+      const angleStep = angleSteps[i];
+      const isMainArrow = angleStep === 0;
       const localAngle = Math.max(
         0,
-        Math.min(Math.PI / 2, launch.angle + (i - (count - 1) / 2) * spread)
+        Math.min(Math.PI / 2, launch.angle + angleStep * spread)
       );
-      const offsetFromCenter = Math.abs(i - mainIndex);
-      const isUnderArcArrow = i < mainIndex;
+      const offsetFromCenter = Math.abs(angleStep);
+      const isUnderArcArrow = angleStep < 0;
       const underDelayMul = isUnderArcArrow ? MULTI_SIDE_ARROW_UNDER_DELAY_MUL : 1;
       const launchDelay = Math.min(
         MULTI_SIDE_ARROW_DELAY_MAX,
@@ -3876,6 +3884,18 @@ class GameRoom {
     return Math.max(60, Math.round(rule.base + tier * rule.growth));
   }
 
+  upgradeLevelCap(type) {
+    const cap = UPGRADE_LEVEL_CAPS[type];
+    if (!Number.isFinite(cap)) return null;
+    return Math.max(0, Math.floor(cap));
+  }
+
+  isUpgradeCapped(side, type) {
+    const cap = this.upgradeLevelCap(type);
+    if (!Number.isFinite(cap)) return false;
+    return (Number(side?.[type]) || 0) >= cap;
+  }
+
   spawnMirroredResource() {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
@@ -3925,27 +3945,32 @@ class GameRoom {
     return UPGRADE_PATH_BY_TYPE[type] || 'misc';
   }
 
-  pickUpgradeType(excludedTypes = new Set(), excludedPaths = new Set()) {
-    const withPathSpread = UPGRADE_TYPES.filter((type) => (
+  pickUpgradeType(side, excludedTypes = new Set(), excludedPaths = new Set()) {
+    const pool = UPGRADE_TYPES.filter((type) => !this.isUpgradeCapped(side, type));
+    const sourcePool = pool.length ? pool : UPGRADE_TYPES;
+
+    const withPathSpread = sourcePool.filter((type) => (
       !excludedTypes.has(type)
       && !excludedPaths.has(this.upgradePathForType(type))
     ));
     if (withPathSpread.length) return randomFrom(withPathSpread);
 
-    const uniqueTypePool = UPGRADE_TYPES.filter((type) => !excludedTypes.has(type));
+    const uniqueTypePool = sourcePool.filter((type) => !excludedTypes.has(type));
     if (uniqueTypePool.length) return randomFrom(uniqueTypePool);
 
-    return randomFrom(UPGRADE_TYPES);
+    return randomFrom(sourcePool);
   }
 
   refillRegularCards(sideName) {
+    const side = this[sideName];
+    if (!side) return;
     const shown = this.upgradeCards.filter((c) => c.side === sideName && c.slot >= 0 && c.slot < 2);
     const usedTypes = new Set(shown.map((c) => c.type));
     const usedPaths = new Set(shown.map((c) => this.upgradePathForType(c.type)));
 
     for (let slot = 0; slot < 2; slot += 1) {
       if (!this.hasCardInSlot(sideName, slot)) {
-        const type = this.pickUpgradeType(usedTypes, usedPaths);
+        const type = this.pickUpgradeType(side, usedTypes, usedPaths);
         this.addUpgradeCard(sideName, slot, type, 'random');
         usedTypes.add(type);
         usedPaths.add(this.upgradePathForType(type));
@@ -4000,7 +4025,14 @@ class GameRoom {
   }
 
   awardUpgrade(side, type, value) {
-    side[type] += value;
+    const cap = this.upgradeLevelCap(type);
+    const gain = Math.max(0, Number(value) || 0);
+    const current = Math.max(0, Number(side?.[type]) || 0);
+    if (Number.isFinite(cap)) {
+      side[type] = Math.min(cap, current + gain);
+      return;
+    }
+    side[type] = current + gain;
   }
 
   triggerUpgradeActivation(sideName, type, value, x, y) {
