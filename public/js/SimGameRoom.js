@@ -2927,6 +2927,7 @@ class GameRoom {
     }
 
     golem.golemSmashTtl = STONE_GOLEM_SMASH_TTL;
+    this.queueHitSfx('golemsmash', golem.x, golem.y + 4, sideName);
     this.queueHitSfx(hitAny ? 'explosion' : 'powerup', golem.x, golem.y + 4, sideName);
   }
 

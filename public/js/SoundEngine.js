@@ -14,6 +14,7 @@ export class SoundEngine {
       dragonfire: 0,
       gunhit: 0,
       blocked: 0,
+      golemsmash: 0,
     };
   }
 
@@ -48,6 +49,7 @@ export class SoundEngine {
     else if (type === 'dragonfire') this.playDragonFire();
     else if (type === 'gunhit') this.playGunHit();
     else if (type === 'blocked') this.playBlocked();
+    else if (type === 'golemsmash') this.playGolemSmash();
   }
 
   envGain(start, peak, decay) {
@@ -153,5 +155,27 @@ export class SoundEngine {
     const o2 = this.osc('triangle', 420, t + 0.015, 0.14, g2);
     o1.frequency.exponentialRampToValueAtTime(96, t + 0.15);
     o2.frequency.exponentialRampToValueAtTime(210, t + 0.12);
+  }
+
+  playGolemSmash() {
+    const t = this.ctx.currentTime;
+    const rumble = this.envGain(t, 0.28, 0.42);
+    const growlA = this.envGain(t + 0.01, 0.2, 0.22);
+    const growlB = this.envGain(t + 0.055, 0.18, 0.2);
+    const growlC = this.envGain(t + 0.1, 0.16, 0.19);
+    const impact = this.envGain(t + 0.12, 0.17, 0.13);
+
+    const low = this.osc('sawtooth', 118, t, 0.44, rumble);
+    low.frequency.exponentialRampToValueAtTime(56, t + 0.36);
+
+    const a = this.osc('square', 240, t + 0.01, 0.24, growlA);
+    const b = this.osc('triangle', 208, t + 0.055, 0.21, growlB);
+    const c = this.osc('square', 182, t + 0.1, 0.19, growlC);
+    a.frequency.exponentialRampToValueAtTime(128, t + 0.22);
+    b.frequency.exponentialRampToValueAtTime(118, t + 0.24);
+    c.frequency.exponentialRampToValueAtTime(96, t + 0.2);
+
+    const thud = this.osc('sine', 94, t + 0.12, 0.14, impact);
+    thud.frequency.exponentialRampToValueAtTime(46, t + 0.23);
   }
 }
