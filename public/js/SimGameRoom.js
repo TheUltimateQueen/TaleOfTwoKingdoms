@@ -2904,7 +2904,7 @@ class GameRoom {
     const sideName = golem.side === 'right' ? 'right' : 'left';
     const awayFromAllyTowerDir = sideName === 'left' ? 1 : -1;
     const smashR = Math.max(STONE_GOLEM_SMASH_RADIUS, (Number(golem.r) || 28) * 2.35);
-    const baseDamage = this.minionOutgoingDamage(golem, (Number(golem.dmg) || 0) * STONE_GOLEM_DAMAGE_MULT);
+    const baseDamage = this.minionOutgoingDamage(golem, (Number(golem.dmg) || 0) * STONE_GOLEM_DAMAGE_MULT * 3);
     const victims = [];
     let hitAny = false;
 
