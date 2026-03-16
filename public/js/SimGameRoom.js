@@ -149,6 +149,7 @@ const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
 const MINION_TARGET_RADIUS_PAD = 84;
 const MAX_DAMAGE_EVENTS_PER_TICK = 240;
+const MAX_BUCKET_CELL_POOL = 2200;
 const ROOM_SIDES = ['left', 'right'];
 
 function clamp(n, min, max) {
@@ -361,6 +362,15 @@ class GameRoom {
       right: null,
     };
     this.candleScorches = [];
+    this.bucketCellPool = [];
+    this.singleMinionBucketsCache = this.createBucketSet();
+    this.arrowBucketsCache = this.createBucketSet();
+    this.dualMinionBucketsCache = this.createBucketSet();
+    this.dualBucketsResultCache = {
+      arrow: this.arrowBucketsCache,
+      minion: this.dualMinionBucketsCache,
+      carrierCounts: { left: 0, right: 0 },
+    };
     this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
     this.right.candleSpawnInSpawns = this.statCandleEvery(this.right);
     this.left.candleCd = this.candleSpawnEtaSeconds('left');
@@ -369,6 +379,37 @@ class GameRoom {
     this.right.candleActive = false;
 
     this.seedUpgradeCards();
+  }
+
+  createBucketSet() {
+    return {
+      left: new Map(),
+      right: new Map(),
+    };
+  }
+
+  resetBucketMap(map) {
+    if (!(map instanceof Map) || map.size === 0) return;
+    for (const cell of map.values()) {
+      if (!Array.isArray(cell)) continue;
+      cell.length = 0;
+      if (this.bucketCellPool.length < MAX_BUCKET_CELL_POOL) this.bucketCellPool.push(cell);
+    }
+    map.clear();
+  }
+
+  resetBucketSet(buckets) {
+    if (!buckets) return;
+    this.resetBucketMap(buckets.left);
+    this.resetBucketMap(buckets.right);
+  }
+
+  bucketCell(sideMap, key) {
+    const existing = sideMap.get(key);
+    if (existing) return existing;
+    const next = this.bucketCellPool.pop() || [];
+    sideMap.set(key, next);
+    return next;
   }
 
   serialize() {
@@ -882,11 +923,15 @@ class GameRoom {
   }
 
   tickShotPowers(dt) {
-    for (let i = this.shotPowers.length - 1; i >= 0; i -= 1) {
+    let write = 0;
+    for (let i = 0; i < this.shotPowers.length; i += 1) {
       const p = this.shotPowers[i];
       p.y += p.vy * dt;
-      if (p.y >= GROUND_Y) this.shotPowers.splice(i, 1);
+      if (p.y >= GROUND_Y) continue;
+      this.shotPowers[write] = p;
+      write += 1;
     }
+    this.shotPowers.length = write;
   }
 
   candleSpawnX(sideName) {
@@ -1680,7 +1725,8 @@ class GameRoom {
   tickCandle(dt, precomputedBuckets = null, precomputedHolders = null) {
     if (!Array.isArray(this.candleScorches)) this.candleScorches = [];
     const minionBuckets = precomputedBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
-    for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
+    let scorchWrite = 0;
+    for (let i = 0; i < this.candleScorches.length; i += 1) {
       const scorch = this.candleScorches[i];
       scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
       if (!Number.isFinite(scorch.smokeShieldMaxTtl)) {
@@ -1700,8 +1746,11 @@ class GameRoom {
           scorch.towerBurnTick = 0.25;
         }
       }
-      if (scorch.ttl <= 0) this.candleScorches.splice(i, 1);
+      if (scorch.ttl <= 0) continue;
+      this.candleScorches[scorchWrite] = scorch;
+      scorchWrite += 1;
     }
+    this.candleScorches.length = scorchWrite;
 
     for (const sideName of ROOM_SIDES) {
       if (!this.candles[sideName]) {
@@ -2008,19 +2057,16 @@ class GameRoom {
   }
 
   buildMinionBuckets(bucketW = ARROW_TARGET_BUCKET_W) {
-    const buckets = {
-      left: new Map(),
-      right: new Map(),
-    };
+    const buckets = this.singleMinionBucketsCache;
+    const width = Math.max(1, Number(bucketW) || ARROW_TARGET_BUCKET_W);
+    this.resetBucketSet(buckets);
 
     for (const minion of this.minions) {
       if (!minion || minion.removed) continue;
       const sideName = minion.side === 'right' ? 'right' : 'left';
       const x = Number.isFinite(minion.x) ? minion.x : 0;
-      const key = Math.floor(x / bucketW);
-      const cell = buckets[sideName].get(key);
-      if (cell) cell.push(minion);
-      else buckets[sideName].set(key, [minion]);
+      const key = Math.floor(x / width);
+      this.bucketCell(buckets[sideName], key).push(minion);
     }
 
     return buckets;
@@ -2031,17 +2077,18 @@ class GameRoom {
   }
 
   buildDualMinionBuckets(arrowBucketW = ARROW_TARGET_BUCKET_W, minionBucketW = MINION_TARGET_BUCKET_W) {
-    const arrowBuckets = {
-      left: new Map(),
-      right: new Map(),
-    };
-    const carrierCounts = { left: 0, right: 0 };
-    const minionBuckets = arrowBucketW === minionBucketW
+    const arrowBuckets = this.arrowBucketsCache;
+    const carrierCounts = this.dualBucketsResultCache.carrierCounts;
+    carrierCounts.left = 0;
+    carrierCounts.right = 0;
+    const arrowWidth = Math.max(1, Number(arrowBucketW) || ARROW_TARGET_BUCKET_W);
+    const minionWidth = Math.max(1, Number(minionBucketW) || MINION_TARGET_BUCKET_W);
+    const minionBuckets = arrowWidth === minionWidth
       ? arrowBuckets
-      : {
-          left: new Map(),
-          right: new Map(),
-        };
+      : this.dualMinionBucketsCache;
+
+    this.resetBucketSet(arrowBuckets);
+    if (minionBuckets !== arrowBuckets) this.resetBucketSet(minionBuckets);
 
     for (const minion of this.minions) {
       if (!minion || minion.removed) continue;
@@ -2052,23 +2099,17 @@ class GameRoom {
         carrierCounts[carrierSide] += 1;
       }
 
-      const arrowKey = Math.floor(x / arrowBucketW);
-      const arrowCell = arrowBuckets[sideName].get(arrowKey);
-      if (arrowCell) arrowCell.push(minion);
-      else arrowBuckets[sideName].set(arrowKey, [minion]);
+      const arrowKey = Math.floor(x / arrowWidth);
+      this.bucketCell(arrowBuckets[sideName], arrowKey).push(minion);
 
       if (minionBuckets === arrowBuckets) continue;
-      const minionKey = Math.floor(x / minionBucketW);
-      const minionCell = minionBuckets[sideName].get(minionKey);
-      if (minionCell) minionCell.push(minion);
-      else minionBuckets[sideName].set(minionKey, [minion]);
+      const minionKey = Math.floor(x / minionWidth);
+      this.bucketCell(minionBuckets[sideName], minionKey).push(minion);
     }
 
-    return {
-      arrow: arrowBuckets,
-      minion: minionBuckets,
-      carrierCounts,
-    };
+    this.dualBucketsResultCache.arrow = arrowBuckets;
+    this.dualBucketsResultCache.minion = minionBuckets;
+    return this.dualBucketsResultCache;
   }
 
   forEachMinionInRadius(centerX, centerY, radius, buckets = null, bucketW = ARROW_TARGET_BUCKET_W, fn = null) {

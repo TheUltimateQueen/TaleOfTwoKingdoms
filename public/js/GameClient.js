@@ -104,6 +104,7 @@ export class GameClient {
     this.voiceUnlocked = false;
     this.voicePools = null;
     this.voiceState = null;
+    this.voicePresence = { hero: false, president: false };
     this.gameOverLatched = false;
     this.gameOverRevealAtMs = 0;
     this.nextGameOverBoomAtMs = 0;
@@ -666,8 +667,19 @@ export class GameClient {
     const snapshot = this.state.snapshot;
     const minions = Array.isArray(snapshot?.minions) ? snapshot.minions : [];
     const inPlayableRound = Boolean(snapshot?.started) && !snapshot?.gameOver;
-    const hasHero = inPlayableRound && minions.some((m) => m?.hero && Number(m.hp) > 0);
-    const hasPresident = inPlayableRound && minions.some((m) => m?.president && Number(m.hp) > 0);
+    let hasHero = false;
+    let hasPresident = false;
+    if (inPlayableRound) {
+      for (let i = 0; i < minions.length; i += 1) {
+        const m = minions[i];
+        if (!m || (Number(m.hp) || 0) <= 0) continue;
+        if (m.hero) hasHero = true;
+        if (m.president) hasPresident = true;
+        if (hasHero && hasPresident) break;
+      }
+    }
+    this.voicePresence.hero = hasHero;
+    this.voicePresence.president = hasPresident;
     this.syncVoiceType('hero', hasHero);
     this.syncVoiceType('president', hasPresident);
   }
@@ -698,9 +710,8 @@ export class GameClient {
   shouldPlayVoiceType(type) {
     const snapshot = this.state.snapshot;
     if (!snapshot || !snapshot.started || snapshot.gameOver) return false;
-    const minions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
-    if (type === 'hero') return minions.some((m) => m?.hero && Number(m.hp) > 0);
-    if (type === 'president') return minions.some((m) => m?.president && Number(m.hp) > 0);
+    if (type === 'hero') return Boolean(this.voicePresence?.hero);
+    if (type === 'president') return Boolean(this.voicePresence?.president);
     return false;
   }
 

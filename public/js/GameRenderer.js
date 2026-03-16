@@ -190,12 +190,34 @@ const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const MINION_HIT_FLASH_TTL = 0.18;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
+const MAX_PARTICLES = 1800;
+const MAX_POOLED_PARTICLES = MAX_PARTICLES * 2;
+const MAX_DAMAGE_TEXTS = 180;
+const MAX_HERO_LINES = 80;
+const MAX_DEATH_GHOSTS = 110;
+const TOWER_HIT_PARTICLE_COLORS = ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'];
+const BLOCKED_PARTICLE_COLORS = ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'];
+const CANDLE_HIT_FIRE_COLORS = ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'];
+const CANDLE_HIT_PLUME_COLORS = ['#ff5f35', '#ffb24c', '#ffe7b1'];
+const CANDLE_HIT_WAX_COLORS = ['#fff4d8', '#f7e6bf', '#e6cfa4'];
+const TOWER_IMPACT_PARTICLE_COLORS = ['#c5d4e6', '#8fa1b8', '#73839a'];
+const TOWER_COLLAPSE_PARTICLE_COLORS = ['#ced9e7', '#9baec3', '#6f8094', '#d9b483', '#7f6852'];
+const FX_QUALITY_RANK = {
+  low: 0,
+  medium: 1,
+  high: 2,
+};
+
+function pickRandom(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
 
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.particles = [];
+    this.particlePool = [];
     this.diggerDustMarks = new Map();
     this.damageTexts = [];
     this.heroLines = [];
@@ -212,8 +234,157 @@ export class GameRenderer {
       loser: null,
       lastBurstMs: 0,
     };
+    this.cachedBackgroundGradient = null;
+    this.cachedBackgroundHeight = 0;
+    this.spriteCache = new Map();
+    this.spriteCacheMaxEntries = 180;
+    this.fxQuality = 'high';
+    this.fxFrameDtAvg = 1 / 60;
+    this.fxQualityHold = 0;
     this.frameArrowCount = 0;
     this.lastFrameAt = performance.now();
+  }
+
+  backgroundGradient(height) {
+    if (!this.cachedBackgroundGradient || this.cachedBackgroundHeight !== height) {
+      const gradient = this.ctx.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, '#17263d');
+      gradient.addColorStop(1, '#102033');
+      this.cachedBackgroundGradient = gradient;
+      this.cachedBackgroundHeight = height;
+    }
+    return this.cachedBackgroundGradient;
+  }
+
+  spawnParticle(x, y, vx, vy, life, maxLife, size, color, gravity) {
+    if (this.particles.length >= this.maxLiveParticles()) return;
+    const particle = this.particlePool.pop() || {};
+    particle.x = x;
+    particle.y = y;
+    particle.vx = vx;
+    particle.vy = vy;
+    particle.life = life;
+    particle.maxLife = maxLife;
+    particle.size = size;
+    particle.color = color;
+    particle.gravity = gravity;
+    this.particles.push(particle);
+  }
+
+  recycleParticle(particle) {
+    if (!particle) return;
+    if (this.particlePool.length >= MAX_POOLED_PARTICLES) return;
+    particle.color = null;
+    this.particlePool.push(particle);
+  }
+
+  maxLiveParticles() {
+    if (this.fxQuality === 'low') return 700;
+    if (this.fxQuality === 'medium') return 1200;
+    return MAX_PARTICLES;
+  }
+
+  particleBurstScale() {
+    if (this.fxQuality === 'low') return 0.45;
+    if (this.fxQuality === 'medium') return 0.72;
+    return 1;
+  }
+
+  scaledParticleCount(baseCount, minCount = 1) {
+    const scaled = Math.round(baseCount * this.particleBurstScale());
+    return Math.max(minCount, scaled);
+  }
+
+  updateFxQuality(dt) {
+    const alpha = 0.08;
+    this.fxFrameDtAvg += (dt - this.fxFrameDtAvg) * alpha;
+    if (this.fxQualityHold > 0) this.fxQualityHold = Math.max(0, this.fxQualityHold - dt);
+
+    let target = this.fxQuality;
+    if (this.fxQuality === 'high') {
+      target = this.fxFrameDtAvg > 0.0215 ? 'medium' : 'high';
+    } else if (this.fxQuality === 'medium') {
+      if (this.fxFrameDtAvg > 0.0255) target = 'low';
+      else if (this.fxFrameDtAvg < 0.0178) target = 'high';
+      else target = 'medium';
+    } else {
+      target = this.fxFrameDtAvg < 0.021 ? 'medium' : 'low';
+    }
+
+    if (target === this.fxQuality) return;
+    const currentRank = FX_QUALITY_RANK[this.fxQuality] ?? 2;
+    const targetRank = FX_QUALITY_RANK[target] ?? currentRank;
+    const qualityDrop = targetRank < currentRank;
+    if (!qualityDrop && this.fxQualityHold > 0) return;
+    this.fxQuality = target;
+    this.fxQualityHold = qualityDrop ? 1.2 : 0.6;
+  }
+
+  createSpriteCanvas(width, height) {
+    const w = Math.max(1, Math.round(width));
+    const h = Math.max(1, Math.round(height));
+    if (typeof OffscreenCanvas !== 'undefined') {
+      return new OffscreenCanvas(w, h);
+    }
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      return canvas;
+    }
+    return null;
+  }
+
+  cachedSpriteEntry(key, width, height, renderFn) {
+    const w = Math.max(1, Math.round(width));
+    const h = Math.max(1, Math.round(height));
+    const cached = this.spriteCache.get(key);
+    if (cached && cached.w === w && cached.h === h) {
+      // Refresh insertion order for simple LRU behavior.
+      this.spriteCache.delete(key);
+      this.spriteCache.set(key, cached);
+      return cached;
+    }
+
+    const canvas = this.createSpriteCanvas(w, h);
+    if (!canvas) return null;
+    const cacheCtx = canvas.getContext('2d');
+    if (!cacheCtx) return null;
+    cacheCtx.clearRect(0, 0, w, h);
+
+    const prevCtx = this.ctx;
+    this.ctx = cacheCtx;
+    try {
+      renderFn(cacheCtx, w, h);
+    } finally {
+      this.ctx = prevCtx;
+    }
+
+    const entry = { canvas, w, h };
+    this.spriteCache.delete(key);
+    this.spriteCache.set(key, entry);
+    while (this.spriteCache.size > this.spriteCacheMaxEntries) {
+      const oldestKey = this.spriteCache.keys().next().value;
+      this.spriteCache.delete(oldestKey);
+    }
+    return entry;
+  }
+
+  drawSpriteFromCache(minion, key, width, height, renderFn) {
+    const entry = this.cachedSpriteEntry(key, width, height, renderFn);
+    if (!entry) return false;
+    this.ctx.drawImage(entry.canvas, minion.x - entry.w / 2, minion.y - entry.h / 2);
+    return true;
+  }
+
+  pushDamageText(text) {
+    if (this.damageTexts.length >= MAX_DAMAGE_TEXTS) this.damageTexts.shift();
+    this.damageTexts.push(text);
+  }
+
+  pushHeroLine(line) {
+    if (this.heroLines.length >= MAX_HERO_LINES) this.heroLines.shift();
+    this.heroLines.push(line);
   }
 
   draw(snapshot, world) {
@@ -223,6 +394,7 @@ export class GameRenderer {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrameAt) / 1000);
     this.lastFrameAt = now;
+    this.updateFxQuality(dt);
     this.updateTowerShake(dt);
     this.updateGameOverCinematic(snapshot, world, now, dt);
 
@@ -231,10 +403,7 @@ export class GameRenderer {
 
     ctx.clearRect(0, 0, w, h);
 
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#17263d');
-    g.addColorStop(1, '#102033');
-    ctx.fillStyle = g;
+    ctx.fillStyle = this.backgroundGradient(h);
     ctx.fillRect(0, 0, w, h);
 
     ctx.fillStyle = '#20354f';
@@ -282,18 +451,23 @@ export class GameRenderer {
     for (const res of snapshot.resources) this.drawResourceNode(res);
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
     for (const card of snapshot.upgradeCards) this.drawUpgradeCard(card);
-    const candleScorches = Array.isArray(snapshot.candleScorches)
-      ? snapshot.candleScorches
-      : (snapshot.candleScorch ? [snapshot.candleScorch] : []);
-    for (const scorch of candleScorches) this.drawCandleScorch(scorch);
+    if (Array.isArray(snapshot.candleScorches)) {
+      for (let i = 0; i < snapshot.candleScorches.length; i += 1) {
+        if (this.fxQuality === 'low' && i % 2 === 1) continue;
+        this.drawCandleScorch(snapshot.candleScorches[i]);
+      }
+    } else if (snapshot.candleScorch) {
+      this.drawCandleScorch(snapshot.candleScorch);
+    }
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
-    this.drawMinionHitFlashes(snapshot.minions);
+    if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
     this.updateDeathGhosts(dt);
     this.drawDeathGhosts();
-    const candles = Array.isArray(snapshot.candles)
-      ? snapshot.candles
-      : (snapshot.candle ? [snapshot.candle] : []);
-    for (const candle of candles) this.drawCandle(candle);
+    if (Array.isArray(snapshot.candles)) {
+      for (const candle of snapshot.candles) this.drawCandle(candle);
+    } else if (snapshot.candle) {
+      this.drawCandle(snapshot.candle);
+    }
     this.updateParticles(dt);
     this.drawParticles();
     this.frameArrowCount = Array.isArray(snapshot.arrows) ? snapshot.arrows.length : 0;
@@ -352,89 +526,94 @@ export class GameRenderer {
       const half = (this.canvas?.width || 1600) * 0.5;
       const towerSide = pside === 'left' || pside === 'right' ? pside : (px < half ? 'left' : 'right');
       this.registerTowerImpact(towerSide, px, py, 1);
-      for (let i = 0; i < 20; i += 1) {
+      const burstCount = this.scaledParticleCount(20, 3);
+      for (let i = 0; i < burstCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = 90 + Math.random() * 220;
-        this.particles.push({
-          x: px + (Math.random() * 8 - 4),
-          y: py + (Math.random() * 6 - 3),
-          vx: Math.cos(ang) * mag,
-          vy: Math.sin(ang) * mag - 24,
-          life: 0.42 + Math.random() * 0.22,
-          maxLife: 0.62,
-          size: 1.8 + Math.random() * 2.6,
-          color: ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'][Math.floor(Math.random() * 4)],
-          gravity: 640,
-        });
+        this.spawnParticle(
+          px + (Math.random() * 8 - 4),
+          py + (Math.random() * 6 - 3),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 24,
+          0.42 + Math.random() * 0.22,
+          0.62,
+          1.8 + Math.random() * 2.6,
+          pickRandom(TOWER_HIT_PARTICLE_COLORS),
+          640
+        );
       }
       return;
     }
     if (type === 'blocked') {
-      for (let i = 0; i < 18; i += 1) {
+      const burstCount = this.scaledParticleCount(18, 3);
+      for (let i = 0; i < burstCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = 80 + Math.random() * 140;
-        this.particles.push({
-          x: px + (Math.random() * 6 - 3),
-          y: py + (Math.random() * 4 - 2),
-          vx: Math.cos(ang) * mag,
-          vy: Math.sin(ang) * mag - 16,
-          life: 0.34 + Math.random() * 0.2,
-          maxLife: 0.58,
-          size: 2 + Math.random() * 2.6,
-          color: ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'][Math.floor(Math.random() * 4)],
-          gravity: 320,
-        });
+        this.spawnParticle(
+          px + (Math.random() * 6 - 3),
+          py + (Math.random() * 4 - 2),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 16,
+          0.34 + Math.random() * 0.2,
+          0.58,
+          2 + Math.random() * 2.6,
+          pickRandom(BLOCKED_PARTICLE_COLORS),
+          320
+        );
       }
       return;
     }
     if (type === 'candlehit') {
       // Fire burst centered on the flame hit.
-      for (let i = 0; i < 30; i += 1) {
+      const fireBurstCount = this.scaledParticleCount(30, 5);
+      for (let i = 0; i < fireBurstCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = 120 + Math.random() * 250;
-        this.particles.push({
-          x: px + (Math.random() * 4 - 2),
-          y: py + (Math.random() * 3 - 1.5),
-          vx: Math.cos(ang) * mag,
-          vy: Math.sin(ang) * mag - 45,
-          life: 0.34 + Math.random() * 0.16,
-          maxLife: 0.48,
-          size: 2.2 + Math.random() * 2.8,
-          color: ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'][Math.floor(Math.random() * 4)],
-          gravity: 540,
-        });
+        this.spawnParticle(
+          px + (Math.random() * 4 - 2),
+          py + (Math.random() * 3 - 1.5),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 45,
+          0.34 + Math.random() * 0.16,
+          0.48,
+          2.2 + Math.random() * 2.8,
+          pickRandom(CANDLE_HIT_FIRE_COLORS),
+          540
+        );
       }
       // Stem plume so wax/embers clearly eject from the candle body.
-      for (let i = 0; i < 14; i += 1) {
+      const plumeBurstCount = this.scaledParticleCount(14, 2);
+      for (let i = 0; i < plumeBurstCount; i += 1) {
         const ang = -Math.PI / 2 + (Math.random() * 0.85 - 0.425);
         const mag = 200 + Math.random() * 170;
-        this.particles.push({
-          x: px + (Math.random() * 8 - 4),
-          y: py + 8 + (Math.random() * 3 - 1.5),
-          vx: Math.cos(ang) * mag * 0.46,
-          vy: Math.sin(ang) * mag - 35,
-          life: 0.42 + Math.random() * 0.16,
-          maxLife: 0.58,
-          size: 2 + Math.random() * 2.2,
-          color: ['#ff5f35', '#ffb24c', '#ffe7b1'][Math.floor(Math.random() * 3)],
-          gravity: 560,
-        });
+        this.spawnParticle(
+          px + (Math.random() * 8 - 4),
+          py + 8 + (Math.random() * 3 - 1.5),
+          Math.cos(ang) * mag * 0.46,
+          Math.sin(ang) * mag - 35,
+          0.42 + Math.random() * 0.16,
+          0.58,
+          2 + Math.random() * 2.2,
+          pickRandom(CANDLE_HIT_PLUME_COLORS),
+          560
+        );
       }
       // Wax chunks spraying outward from the stem.
-      for (let i = 0; i < 22; i += 1) {
+      const waxBurstCount = this.scaledParticleCount(22, 4);
+      for (let i = 0; i < waxBurstCount; i += 1) {
         const ang = -Math.PI / 2 + (Math.random() * 1.8 - 0.9);
         const mag = 110 + Math.random() * 180;
-        this.particles.push({
-          x: px + (Math.random() * 8 - 4),
-          y: py + 10 + (Math.random() * 5 - 2.5),
-          vx: Math.cos(ang) * mag,
-          vy: Math.sin(ang) * mag - 10,
-          life: 0.64 + Math.random() * 0.3,
-          maxLife: 0.92,
-          size: 1.9 + Math.random() * 2.4,
-          color: ['#fff4d8', '#f7e6bf', '#e6cfa4'][Math.floor(Math.random() * 3)],
-          gravity: 660,
-        });
+        this.spawnParticle(
+          px + (Math.random() * 8 - 4),
+          py + 10 + (Math.random() * 5 - 2.5),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 10,
+          0.64 + Math.random() * 0.3,
+          0.92,
+          1.9 + Math.random() * 2.4,
+          pickRandom(CANDLE_HIT_WAX_COLORS),
+          660
+        );
       }
       return;
     }
@@ -493,20 +672,21 @@ export class GameRenderer {
       gravity = 560;
     }
 
-    for (let i = 0; i < count; i += 1) {
+    const burstCount = this.scaledParticleCount(count, 2);
+    for (let i = 0; i < burstCount; i += 1) {
       const ang = Math.random() * Math.PI * 2;
       const mag = speed * (0.45 + Math.random() * 0.65);
-      this.particles.push({
-        x: px,
-        y: py,
-        vx: Math.cos(ang) * mag,
-        vy: Math.sin(ang) * mag - 40,
+      this.spawnParticle(
+        px,
+        py,
+        Math.cos(ang) * mag,
+        Math.sin(ang) * mag - 40,
         life,
-        maxLife: life,
-        size: sizeBase + Math.random() * sizeRand,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        gravity,
-      });
+        life,
+        sizeBase + Math.random() * sizeRand,
+        colors[Math.floor(Math.random() * colors.length)],
+        gravity
+      );
     }
   }
 
@@ -580,7 +760,9 @@ export class GameRenderer {
       life,
       maxLife: life,
     });
-    if (this.deathGhosts.length > 110) this.deathGhosts.splice(0, this.deathGhosts.length - 110);
+    if (this.deathGhosts.length > MAX_DEATH_GHOSTS) {
+      this.deathGhosts.splice(0, this.deathGhosts.length - MAX_DEATH_GHOSTS);
+    }
   }
 
   emitDiggerDirt(minion, x, y, dir, phase, shovelSwing) {
@@ -595,25 +777,25 @@ export class GameRenderer {
     const burstX = x + dir * (r * 1.3);
     const burstY = y + r * 0.2;
     const colors = ['#8f7558', '#b89a75', '#6d5a44', '#9e825f'];
-    const count = 3 + Math.floor(Math.random() * 3);
+    const count = this.scaledParticleCount(3 + Math.floor(Math.random() * 3), 1);
     for (let i = 0; i < count; i += 1) {
-      this.particles.push({
-        x: burstX + (Math.random() * 3 - 1.5),
-        y: burstY + (Math.random() * 2 - 1),
-        vx: dir * (70 + Math.random() * 90) + (Math.random() * 26 - 13),
-        vy: -40 - Math.random() * 55,
-        life: 0.34 + Math.random() * 0.26,
-        maxLife: 0.6,
-        size: 1.6 + Math.random() * 1.9,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        gravity: 480 + Math.random() * 140,
-      });
+      this.spawnParticle(
+        burstX + (Math.random() * 3 - 1.5),
+        burstY + (Math.random() * 2 - 1),
+        dir * (70 + Math.random() * 90) + (Math.random() * 26 - 13),
+        -40 - Math.random() * 55,
+        0.34 + Math.random() * 0.26,
+        0.6,
+        1.6 + Math.random() * 1.9,
+        colors[Math.floor(Math.random() * colors.length)],
+        480 + Math.random() * 140
+      );
     }
   }
 
   emitDamageNumber(amount, x, y) {
     const dmg = Math.max(1, Math.round(Number(amount) || 0));
-    this.damageTexts.push({
+    this.pushDamageText({
       amount: dmg,
       x: x + (Math.random() * 14 - 7),
       y: y + (Math.random() * 6 - 3),
@@ -626,7 +808,7 @@ export class GameRenderer {
 
   emitHeroLine(text, x, y, side) {
     if (!text) return;
-    this.heroLines.push({
+    this.pushHeroLine({
       text: String(text).slice(0, 56),
       side,
       x,
@@ -638,7 +820,8 @@ export class GameRenderer {
   }
 
   updateParticles(dt) {
-    for (let i = this.particles.length - 1; i >= 0; i -= 1) {
+    let write = 0;
+    for (let i = 0; i < this.particles.length; i += 1) {
       const p = this.particles[i];
       p.vy += p.gravity * dt;
       p.vx *= 0.985;
@@ -646,12 +829,19 @@ export class GameRenderer {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life -= dt;
-      if (p.life <= 0) this.particles.splice(i, 1);
+      if (p.life <= 0) {
+        this.recycleParticle(p);
+        continue;
+      }
+      this.particles[write] = p;
+      write += 1;
     }
+    this.particles.length = write;
   }
 
   updateDeathGhosts(dt) {
-    for (let i = this.deathGhosts.length - 1; i >= 0; i -= 1) {
+    let write = 0;
+    for (let i = 0; i < this.deathGhosts.length; i += 1) {
       const g = this.deathGhosts[i];
       g.vy += g.gravity * dt;
       g.vx *= 0.985;
@@ -665,12 +855,16 @@ export class GameRenderer {
         g.minion.x = g.x;
         g.minion.y = g.y;
       }
-      if (g.life <= 0) this.deathGhosts.splice(i, 1);
+      if (g.life <= 0) continue;
+      this.deathGhosts[write] = g;
+      write += 1;
     }
+    this.deathGhosts.length = write;
   }
 
   updateDamageTexts(dt) {
-    for (let i = this.damageTexts.length - 1; i >= 0; i -= 1) {
+    let write = 0;
+    for (let i = 0; i < this.damageTexts.length; i += 1) {
       const t = this.damageTexts[i];
       t.vy -= 50 * dt;
       t.vx *= 0.96;
@@ -678,18 +872,25 @@ export class GameRenderer {
       t.x += t.vx * dt;
       t.y += t.vy * dt;
       t.life -= dt;
-      if (t.life <= 0) this.damageTexts.splice(i, 1);
+      if (t.life <= 0) continue;
+      this.damageTexts[write] = t;
+      write += 1;
     }
+    this.damageTexts.length = write;
   }
 
   updateHeroLines(dt) {
-    for (let i = this.heroLines.length - 1; i >= 0; i -= 1) {
+    let write = 0;
+    for (let i = 0; i < this.heroLines.length; i += 1) {
       const b = this.heroLines[i];
       b.y += b.vy * dt;
       b.vy -= 18 * dt;
       b.life -= dt;
-      if (b.life <= 0) this.heroLines.splice(i, 1);
+      if (b.life <= 0) continue;
+      this.heroLines[write] = b;
+      write += 1;
     }
+    this.heroLines.length = write;
   }
 
   registerTowerImpact(side, x, y, intensity = 1) {
@@ -699,20 +900,21 @@ export class GameRenderer {
     state.ttl = Math.max(state.ttl, 0.16 + mag * 0.05);
     state.amp = Math.min(8, state.amp + 1.1 + mag * 0.8);
 
-    for (let i = 0; i < 12; i += 1) {
+    const burstCount = this.scaledParticleCount(12, 2);
+    for (let i = 0; i < burstCount; i += 1) {
       const ang = Math.random() * Math.PI * 2;
       const magV = 60 + Math.random() * 150;
-      this.particles.push({
-        x: x + (Math.random() * 7 - 3.5),
-        y: y + (Math.random() * 5 - 2.5),
-        vx: Math.cos(ang) * magV,
-        vy: Math.sin(ang) * magV - 18,
-        life: 0.35 + Math.random() * 0.2,
-        maxLife: 0.56,
-        size: 1.6 + Math.random() * 2.2,
-        color: ['#c5d4e6', '#8fa1b8', '#73839a'][Math.floor(Math.random() * 3)],
-        gravity: 620,
-      });
+      this.spawnParticle(
+        x + (Math.random() * 7 - 3.5),
+        y + (Math.random() * 5 - 2.5),
+        Math.cos(ang) * magV,
+        Math.sin(ang) * magV - 18,
+        0.35 + Math.random() * 0.2,
+        0.56,
+        1.6 + Math.random() * 2.2,
+        pickRandom(TOWER_IMPACT_PARTICLE_COLORS),
+        620
+      );
     }
   }
 
@@ -744,21 +946,21 @@ export class GameRenderer {
       const impactY = baseY - 110 + Math.random() * 150;
       this.registerTowerImpact(loser, towerX + (Math.random() * 20 - 10), impactY, 1.2 + progress * 1.7);
 
-      const chunkCount = 18 + Math.floor(progress * 16);
+      const chunkCount = this.scaledParticleCount(18 + Math.floor(progress * 16), 4);
       for (let i = 0; i < chunkCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = 100 + Math.random() * (180 + progress * 120);
-        this.particles.push({
-          x: towerX + (Math.random() * 36 - 18),
-          y: impactY + (Math.random() * 30 - 15),
-          vx: Math.cos(ang) * mag,
-          vy: Math.sin(ang) * mag - (40 + progress * 45),
-          life: 0.55 + Math.random() * 0.46,
-          maxLife: 0.96,
-          size: 2 + Math.random() * 3.8,
-          color: ['#ced9e7', '#9baec3', '#6f8094', '#d9b483', '#7f6852'][Math.floor(Math.random() * 5)],
-          gravity: 660,
-        });
+        this.spawnParticle(
+          towerX + (Math.random() * 36 - 18),
+          impactY + (Math.random() * 30 - 15),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - (40 + progress * 45),
+          0.55 + Math.random() * 0.46,
+          0.96,
+          2 + Math.random() * 3.8,
+          pickRandom(TOWER_COLLAPSE_PARTICLE_COLORS),
+          660
+        );
       }
       state.lastBurstMs = nowMs;
     }
@@ -919,22 +1121,33 @@ export class GameRenderer {
       ctx.translate(g.x, g.y);
       ctx.rotate(g.rot + sway);
       ctx.translate(-g.x, -g.y);
-      ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.16 + fade * 0.4;
-      ctx.filter = 'grayscale(1) saturate(0) brightness(2.3)';
-      this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+      if (this.fxQuality === 'low') {
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.12 + fade * 0.25;
+        this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+      } else if (this.fxQuality === 'medium') {
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.16 + fade * 0.35;
+        ctx.filter = 'grayscale(1) saturate(0) brightness(2.3)';
+        this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+      } else {
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.16 + fade * 0.4;
+        ctx.filter = 'grayscale(1) saturate(0) brightness(2.3)';
+        this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
 
-      // Team tint as a sprite-shaped glow, avoiding rectangular overlays.
-      ctx.filter = 'grayscale(1) saturate(0) brightness(2.5)';
-      ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.12 + fade * 0.2;
-      ctx.shadowColor = tintFill;
-      ctx.shadowBlur = 12 + fade * 20;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
-      ctx.shadowBlur = 0;
-      ctx.shadowColor = 'transparent';
+        // Team tint as a sprite-shaped glow, avoiding rectangular overlays.
+        ctx.filter = 'grayscale(1) saturate(0) brightness(2.5)';
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.12 + fade * 0.2;
+        ctx.shadowColor = tintFill;
+        ctx.shadowBlur = 12 + fade * 20;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
       ctx.filter = 'none';
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
@@ -2447,14 +2660,42 @@ export class GameRenderer {
 
   drawGunnerSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
-    const palette = TEAM_COLORS[minion.side];
-    const x = minion.x;
-    const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const scale = minion.super ? 1.34 : 1;
     const bodyW = 22 * scale;
     const bodyH = 18 * scale;
+    if (!cacheRender) {
+      const flashNorm = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
+      const flashBucket = Math.max(0, Math.min(3, Math.round(flashNorm * 3)));
+      const cacheKey = `gunner:${sideName}:${minion.super ? 1 : 0}:${flashBucket}`;
+      const cacheWidth = Math.ceil(bodyW * 4 + 40);
+      const cacheHeight = Math.ceil(bodyH * 3 + 44);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          gunFlashTtl: flashBucket > 0 ? (flashBucket / 3) * 0.14 : 0,
+        };
+        this.drawGunnerSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#ffd7aa';
+          ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('GUNNER', minion.x, minion.y - bodyH * 1.18);
+          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+        }
+        return;
+      }
+    }
+    const palette = TEAM_COLORS[minion.side];
+    const x = minion.x;
+    const y = minion.y;
+    const dir = sideName === 'left' ? 1 : -1;
     const flash = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
 
     ctx.fillStyle = '#0000002a';
@@ -2538,13 +2779,34 @@ export class GameRenderer {
 
   drawNecroSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const scale = minion.super ? 1.45 : 1.08;
+    const bodyR = 12 * scale;
+    if (!cacheRender) {
+      const cacheKey = `necro:${sideName}:${minion.super ? 1 : 0}`;
+      const cacheWidth = Math.ceil(bodyR * 4 + 42);
+      const cacheHeight = Math.ceil(bodyR * 4 + 42);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = { ...minion, x: w / 2, y: h / 2 };
+        this.drawNecroSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#a9ffe0';
+          ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('NECRO', minion.x, minion.y - bodyR - (minion.super ? 26 : 20));
+          this.drawMinionHpBar(minion, minion.x, minion.y, Math.max(1, scale * 0.95));
+        }
+        return;
+      }
+    }
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
     const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
-    const scale = minion.super ? 1.45 : 1.08;
-    const bodyR = 12 * scale;
+    const dir = sideName === 'left' ? 1 : -1;
 
     ctx.fillStyle = '#00000024';
     ctx.beginPath();
@@ -2633,13 +2895,35 @@ export class GameRenderer {
 
   drawBomberSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const scale = minion.super ? 1.22 : 1;
+    const tier = Math.max(0, Math.min(3, Number(minion.tier) || 0));
+    const r = (12 + tier) * scale;
+    if (!cacheRender) {
+      const cacheKey = `bomber:${sideName}:${minion.super ? 1 : 0}:${tier}`;
+      const cacheWidth = Math.ceil(r * 5 + 42);
+      const cacheHeight = Math.ceil(r * 4 + 36);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = { ...minion, x: w / 2, y: h / 2, tier };
+        this.drawBomberSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#f5d39f';
+          ctx.font = `bold ${minion.super ? 12 : 10}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('BOMBER', minion.x, minion.y - r - 16);
+          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+        }
+        return;
+      }
+    }
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
     const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
-    const scale = minion.super ? 1.22 : 1;
-    const r = (12 + Math.min(3, minion.tier || 0)) * scale;
+    const dir = sideName === 'left' ? 1 : -1;
 
     ctx.fillStyle = '#00000024';
     ctx.beginPath();
@@ -2691,19 +2975,51 @@ export class GameRenderer {
 
   drawHeroSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
     const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
+    const dir = sideName === 'left' ? 1 : -1;
     const scale = (minion.super ? 1.26 : 1.08) * 1.5;
     const bodyR = 14 * scale;
-    const swing = Math.sin((Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0) * 1.4);
+    const swingInput = Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0;
+    const swing = Math.sin(swingInput * 1.4);
+    if (!cacheRender) {
+      const swingBucket = Math.max(0, Math.min(8, Math.round((swing + 1) * 4)));
+      const quantSwing = (Math.asin(swingBucket / 4 - 1) || 0) / 1.4;
+      const cacheKey = `hero:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
+      const cacheWidth = Math.ceil(bodyR * 6 + 56);
+      const cacheHeight = Math.ceil(bodyR * 5.4 + 56);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          heroSwing: quantSwing,
+        };
+        this.drawHeroSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.strokeStyle = '#311707';
+          ctx.lineWidth = 2.6;
+          ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.strokeText('HERO!!!', minion.x, minion.y - bodyR - 20);
+          ctx.fillStyle = '#ffe4b0';
+          ctx.fillText('HERO!!!', minion.x, minion.y - bodyR - 20);
+          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+        }
+        return;
+      }
+    }
     const dramaPulse = 0.65 + Math.abs(swing) * 0.55;
 
     const aura = ctx.createRadialGradient(x, y - bodyR * 0.2, bodyR * 0.6, x, y - bodyR * 0.2, bodyR * (2.2 + dramaPulse * 0.35));
-    aura.addColorStop(0, minion.side === 'left' ? 'rgba(147, 214, 255, 0.24)' : 'rgba(255, 154, 154, 0.24)');
-    aura.addColorStop(0.5, minion.side === 'left' ? 'rgba(116, 194, 255, 0.14)' : 'rgba(255, 128, 128, 0.13)');
+    aura.addColorStop(0, sideName === 'left' ? 'rgba(147, 214, 255, 0.24)' : 'rgba(255, 154, 154, 0.24)');
+    aura.addColorStop(0.5, sideName === 'left' ? 'rgba(116, 194, 255, 0.14)' : 'rgba(255, 128, 128, 0.13)');
     aura.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = aura;
     ctx.beginPath();
@@ -2815,14 +3131,41 @@ export class GameRenderer {
 
   drawMonkSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
-    const palette = TEAM_COLORS[minion.side];
-    const x = minion.x;
-    const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const scale = minion.super ? 1.18 : 1.04;
     const bodyR = 13 * scale;
     const healScale = Number.isFinite(minion.monkHealScale) ? minion.monkHealScale : 1;
+    if (!cacheRender) {
+      const healBucket = Math.max(0, Math.min(4, Math.round(healScale * 4)));
+      const cacheKey = `monk:${sideName}:${minion.super ? 1 : 0}:${healBucket}`;
+      const cacheWidth = Math.ceil(bodyR * 4.6 + 44);
+      const cacheHeight = Math.ceil(bodyR * 4.4 + 44);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          monkHealScale: healBucket / 4,
+        };
+        this.drawMonkSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#ddffcb';
+          ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('MONK', minion.x, minion.y - bodyR - 18);
+          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+        }
+        return;
+      }
+    }
+    const palette = TEAM_COLORS[minion.side];
+    const x = minion.x;
+    const y = minion.y;
+    const dir = sideName === 'left' ? 1 : -1;
     const auraAlpha = 0.18 + Math.max(0, Math.min(0.3, healScale * 0.25));
 
     ctx.fillStyle = '#0000002a';
@@ -2910,14 +3253,42 @@ export class GameRenderer {
 
   drawPresidentSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
-    const palette = TEAM_COLORS[minion.side];
-    const x = minion.x;
-    const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const scale = minion.super ? 1.2 : 1.04;
     const bodyR = 13 * scale;
     const setup = Boolean(minion.presidentSetup);
+    if (!cacheRender) {
+      const auraRadius = Math.max(0, Number(minion.presidentAuraRadius) || 0);
+      const auraBucket = Math.max(0, Math.min(8, Math.round(auraRadius / 30)));
+      const cacheKey = `president:${sideName}:${minion.super ? 1 : 0}:${setup ? 1 : 0}:${auraBucket}`;
+      const cacheWidth = Math.ceil((setup ? 220 : 140) * scale);
+      const cacheHeight = Math.ceil((setup ? 170 : 136) * scale);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          presidentAuraRadius: auraBucket * 30,
+        };
+        this.drawPresidentSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#ffe3b9';
+          ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('PRESIDENT', minion.x, minion.y - bodyR - 18);
+          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+        }
+        return;
+      }
+    }
+    const palette = TEAM_COLORS[minion.side];
+    const x = minion.x;
+    const y = minion.y;
+    const dir = sideName === 'left' ? 1 : -1;
 
     ctx.fillStyle = '#00000026';
     ctx.beginPath();
@@ -3019,16 +3390,45 @@ export class GameRenderer {
 
   drawShieldBearerSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const x = minion.x;
     const y = minion.y;
-    const dir = minion.side === 'left' ? 1 : -1;
+    const dir = sideName === 'left' ? 1 : -1;
     const baseR = Math.max(18, Number(minion.r) || 20);
     const scale = 1.1;
     const bodyW = baseR * 1.05;
     const bodyH = baseR * 1.78;
     const headR = baseR * 0.36;
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / 0.75));
+    if (!cacheRender) {
+      const baseRBucket = Math.max(18, Math.min(36, Math.round(baseR)));
+      const pushBucket = Math.max(0, Math.min(5, Math.round(pushLife * 5)));
+      const cacheKey = `shield:${sideName}:${baseRBucket}:${pushBucket}`;
+      const cacheWidth = Math.ceil(baseRBucket * 6.2 + 64);
+      const cacheHeight = Math.ceil(baseRBucket * 7.2 + 72);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          r: baseRBucket,
+          shieldPushTtl: (pushBucket / 5) * 0.75,
+        };
+        this.drawShieldBearerSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          ctx.fillStyle = '#d9ecff';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('SHIELD', minion.x, minion.y - bodyH - headR - 18);
+          this.drawMinionHpBar(minion, minion.x, minion.y + 2, Math.max(1.4, (baseR / 16) * 1.25));
+        }
+        return;
+      }
+    }
     const shieldScale = 1 + pushLife * 0.45;
     const shieldW = (baseR * 1.14 + 10) * shieldScale;
     const shieldH = (baseR * 1.9 + 10) * shieldScale;
@@ -3423,8 +3823,38 @@ export class GameRenderer {
     );
   }
 
+  drawStandardMinionHud(minion, x, y, bodyR, scale, options = {}) {
+    const isRider = options.isRider === true;
+    const { ctx } = this;
+    this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
+
+    if (minion.super) {
+      ctx.fillStyle = '#ffe6a8';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('SUPER', x, y - bodyR * scale - 18);
+    }
+
+    if (isRider) {
+      ctx.fillStyle = '#ffe5bf';
+      ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('RIDER', x, y - bodyR * scale - (minion.super ? 34 : 20));
+    }
+
+    const hpPct = Math.max(0, minion.hp / minion.maxHp);
+    const hpW = 36 * scale;
+    const hpX = x - hpW / 2;
+    const hpY = y - (26 * scale + 2);
+    ctx.fillStyle = '#101420cc';
+    ctx.fillRect(hpX, hpY, hpW, 5);
+    ctx.fillStyle = '#6bff95';
+    ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+  }
+
   drawMinionSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     if (minion.dragon) {
       this.drawDragonSprite(minion, options);
       return;
@@ -3466,18 +3896,48 @@ export class GameRenderer {
       return;
     }
 
-    const { ctx } = this;
-    const palette = TEAM_COLORS[minion.side];
-    const isNecro = Boolean(minion.necrominion);
     const isSummoned = Boolean(minion.summoned);
-    const isGunner = Boolean(minion.gunner);
     const isRider = Boolean(minion.rider);
     const t = Math.max(0, Math.min(3, minion.tier || 0));
     const stage = Math.max(0, Math.min(5, Math.floor((minion.level || 0) / 4)));
     const scale = minion.super ? 2 : 1;
+    const bodyR = 12 + t + Math.min(2, stage * 0.35);
+    if (!cacheRender) {
+      const sideName = minion.side === 'right' ? 'right' : 'left';
+      const cacheKey = [
+        'minion',
+        sideName,
+        t,
+        stage,
+        minion.super ? 1 : 0,
+        isSummoned ? 1 : 0,
+        isRider ? 1 : 0,
+        minion.riderChargeReady ? 1 : 0,
+      ].join(':');
+      const widthBase = isRider ? 188 : 128;
+      const heightBase = isRider ? 148 : 126;
+      const cacheWidth = Math.ceil(widthBase * Math.max(1, scale * 0.8));
+      const cacheHeight = Math.ceil(heightBase * Math.max(1, scale * 0.8));
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          tier: t,
+          level: stage * 4,
+        };
+        this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) this.drawStandardMinionHud(minion, minion.x, minion.y, bodyR, scale, { isRider });
+        return;
+      }
+    }
+
+    const { ctx } = this;
+    const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
     const y = minion.y;
-    const bodyR = 12 + t + Math.min(2, stage * 0.35);
     const armor = ['#5e748f', '#8b9ab2', '#d9b45f', '#b8e2ff'][t];
     const weaponLen = 8 + stage * 2.2;
     const plateW = 16 + stage * 2;
@@ -3494,14 +3954,6 @@ export class GameRenderer {
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.arc(x, y, bodyR * scale + 15, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    if (isNecro) {
-      ctx.strokeStyle = '#6ff8bf80';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(x, y, bodyR * scale + 9, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -3647,18 +4099,6 @@ export class GameRenderer {
       ctx.fill();
     }
 
-    if (isNecro) {
-      ctx.strokeStyle = '#97ffd2';
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.arc(0, -2, 4.8, 0.2, Math.PI - 0.2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-3, 2);
-      ctx.lineTo(3, 2);
-      ctx.stroke();
-    }
-
     const handX = dir * (bodyR - 1);
     const handY = 2;
 
@@ -3678,37 +4118,6 @@ export class GameRenderer {
         ctx.lineTo(handX + dir * (lanceLen + 5), handY - 3);
         ctx.lineTo(handX + dir * (lanceLen - 2), handY - 1);
         ctx.stroke();
-      } else if (isGunner) {
-        const gunLen = weaponLen + 7;
-        const muzzleX = handX + dir * (gunLen + 2);
-        const muzzleY = handY - 2;
-        const bodyStart = handX + dir * 1;
-        const bodyEnd = handX + dir * (gunLen * 0.58);
-
-        ctx.strokeStyle = '#d9e5fb';
-        ctx.lineWidth = minion.super ? 4 : 3.1;
-        ctx.beginPath();
-        ctx.moveTo(handX, handY);
-        ctx.lineTo(handX + dir * gunLen, handY - 2);
-        ctx.stroke();
-
-        ctx.fillStyle = '#455977';
-        ctx.fillRect(Math.min(bodyStart, bodyEnd), handY - 3.2, Math.abs(bodyEnd - bodyStart), 6.4);
-        ctx.fillStyle = '#1f2736';
-        ctx.fillRect(Math.min(handX, handX + dir * 4), handY + 1, Math.abs(dir * 4), 3.5);
-
-        const flash = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
-        if (flash > 0) {
-          const flashR = 2 + flash * 5;
-          ctx.fillStyle = '#fff2b0';
-          ctx.beginPath();
-          ctx.arc(muzzleX, muzzleY, flashR, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#ff9f5f';
-          ctx.beginPath();
-          ctx.arc(muzzleX + dir * 2, muzzleY, flashR * 0.65, 0, Math.PI * 2);
-          ctx.fill();
-        }
       } else {
         ctx.strokeStyle = '#d4dde8';
         ctx.lineWidth = minion.super ? 3.6 : 2.5;
@@ -3770,62 +4179,64 @@ export class GameRenderer {
     }
 
     ctx.restore();
-    if (showHud) {
-      this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
-
-      if (minion.super) {
-        ctx.fillStyle = '#ffe6a8';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('SUPER', x, y - bodyR * scale - 18);
-      }
-
-      if (isNecro) {
-        ctx.fillStyle = '#a9ffe0';
-        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('NECRO', x, y - bodyR * scale - (minion.super ? 34 : 20));
-      }
-
-      if (isGunner) {
-        ctx.fillStyle = '#ffd6a1';
-        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('GUNNER', x, y - bodyR * scale - (minion.super ? 34 : 20));
-      }
-
-      if (isRider) {
-        ctx.fillStyle = '#ffe5bf';
-        ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('RIDER', x, y - bodyR * scale - (minion.super ? 34 : 20));
-      }
-
-      const hpPct = Math.max(0, minion.hp / minion.maxHp);
-      const hpW = 36 * scale;
-      const hpX = x - hpW / 2;
-      const hpY = y - (26 * scale + 2);
-      ctx.fillStyle = '#101420cc';
-      ctx.fillRect(hpX, hpY, hpW, 5);
-      ctx.fillStyle = '#6bff95';
-      ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
-    }
+    if (showHud) this.drawStandardMinionHud(minion, x, y, bodyR, scale, { isRider });
   }
 
   drawDiggerSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
     const allowEffects = options.allowEffects !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const palette = TEAM_COLORS[minion.side];
     const x = minion.x;
     const y = minion.y;
     const r = Math.max(11, minion.r || 12);
-    const dir = minion.side === 'left' ? 1 : -1;
+    const dir = sideName === 'left' ? 1 : -1;
     const phase = Number.isFinite(minion.digPhase) ? minion.digPhase : 0;
     const shovelSwing = Math.sin(phase * 3.1);
     const handY = -r * 0.14 + Math.cos(phase * 2.6) * 2.3;
     const digBob = Math.sin(phase * 1.9) * 2.1;
     const topY = y + digBob;
+    if (!cacheRender) {
+      const phaseCycle = Math.PI * 2;
+      const wrappedPhase = ((phase % phaseCycle) + phaseCycle) % phaseCycle;
+      const phaseBuckets = 10;
+      const phaseBucket = Math.max(0, Math.min(phaseBuckets - 1, Math.round((wrappedPhase / phaseCycle) * (phaseBuckets - 1))));
+      const radiusBucket = Math.max(11, Math.min(18, Math.round(r)));
+      const cacheKey = `digger:${sideName}:${radiusBucket}:${phaseBucket}`;
+      const cacheWidth = Math.ceil(radiusBucket * 5.2 + 42);
+      const cacheHeight = Math.ceil(radiusBucket * 4.4 + 42);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          r: radiusBucket,
+          digPhase: (phaseBucket / Math.max(1, phaseBuckets - 1)) * phaseCycle,
+        };
+        this.drawDiggerSprite(proxy, { showHud: false, allowEffects: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (allowEffects) this.emitDiggerDirt(minion, minion.x, topY, dir, phase, shovelSwing);
+        if (showHud) {
+          ctx.fillStyle = '#e3d0ab';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('DIGGER', minion.x, topY - r - 14);
+
+          const hpPct = Math.max(0, minion.hp / minion.maxHp);
+          const hpW = 28;
+          const hpX = minion.x - hpW / 2;
+          const hpY = topY - r - 9;
+          ctx.fillStyle = '#101420cc';
+          ctx.fillRect(hpX, hpY, hpW, 4);
+          ctx.fillStyle = '#6bff95';
+          ctx.fillRect(hpX, hpY, hpW * hpPct, 4);
+        }
+        return;
+      }
+    }
 
     ctx.fillStyle = '#00000020';
     ctx.beginPath();
@@ -3919,28 +4330,117 @@ export class GameRenderer {
   }
 
   dragonHeartCore(minion) {
+    const baseR = Math.max(14, Number(minion?.r) || 14);
     const dir = minion.side === 'left' ? 1 : -1;
     return {
-      x: minion.x + dir * (minion.r * 0.34),
-      y: minion.y - minion.r * 0.14,
-      r: Math.max(7, minion.r * 0.3),
+      x: minion.x + dir * (baseR * 0.34),
+      y: minion.y - baseR * 0.14,
+      r: Math.max(7, baseR * 0.3),
     };
   }
 
   drawDragonSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
     const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
     const palette = TEAM_COLORS[minion.side];
-    const dir = minion.side === 'left' ? 1 : -1;
+    const dir = sideName === 'left' ? 1 : -1;
     const x = minion.x;
     const y = minion.y;
+    const baseR = Math.max(14, Number(minion.r) || 14);
     const scale = minion.super ? 1.22 : 1;
-    const bodyW = minion.r * 1.42 * scale;
-    const bodyH = minion.r * 0.82 * scale;
-    const wingSpan = minion.r * 2.4 * scale;
-    const wingLift = 0.35 + (Math.sin((minion.flyPhase || 0) * 2) + 1) * 0.27;
-    const mouthX = x + dir * (minion.r * 0.95);
-    const mouthY = y - minion.r * 0.24;
+    const bodyW = baseR * 1.42 * scale;
+    const bodyH = baseR * 0.82 * scale;
+    const wingSpan = baseR * 2.4 * scale;
+    const phase = Number.isFinite(minion.flyPhase) ? minion.flyPhase : 0;
+    const wingLift = 0.35 + (Math.sin(phase * 2) + 1) * 0.27;
+    const mouthX = x + dir * (baseR * 0.95);
+    const mouthY = y - baseR * 0.24;
+
+    const drawDragonLabel = () => {
+      if (!showHud) return;
+      ctx.fillStyle = '#ffc78d';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DRAGON', x, y - bodyH - 18);
+    };
+
+    const drawDragonBreath = () => {
+      if ((minion.dragonBreathTtl || 0) <= 0) return;
+      const toX = Number.isFinite(minion.dragonBreathToX) ? minion.dragonBreathToX : mouthX + dir * 120;
+      const toY = Number.isFinite(minion.dragonBreathToY) ? minion.dragonBreathToY : mouthY + 10;
+      const flameLife = Math.max(0, Math.min(1, minion.dragonBreathTtl / 0.24));
+
+      ctx.save();
+      ctx.globalAlpha = 0.35 + flameLife * 0.55;
+      const flameGradient = ctx.createLinearGradient(mouthX, mouthY, toX, toY);
+      flameGradient.addColorStop(0, '#fff1b2');
+      flameGradient.addColorStop(0.35, '#ffb648');
+      flameGradient.addColorStop(0.75, '#ff7a33');
+      flameGradient.addColorStop(1, '#ff4c2c');
+      ctx.strokeStyle = flameGradient;
+      ctx.lineWidth = 6 + flameLife * 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(mouthX, mouthY);
+      ctx.quadraticCurveTo(
+        (mouthX + toX) * 0.5 + Math.sin(phase * 5) * 10,
+        (mouthY + toY) * 0.5 - 8,
+        toX,
+        toY
+      );
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.6 + flameLife * 0.35;
+      ctx.fillStyle = '#ffe7a0';
+      ctx.beginPath();
+      ctx.arc(mouthX, mouthY, 3.2 + flameLife * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawDragonHpBar = () => {
+      if (!showHud) return;
+      const hpPct = Math.max(0, minion.hp / minion.maxHp);
+      const hpW = 48 * scale;
+      const hpX = x - hpW / 2;
+      const hpY = y - (bodyH + 12);
+      ctx.fillStyle = '#101420cc';
+      ctx.fillRect(hpX, hpY, hpW, 6);
+      ctx.fillStyle = '#6bff95';
+      ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
+    };
+
+    if (!cacheRender) {
+      const phaseCycle = Math.PI * 2;
+      const wrappedPhase = ((phase % phaseCycle) + phaseCycle) % phaseCycle;
+      const phaseBuckets = 12;
+      const phaseBucket = Math.max(0, Math.min(phaseBuckets - 1, Math.round((wrappedPhase / phaseCycle) * (phaseBuckets - 1))));
+      const radiusBucket = Math.max(14, Math.min(36, Math.round(baseR)));
+      const cacheKey = `dragon:${sideName}:${minion.super ? 1 : 0}:${radiusBucket}:${phaseBucket}`;
+      const cacheWidth = Math.ceil(radiusBucket * 8 * scale + 96);
+      const cacheHeight = Math.ceil(radiusBucket * 5.6 * scale + 110);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          r: radiusBucket,
+          flyPhase: (phaseBucket / Math.max(1, phaseBuckets - 1)) * phaseCycle,
+          dragonBreathTtl: 0,
+          dragonBreathToX: null,
+          dragonBreathToY: null,
+        };
+        this.drawDragonSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        drawDragonLabel();
+        drawDragonBreath();
+        drawDragonHpBar();
+        return;
+      }
+    }
 
     ctx.fillStyle = '#00000026';
     ctx.beginPath();
@@ -4032,56 +4532,9 @@ export class GameRenderer {
 
     ctx.restore();
 
-    if (showHud) {
-      ctx.fillStyle = '#ffc78d';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('DRAGON', x, y - bodyH - 18);
-    }
-
-    if ((minion.dragonBreathTtl || 0) > 0) {
-      const toX = Number.isFinite(minion.dragonBreathToX) ? minion.dragonBreathToX : mouthX + dir * 120;
-      const toY = Number.isFinite(minion.dragonBreathToY) ? minion.dragonBreathToY : mouthY + 10;
-      const flameLife = Math.max(0, Math.min(1, minion.dragonBreathTtl / 0.24));
-
-      ctx.save();
-      ctx.globalAlpha = 0.35 + flameLife * 0.55;
-      const flameGradient = ctx.createLinearGradient(mouthX, mouthY, toX, toY);
-      flameGradient.addColorStop(0, '#fff1b2');
-      flameGradient.addColorStop(0.35, '#ffb648');
-      flameGradient.addColorStop(0.75, '#ff7a33');
-      flameGradient.addColorStop(1, '#ff4c2c');
-      ctx.strokeStyle = flameGradient;
-      ctx.lineWidth = 6 + flameLife * 8;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(mouthX, mouthY);
-      ctx.quadraticCurveTo(
-        (mouthX + toX) * 0.5 + Math.sin((minion.flyPhase || 0) * 5) * 10,
-        (mouthY + toY) * 0.5 - 8,
-        toX,
-        toY
-      );
-      ctx.stroke();
-
-      ctx.globalAlpha = 0.6 + flameLife * 0.35;
-      ctx.fillStyle = '#ffe7a0';
-      ctx.beginPath();
-      ctx.arc(mouthX, mouthY, 3.2 + flameLife * 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    if (showHud) {
-      const hpPct = Math.max(0, minion.hp / minion.maxHp);
-      const hpW = 48 * scale;
-      const hpX = x - hpW / 2;
-      const hpY = y - (bodyH + 12);
-      ctx.fillStyle = '#101420cc';
-      ctx.fillRect(hpX, hpY, hpW, 6);
-      ctx.fillStyle = '#6bff95';
-      ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
-    }
+    drawDragonLabel();
+    drawDragonBreath();
+    drawDragonHpBar();
   }
 
   drawArrow(arrow) {
