@@ -1693,7 +1693,7 @@ export class GameRenderer {
     const pct = Math.max(0, hp / 6000);
     ctx.fillStyle = '#141414';
     ctx.fillRect(x - hpW / 2, y - wallH / 2 - 34, hpW, 10);
-    ctx.fillStyle = palette.primary;
+    ctx.fillStyle = '#6bff95';
     ctx.fillRect(x - hpW / 2, y - wallH / 2 - 34, hpW * pct, 10);
 
     this.drawTowerUpgradeBadges(side, x, y, sideState);
