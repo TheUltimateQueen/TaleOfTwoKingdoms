@@ -2007,16 +2007,21 @@ export class GameRenderer {
 
     const smokeShieldTtl = Math.max(0, Number(scorch.smokeShieldTtl) || 0);
     if (smokeShieldTtl > 0) {
-      const life = Math.max(0, Math.min(1, smokeShieldTtl / 3.5));
+      const smokeShieldMaxTtl = Math.max(0.01, Number(scorch.smokeShieldMaxTtl) || 3.5);
+      const life = Math.max(0, Math.min(1, smokeShieldTtl / smokeShieldMaxTtl));
       const smokeX = x;
       const smokeY = y + (Number(scorch.smokeShieldYOffset) || -28);
-      const smokeRx = Math.max(12, Number(scorch.smokeShieldRx) || 0);
-      const smokeRy = Math.max(10, Number(scorch.smokeShieldRy) || 0);
+      const smokeRx = Math.max(0, Number(scorch.smokeShieldRx) || 0) * life;
+      const smokeRy = Math.max(0, Number(scorch.smokeShieldRy) || 0) * life;
+      if (smokeRx <= 0.6 || smokeRy <= 0.6) {
+        ctx.restore();
+        return;
+      }
       const breathe = Math.sin(t * 5.1 + r * 0.02) * 0.06;
       const domeRx = smokeRx * (1 + breathe * 0.55);
       const domeRy = smokeRy * (1 + breathe * 0.32);
 
-      ctx.globalAlpha = 0.22 + life * 0.34;
+      ctx.globalAlpha = 0.05 + life * 0.51;
       const cloud = ctx.createRadialGradient(
         smokeX,
         smokeY - domeRy * 0.62,
@@ -2036,7 +2041,7 @@ export class GameRenderer {
       ctx.closePath();
       ctx.fill();
 
-      ctx.globalAlpha = 0.24 + life * 0.42;
+      ctx.globalAlpha = 0.06 + life * 0.6;
       ctx.strokeStyle = '#f5fbff';
       ctx.lineWidth = 1.3 + life * 1.2;
       ctx.beginPath();

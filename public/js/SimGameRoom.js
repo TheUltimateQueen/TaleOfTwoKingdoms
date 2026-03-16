@@ -458,6 +458,7 @@ class GameRoom {
       r: roundTo(scorch.r, 1),
       ttl: roundTo(scorch.ttl, 2),
       smokeShieldTtl: roundTo(scorch.smokeShieldTtl, 2),
+      smokeShieldMaxTtl: roundTo(scorch.smokeShieldMaxTtl, 2),
       smokeShieldRx: roundTo(scorch.smokeShieldRx, 1),
       smokeShieldRy: roundTo(scorch.smokeShieldRy, 1),
       smokeShieldYOffset: roundTo(scorch.smokeShieldYOffset, 1),
@@ -995,8 +996,14 @@ class GameRoom {
 
   scorchSmokeShieldShape(scorch) {
     if (!scorch) return null;
-    const rx = Math.max(1, Number(scorch.smokeShieldRx) || 0);
-    const ry = Math.max(1, Number(scorch.smokeShieldRy) || 0);
+    const ttl = Number(scorch.smokeShieldTtl) || 0;
+    const maxTtl = Math.max(0.01, Number(scorch.smokeShieldMaxTtl) || CANDLE_SMOKE_SHIELD_SECONDS);
+    const life = clamp(ttl / maxTtl, 0, 1);
+    if (life <= 0.01) return null;
+    const baseRx = Math.max(0, Number(scorch.smokeShieldRx) || 0);
+    const baseRy = Math.max(0, Number(scorch.smokeShieldRy) || 0);
+    const rx = baseRx * life;
+    const ry = baseRy * life;
     if (rx <= 0 || ry <= 0) return null;
     return {
       x: Number(scorch.x) || 0,
@@ -1569,6 +1576,7 @@ class GameRoom {
       r: 96,
       ttl: 4.2,
       smokeShieldTtl: CANDLE_SMOKE_SHIELD_SECONDS,
+      smokeShieldMaxTtl: CANDLE_SMOKE_SHIELD_SECONDS,
       smokeShieldRx: (Math.max(28, Number(candle.cartHalfW) || CANDLE_CART_HALF_W) + 18)
         * CANDLE_SMOKE_SHIELD_SCALE
         * CANDLE_DESTROYED_SMOKE_SCALE,
@@ -1619,6 +1627,7 @@ class GameRoom {
       r: 128 + waxPct * 24,
       ttl: 5.4 + waxPct * 1.8,
       smokeShieldTtl: 0,
+      smokeShieldMaxTtl: 0,
       smokeShieldRx: 0,
       smokeShieldRy: 0,
       smokeShieldYOffset: 0,
@@ -1674,6 +1683,9 @@ class GameRoom {
     for (let i = this.candleScorches.length - 1; i >= 0; i -= 1) {
       const scorch = this.candleScorches[i];
       scorch.ttl = Math.max(0, (Number(scorch.ttl) || 0) - dt);
+      if (!Number.isFinite(scorch.smokeShieldMaxTtl)) {
+        scorch.smokeShieldMaxTtl = Math.max(0, Number(scorch.smokeShieldTtl) || 0);
+      }
       scorch.smokeShieldTtl = Math.max(0, (Number(scorch.smokeShieldTtl) || 0) - dt);
       const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
       this.forEachMinionInRadius(scorch.x, scorch.y, scorch.r, minionBuckets, MINION_TARGET_BUCKET_W, (minion) => {
