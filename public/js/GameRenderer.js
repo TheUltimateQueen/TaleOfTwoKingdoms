@@ -4540,7 +4540,16 @@ export class GameRenderer {
   drawArrow(arrow) {
     if ((Number(arrow?.launchDelay) || 0) > 0) return;
     const { ctx } = this;
-    const angle = Math.atan2(arrow.vy, arrow.vx);
+    const isStuck = Boolean(arrow.stuck);
+    const stuckTtlMax = Math.max(0, Number(arrow.stuckTtlMax) || 0);
+    const stuckTtl = Math.max(0, Number(arrow.stuckTtl) || 0);
+    const stuckFade = isStuck && stuckTtlMax > 0
+      ? Math.max(0, Math.min(1, stuckTtl / stuckTtlMax))
+      : 1;
+    if (isStuck && stuckFade <= 0) return;
+    const angle = isStuck && Number.isFinite(arrow.stuckAngle)
+      ? arrow.stuckAngle
+      : Math.atan2(arrow.vy, arrow.vx);
     const len = 14 + arrow.r * 1.6;
     const isMainArrow = Boolean(arrow.mainArrow);
     const comboTier = Math.max(1, Math.min(4, Number(arrow.comboTier) || 1));
@@ -4569,8 +4578,10 @@ export class GameRenderer {
     }
 
     ctx.save();
+    if (isStuck) ctx.globalAlpha *= stuckFade;
     ctx.translate(arrow.x, arrow.y);
     ctx.rotate(angle);
+    if (isStuck) ctx.translate(-len * 0.18, 0);
 
     const allowGlow = glow && !veryHeavyArrowLoad && (isMainArrow || !heavyArrowLoad);
     if (allowGlow) {
@@ -4578,7 +4589,7 @@ export class GameRenderer {
       ctx.shadowBlur = isMainArrow ? 0.8 : 5;
     }
 
-    if (comboBoost > 0 && !heavyArrowLoad) {
+    if (!isStuck && comboBoost > 0 && !heavyArrowLoad) {
       const trailColor = comboTier >= 4
         ? (arrow.side === 'left' ? '#eefbffcc' : '#fff1c6cc')
         : (arrow.side === 'left' ? '#b9ecffb8' : '#ffcab7b8');
@@ -4610,7 +4621,7 @@ export class GameRenderer {
     ctx.moveTo(-len * 0.55, 0);
     ctx.lineTo(len * 0.45, 0);
     ctx.stroke();
-    if (arrow.powerType === 'flameShot') {
+    if (arrow.powerType === 'flameShot' && !isStuck) {
       if (heavyArrowLoad) {
         ctx.strokeStyle = '#ff8f52';
       } else {
@@ -4626,7 +4637,7 @@ export class GameRenderer {
       ctx.lineTo(len * 0.26, 0);
       ctx.stroke();
     }
-    if (isMainArrow) {
+    if (isMainArrow && !isStuck) {
       ctx.strokeStyle = '#ffffffdd';
       ctx.lineWidth = Math.max(1, arrow.r * 0.28);
       ctx.beginPath();

@@ -144,6 +144,13 @@ const CANDLE_DESTROYED_SMOKE_Y_OFFSET = -28;
 const MULTI_SIDE_ARROW_DELAY_STEP = 0.05;
 const MULTI_SIDE_ARROW_DELAY_MAX = 0.9;
 const MULTI_SIDE_ARROW_UNDER_DELAY_MUL = 2;
+const ARROW_FLIGHT_TTL = 6.5;
+const ARROW_SKY_TTL_PAUSE_Y = -60;
+const DIGGER_SPAWN_BASE_Y = TOWER_Y + 102;
+const ARROW_STICK_GROUND_Y = DIGGER_SPAWN_BASE_Y + 46;
+const ARROW_STUCK_DURATION = 4;
+const SHOT_POWER_FALL_MIN_SPEED = 78;
+const SHOT_POWER_FALL_MAX_SPEED = 112;
 const ARROW_TARGET_BUCKET_W = 120;
 const ARROW_TARGET_BUCKET_SCAN = 2;
 const MINION_TARGET_BUCKET_W = 140;
@@ -429,6 +436,10 @@ class GameRoom {
       mainArrow: Boolean(a.mainArrow),
       comboTier: Math.max(1, Math.round(Number(a.comboTier) || 1)),
       launchDelay: roundTo(a.launchDelay, 3),
+      stuck: Boolean(a.stuck),
+      stuckAngle: finiteOrNull(a.stuckAngle, 3),
+      stuckTtl: roundTo(a.stuckTtl, 3),
+      stuckTtlMax: roundTo(a.stuckTtlMax, 3),
     }));
     const minions = this.minions.map((m) => ({
       id: m.id,
@@ -927,7 +938,10 @@ class GameRoom {
     for (let i = 0; i < this.shotPowers.length; i += 1) {
       const p = this.shotPowers[i];
       p.y += p.vy * dt;
-      if (p.y >= GROUND_Y) continue;
+      if (p.y >= ARROW_STICK_GROUND_Y) {
+        this.queueHitSfx('explosion', p.x, ARROW_STICK_GROUND_Y, p.side);
+        continue;
+      }
       this.shotPowers[write] = p;
       write += 1;
     }
@@ -1831,6 +1845,14 @@ class GameRoom {
 
     for (let i = this.arrows.length - 1; i >= 0; i -= 1) {
       const a = this.arrows[i];
+      if (a.stuck) {
+        a.stuckTtl = Math.max(0, (Number(a.stuckTtl) || 0) - dt);
+        if (a.stuckTtl <= 0) {
+          this.arrows.splice(i, 1);
+          continue;
+        }
+        continue;
+      }
       const prevX = Number(a.x) || 0;
       const prevY = Number(a.y) || 0;
       let stepDt = dt;
@@ -1845,17 +1867,18 @@ class GameRoom {
       a.vy += (a.gravity || 560) * stepDt;
       a.x += a.vx * stepDt;
       a.y += a.vy * stepDt;
-      a.ttl -= stepDt;
+      const pauseTtl = a.y < ARROW_SKY_TTL_PAUSE_Y && a.vy < 0;
+      if (!pauseTtl) a.ttl -= stepDt;
 
-      if (a.ttl <= 0 || a.x < -50 || a.x > WORLD_W + 50 || a.y < -50 || a.y > WORLD_H + 50) {
+      if (a.ttl <= 0 || a.x < -50 || a.x > WORLD_W + 50 || a.y > WORLD_H + 50) {
         this.markArrowMiss(a);
         this.arrows.splice(i, 1);
         continue;
       }
 
-      if (a.y >= GROUND_Y + 12 && a.vy > 0) {
+      if (a.y >= ARROW_STICK_GROUND_Y && a.vy > 0) {
         this.markArrowMiss(a);
-        this.arrows.splice(i, 1);
+        this.stickArrowInGround(a);
         continue;
       }
 
@@ -2054,6 +2077,30 @@ class GameRoom {
 
       if (consumed) this.arrows.splice(i, 1);
     }
+  }
+
+  stickArrowInGround(arrow) {
+    if (!arrow || arrow.stuck) return;
+    const sideName = arrow.side === 'right' ? 'right' : 'left';
+    const sideDir = sideName === 'left' ? 1 : -1;
+    const incoming = Math.atan2(
+      Math.max(90, Number(arrow.vy) || 0),
+      Number(arrow.vx) || sideDir * 120
+    );
+    const baseAngle = sideName === 'left' ? 0.9 : Math.PI - 0.9;
+    const minAngle = sideName === 'left' ? 0.48 : Math.PI - 1.28;
+    const maxAngle = sideName === 'left' ? 1.28 : Math.PI - 0.48;
+    arrow.stuck = true;
+    arrow.stuckTtl = ARROW_STUCK_DURATION;
+    arrow.stuckTtlMax = ARROW_STUCK_DURATION;
+    arrow.ttl = ARROW_STUCK_DURATION;
+    arrow.launchDelay = 0;
+    arrow.gravity = 0;
+    arrow.vx = 0;
+    arrow.vy = 0;
+    arrow.x = clamp(Number(arrow.x) || 0, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+    arrow.y = ARROW_STICK_GROUND_Y;
+    arrow.stuckAngle = clamp(baseAngle * 0.6 + incoming * 0.4, minAngle, maxAngle);
   }
 
   buildMinionBuckets(bucketW = ARROW_TARGET_BUCKET_W) {
@@ -3493,7 +3540,7 @@ class GameRoom {
         vx,
         vy,
         dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul * sideArrowMul,
-        ttl: 3.5,
+        ttl: ARROW_FLIGHT_TTL,
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
         powerType,
@@ -3503,6 +3550,10 @@ class GameRoom {
         launchDelay,
         mainArrow: isMainArrow,
         comboTier: comboMul,
+        stuck: false,
+        stuckAngle: null,
+        stuckTtl: 0,
+        stuckTtlMax: 0,
       });
     }
   }
@@ -3843,7 +3894,7 @@ class GameRoom {
   spawnMirroredShotPower() {
     const x = 680 + Math.random() * 110;
     const type = randomFrom(SHOT_POWER_TYPES);
-    const vy = 120 + Math.random() * 40;
+    const vy = SHOT_POWER_FALL_MIN_SPEED + Math.random() * (SHOT_POWER_FALL_MAX_SPEED - SHOT_POWER_FALL_MIN_SPEED);
 
     this.shotPowers.push({ id: this.seq++, side: 'left', x, y: 40, r: 16, type, vy });
     this.shotPowers.push({ id: this.seq++, side: 'right', x: mirroredX(x), y: 40, r: 16, type, vy });
