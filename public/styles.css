@@ -138,6 +138,31 @@ button:hover {
   color: #221507;
 }
 
+.input-guide {
+  margin: 10px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid #3a4f74;
+  border-radius: 10px;
+  background: #122038;
+}
+
+.guide-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: #cde4ff;
+}
+
+.guide-line {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #d9e7ff;
+}
+
+.guide-line:last-child {
+  margin-bottom: 0;
+}
+
 .local-test-btn {
   background: linear-gradient(180deg, #4dbf86 0%, #2f875e 100%);
   border-color: #67d49e;

@@ -216,8 +216,8 @@ export class GameClient {
       }
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
-      if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Local-only quick test: West aims with WASD, East aims with arrow keys.';
-      if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Start Local Keyboard Test';
+      if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Keyboard mode: West aims with W/A/S/D and East aims with Arrow keys. Pick keyboard or phones per match.';
+      if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Play On This Computer (Keyboard)';
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
@@ -420,11 +420,11 @@ export class GameClient {
 
     this.localPressedKeys.clear();
     this.localKeyboardTestActive = true;
-    if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Local keyboard test active. Hold keys to smoothly move each side aim cursor.';
-    if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Restart Local Keyboard Test';
+    if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Keyboard mode active. Hold keys to smoothly move each side aim cursor. Phone controllers are disabled in this match.';
+    if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Restart Keyboard Match';
 
-    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Local keyboard test started. West: WASD | East: Arrow keys.';
-    if (this.lobbyMsg) this.lobbyMsg.textContent = 'Local-only test active on this computer.';
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Keyboard match started. West: W/A/S/D | East: Arrow keys. Use phones in a separate match.';
+    if (this.lobbyMsg) this.lobbyMsg.textContent = 'Keyboard mode active on this computer (1v1).';
 
     this.resetGameOverPresentation();
     this.setPostGamePanel(false);
@@ -1019,11 +1019,11 @@ export class GameClient {
     if (s.gameOver) {
       const leftSummary = arrowAccuracySummary('West', s.left);
       const rightSummary = arrowAccuracySummary('East', s.right);
-      const localHint = this.localKeyboardTestActive ? ' | Local Keyboard Test' : '';
+      const localHint = this.localKeyboardTestActive ? ' | Keyboard Mode' : '';
       this.centerHud.textContent = `Final | Winner ${sideName(s.winner)}${localHint} | ${leftSummary} | ${rightSummary}`;
       return;
     }
-    const localHint = this.localKeyboardTestActive ? ' | Aim: West WASD / East Arrows' : '';
+    const localHint = this.localKeyboardTestActive ? ' | Controls: West W/A/S/D / East Arrows' : '';
     this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
   }
 
@@ -1048,7 +1048,7 @@ export class GameClient {
       this.controllerPanel.classList.add('hidden');
       this.setCreateMode('1v1');
       this.setDisplayMode('lobby');
-      if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Room auto-created on open. Tap 2 or 4 players anytime before match starts.';
+      if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Room auto-created. Pick a control mode per match: Phones (QR) or Keyboard on this computer.';
       this.requestRoomCreate('1v1');
     }
   }
