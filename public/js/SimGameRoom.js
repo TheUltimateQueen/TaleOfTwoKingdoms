@@ -101,6 +101,11 @@ const GUNNER_SKY_CANNON_SETUP_TIME = 0.72;
 const GUNNER_SKY_CANNON_FALL_SPEED = 312;
 const GUNNER_SKY_CANNON_SKY_SPAWN_Y = 36;
 const GUNNER_SKY_CANNON_IMPACT_PAD = 10;
+const GUNNER_SKY_CANNON_BARRAGE_CHANCE = 0.5;
+const GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS = 2;
+const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
+const GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY = 0.24;
+const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
 const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
 const NECRO_REVIVE_SHIELD_SECONDS = 2;
@@ -3575,13 +3580,36 @@ class GameRoom {
     const sideName = gunner.side === 'right' ? 'right' : 'left';
     const dir = sideName === 'left' ? 1 : -1;
     const enemyTowerX = sideName === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+    const enemyTowerY = TOWER_Y - 24;
     const strikeX = clamp(Number(impactX) || enemyTowerX, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38);
     const strikeY = clamp(Number(impactY) || (TOWER_Y - 24), TOWER_Y - 180, TOWER_Y + 212);
+    const barrageActive = Math.random() < GUNNER_SKY_CANNON_BARRAGE_CHANCE;
+    const shotCount = barrageActive
+      ? (GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS
+          + Math.floor(Math.random() * (GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS - GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS + 1)))
+      : 1;
+    const shotQueue = [];
+    for (let i = 0; i < shotCount; i += 1) {
+      const rowT = shotCount <= 1 ? 0 : (i / (shotCount - 1));
+      const approach = rowT * GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX;
+      const shotX = strikeX + (enemyTowerX - strikeX) * approach;
+      const shotY = strikeY + (enemyTowerY - strikeY) * approach;
+      shotQueue.push({
+        impactX: clamp(shotX, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38),
+        impactY: clamp(shotY, TOWER_Y - 180, TOWER_Y + 212),
+      });
+    }
     gunner.gunnerSkyCannonSetupTtl = GUNNER_SKY_CANNON_SETUP_TIME;
-    gunner.gunnerSkyCannonAimX = strikeX;
-    gunner.gunnerSkyCannonAimY = strikeY;
+    gunner.gunnerSkyCannonQueue = shotQueue;
+    gunner.gunnerSkyCannonAimX = Number(shotQueue[0]?.impactX) || strikeX;
+    gunner.gunnerSkyCannonAimY = Number(shotQueue[0]?.impactY) || strikeY;
     gunner.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
-    this.queueLine('SETTING CANNON!', gunner.x, gunner.y - gunner.r - 18, sideName);
+    this.queueLine(
+      shotCount > 1 ? `SETTING BARRAGE x${shotCount}!` : 'SETTING CANNON!',
+      gunner.x,
+      gunner.y - gunner.r - 18,
+      sideName
+    );
     this.queueHitSfx('powerup', gunner.x + dir * (gunner.r * 0.7), gunner.y - gunner.r * 0.5, sideName);
   }
 
@@ -3591,24 +3619,24 @@ class GameRoom {
     const dir = sideName === 'left' ? 1 : -1;
     const muzzleX = gunner.x + dir * (gunner.r + 7);
     const muzzleY = gunner.y - 2;
+    const queued = Array.isArray(gunner.gunnerSkyCannonQueue) ? gunner.gunnerSkyCannonQueue : null;
+    const queuedShot = queued && queued.length ? queued.shift() : null;
     const impactX = clamp(
-      Number(gunner.gunnerSkyCannonAimX) || gunner.x + dir * 80,
+      Number(queuedShot?.impactX) || Number(gunner.gunnerSkyCannonAimX) || gunner.x + dir * 80,
       TOWER_X_LEFT + 38,
       TOWER_X_RIGHT - 38
     );
     const impactY = clamp(
-      Number(gunner.gunnerSkyCannonAimY) || (TOWER_Y - 24),
+      Number(queuedShot?.impactY) || Number(gunner.gunnerSkyCannonAimY) || (TOWER_Y - 24),
       TOWER_Y - 180,
       TOWER_Y + 212
     );
-
-    gunner.gunnerSkyCannonSetupTtl = 0;
-    gunner.gunnerSkyCannonAimX = null;
-    gunner.gunnerSkyCannonAimY = null;
     gunner.gunFlashTtl = Math.max(Number(gunner.gunFlashTtl) || 0, 0.18);
     this.queueHitSfx('gunhit', muzzleX, muzzleY, sideName);
     this.queueHitSfx('powerup', impactX, GUNNER_SKY_CANNON_SKY_SPAWN_Y + 8, sideName);
-    this.queueLine('SKY CANNON!', gunner.x, gunner.y - gunner.r - 18, sideName);
+    if (!queued || !queued.length || Math.random() < 0.45) {
+      this.queueLine('SKY CANNON!', gunner.x, gunner.y - gunner.r - 18, sideName);
+    }
 
     this.cannonBalls.push({
       id: this.seq++,
@@ -3623,6 +3651,18 @@ class GameRoom {
       baseDamage: this.minionOutgoingDamage(gunner, gunner.dmg),
       sourceSuper: Boolean(gunner.super),
     });
+
+    if (queued && queued.length > 0) {
+      const nextShot = queued[0];
+      gunner.gunnerSkyCannonSetupTtl = GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY;
+      gunner.gunnerSkyCannonAimX = Number(nextShot?.impactX) || null;
+      gunner.gunnerSkyCannonAimY = Number(nextShot?.impactY) || null;
+    } else {
+      gunner.gunnerSkyCannonSetupTtl = 0;
+      gunner.gunnerSkyCannonAimX = null;
+      gunner.gunnerSkyCannonAimY = null;
+      gunner.gunnerSkyCannonQueue = null;
+    }
   }
 
   resolveGunnerSkyCannonImpact(ball, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
@@ -4183,6 +4223,7 @@ class GameRoom {
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
+      gunnerSkyCannonQueue: null,
       diggerMineTargetId: null,
       diggerMineT: 0,
       necroShieldHp: 0,
@@ -4236,6 +4277,7 @@ class GameRoom {
       revived.gunnerSkyCannonSetupTtl = 0;
       revived.gunnerSkyCannonAimX = null;
       revived.gunnerSkyCannonAimY = null;
+      revived.gunnerSkyCannonQueue = null;
     }
     if (revived.necrominion) {
       revived.necroShieldMax = revived.maxHp;
@@ -4398,6 +4440,7 @@ class GameRoom {
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
+      gunnerSkyCannonQueue: null,
       dragonSuperBreathCd: 0,
       dragonSuperBreathTtl: 0,
       dragonSuperBreathPulseCd: 0,
@@ -4862,6 +4905,7 @@ class GameRoom {
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
+      gunnerSkyCannonQueue: null,
       dragonSuperBreathCd: isDragon ? (DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER) : 0,
       dragonSuperBreathTtl: 0,
       dragonSuperBreathPulseCd: 0,
