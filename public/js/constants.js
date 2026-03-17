@@ -11,6 +11,13 @@ export const UPGRADE_LABELS = {
   powerLevel: 'Power Effects+',
   specialRateLevel: 'Special Chance+',
   dragonLevel: 'Dragon Rate+',
+  dragonSuperBreathLevel: 'Dragon Super Breath',
+  shieldDarkMetalLevel: 'Shield Dark Metal',
+  monkHealCircleLevel: 'Monk Heal Circle',
+  necroExpertSummonerLevel: 'Necro Death Revival',
+  riderSuperHorseLevel: 'Rider Super Horse',
+  diggerGoldFinderLevel: 'Digger Gold Finder',
+  gunnerSkyCannonLevel: 'Gunner Sky Cannon',
   superMinionLevel: 'Super Rate+',
 };
 
@@ -25,6 +32,13 @@ export const UPGRADE_HINTS = {
   powerLevel: '+shot power and support scaling',
   specialRateLevel: '+special spawn chance',
   dragonLevel: '+dragon spawn rate',
+  dragonSuperBreathLevel: 'unlocks 5s cone burst for dragons',
+  shieldDarkMetalLevel: '10s cycle: 5s at 95% damage reduction, shield chance x2',
+  monkHealCircleLevel: 'unlocks 10s monk healing pulse',
+  necroExpertSummonerLevel: 'nearby deaths revive at 1/8 hp',
+  riderSuperHorseLevel: 'rider hp x4, larger horse, stronger charge hit',
+  diggerGoldFinderLevel: 'diggers seek and collect gold resources',
+  gunnerSkyCannonLevel: 'gunners fire periodic sky-cannon AoE blasts',
   superMinionLevel: '+super spawn rate',
 };
 

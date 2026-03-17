@@ -56,6 +56,13 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'powerLevel', code: 'PW', base: 1 },
   { type: 'specialRateLevel', code: 'SR', base: 1 },
   { type: 'dragonLevel', code: 'DR', base: 0 },
+  { type: 'dragonSuperBreathLevel', code: 'SB', base: 0 },
+  { type: 'shieldDarkMetalLevel', code: 'DM', base: 0 },
+  { type: 'monkHealCircleLevel', code: 'HC', base: 0 },
+  { type: 'necroExpertSummonerLevel', code: 'NS', base: 0 },
+  { type: 'riderSuperHorseLevel', code: 'RH', base: 0 },
+  { type: 'diggerGoldFinderLevel', code: 'GF', base: 0 },
+  { type: 'gunnerSkyCannonLevel', code: 'SC', base: 0 },
   { type: 'superMinionLevel', code: 'SU', base: 0 },
 ];
 
@@ -70,6 +77,13 @@ const UPGRADE_CATEGORY_BY_TYPE = {
   powerLevel: 'power',
   specialRateLevel: 'special',
   dragonLevel: 'special',
+  dragonSuperBreathLevel: 'special',
+  shieldDarkMetalLevel: 'special',
+  monkHealCircleLevel: 'special',
+  necroExpertSummonerLevel: 'special',
+  riderSuperHorseLevel: 'special',
+  diggerGoldFinderLevel: 'special',
+  gunnerSkyCannonLevel: 'special',
   superMinionLevel: 'special',
 };
 
@@ -186,6 +200,7 @@ const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const MINION_HIT_FLASH_TTL = 0.18;
+const SHIELD_DARK_METAL_DURATION = 5;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
 const MAX_PARTICLES = 1800;
@@ -193,6 +208,7 @@ const MAX_POOLED_PARTICLES = MAX_PARTICLES * 2;
 const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
+const MAX_REVIVE_SPIRITS = 90;
 const TOWER_HIT_PARTICLE_COLORS = ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'];
 const BLOCKED_PARTICLE_COLORS = ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'];
 const CANDLE_HIT_FIRE_COLORS = ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'];
@@ -220,6 +236,7 @@ export class GameRenderer {
     this.damageTexts = [];
     this.heroLines = [];
     this.deathGhosts = [];
+    this.reviveSpirits = [];
     this.towerShake = {
       left: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
       right: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
@@ -459,6 +476,8 @@ export class GameRenderer {
     }
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
     if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
+    this.updateReviveSpirits(dt);
+    this.drawReviveSpirits();
     this.updateDeathGhosts(dt);
     this.drawDeathGhosts();
     if (Array.isArray(snapshot.candles)) {
@@ -517,6 +536,26 @@ export class GameRenderer {
     const pside = event ? event.side : side;
     if (type === 'ghostfall') {
       this.emitDeathGhost(event);
+      return;
+    }
+    if (type === 'revive') {
+      this.emitReviveSpirit(event);
+      const burstCount = this.scaledParticleCount(26, 4);
+      for (let i = 0; i < burstCount; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 110 + Math.random() * 160;
+        this.spawnParticle(
+          px + (Math.random() * 6 - 3),
+          py + (Math.random() * 4 - 2),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 36,
+          0.36 + Math.random() * 0.18,
+          0.56,
+          1.8 + Math.random() * 2.2,
+          pickRandom(['#b6ffea', '#7ef2d8', '#f0fff8']),
+          300
+        );
+      }
       return;
     }
     const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;
@@ -615,6 +654,58 @@ export class GameRenderer {
       }
       return;
     }
+    if (type === 'healbeam') {
+      const fromX = Number.isFinite(event?.fromX) ? event.fromX : px;
+      const fromY = Number.isFinite(event?.fromY) ? event.fromY : py;
+      const toX = Number.isFinite(event?.toX) ? event.toX : px;
+      const toY = Number.isFinite(event?.toY) ? event.toY : py;
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+      const len = Math.hypot(dx, dy);
+      const steps = Math.max(3, Math.min(14, Math.round(len / 18)));
+      for (let i = 0; i <= steps; i += 1) {
+        const t = i / steps;
+        const bx = fromX + dx * t + (Math.random() * 4 - 2);
+        const by = fromY + dy * t + (Math.random() * 4 - 2);
+        const ang = Math.random() * Math.PI * 2;
+        const mag = 34 + Math.random() * 62;
+        this.spawnParticle(
+          bx,
+          by,
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 10,
+          0.22 + Math.random() * 0.14,
+          0.34,
+          1.5 + Math.random() * 1.8,
+          pickRandom(['#c6ffb8', '#89f0a4', '#e4ffd8']),
+          180
+        );
+      }
+      return;
+    }
+    if (type === 'healcircle') {
+      const r = Math.max(34, Number(event?.r) || 96);
+      const ringCount = this.scaledParticleCount(44, 8);
+      for (let i = 0; i < ringCount; i += 1) {
+        const ang = (Math.PI * 2 * i) / ringCount + (Math.random() * 0.12 - 0.06);
+        const ringR = r * (0.72 + Math.random() * 0.36);
+        const sx = px + Math.cos(ang) * ringR;
+        const sy = py + Math.sin(ang) * ringR;
+        const mag = 48 + Math.random() * 74;
+        this.spawnParticle(
+          sx,
+          sy,
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 8,
+          0.38 + Math.random() * 0.16,
+          0.52,
+          1.8 + Math.random() * 2.2,
+          pickRandom(['#9ff2ad', '#d7ffcf', '#66d98b']),
+          220
+        );
+      }
+      return;
+    }
 
     let count = 8;
     let colors = [palette.soft, '#ffffff'];
@@ -702,11 +793,14 @@ export class GameRenderer {
       level: Math.max(0, Number(ghost.level) || 1),
       super: Boolean(ghost.super),
       summoned: Boolean(ghost.summoned),
+      necroRevived: Boolean(ghost.necroRevived),
       explosive: Boolean(ghost.explosive),
       gunner: Boolean(ghost.gunner),
       rider: Boolean(ghost.rider),
       riderChargeReady: Boolean(ghost.riderChargeReady),
+      riderSuperHorse: Boolean(ghost.riderSuperHorse),
       digger: Boolean(ghost.digger),
+      diggerGoldFinder: Boolean(ghost.diggerGoldFinder),
       digPhase: Number.isFinite(ghost.digPhase) ? ghost.digPhase : 0.8,
       monk: Boolean(ghost.monk),
       monkHealScale: Number.isFinite(ghost.monkHealScale) ? ghost.monkHealScale : 1,
@@ -715,6 +809,7 @@ export class GameRenderer {
       shieldBearer: Boolean(ghost.shieldBearer),
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      shieldDarkMetalTtl: Math.max(0, Number(ghost.shieldDarkMetalTtl) || 0),
       stoneGolem: Boolean(ghost.stoneGolem),
       golemSmashTtl: 0,
       golemShieldHp: 0,
@@ -760,6 +855,25 @@ export class GameRenderer {
     });
     if (this.deathGhosts.length > MAX_DEATH_GHOSTS) {
       this.deathGhosts.splice(0, this.deathGhosts.length - MAX_DEATH_GHOSTS);
+    }
+  }
+
+  emitReviveSpirit(event) {
+    if (!event || typeof event !== 'object') return;
+    const ghostMinion = this.createGhostMinion(event.ghost, event.side, event.x, event.y);
+    if (!ghostMinion) return;
+    const life = 0.62 + Math.random() * 0.22;
+    this.reviveSpirits.push({
+      minion: ghostMinion,
+      x: ghostMinion.x,
+      y: ghostMinion.y + Math.max(8, ghostMinion.r * 0.25),
+      drift: Math.random() * 12 - 6,
+      phase: Math.random() * Math.PI * 2,
+      life,
+      maxLife: life,
+    });
+    if (this.reviveSpirits.length > MAX_REVIVE_SPIRITS) {
+      this.reviveSpirits.splice(0, this.reviveSpirits.length - MAX_REVIVE_SPIRITS);
     }
   }
 
@@ -858,6 +972,25 @@ export class GameRenderer {
       write += 1;
     }
     this.deathGhosts.length = write;
+  }
+
+  updateReviveSpirits(dt) {
+    let write = 0;
+    for (let i = 0; i < this.reviveSpirits.length; i += 1) {
+      const g = this.reviveSpirits[i];
+      g.phase += dt * 6.5;
+      g.y -= dt * (70 + Math.sin(g.phase) * 10);
+      g.x += Math.sin(g.phase) * dt * (12 + g.drift * 0.5);
+      g.life -= dt;
+      if (g.minion) {
+        g.minion.x = g.x;
+        g.minion.y = g.y;
+      }
+      if (g.life <= 0) continue;
+      this.reviveSpirits[write] = g;
+      write += 1;
+    }
+    this.reviveSpirits.length = write;
   }
 
   updateDamageTexts(dt) {
@@ -1148,6 +1281,40 @@ export class GameRenderer {
       }
       ctx.filter = 'none';
       ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  drawReviveSpirits() {
+    const { ctx } = this;
+    for (const g of this.reviveSpirits) {
+      if (!g?.minion) continue;
+      const life = Math.max(0, g.life / g.maxLife);
+      const rise = 1 - life;
+      const scale = 0.42 + rise * 0.92;
+      const glow = 0.2 + life * 0.42;
+
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.scale(scale, scale);
+      ctx.translate(-g.x, -g.y);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.18 + life * 0.55;
+      ctx.filter = 'grayscale(1) saturate(0) brightness(2.5)';
+      this.drawMinionSprite(g.minion, { showHud: false, allowEffects: false });
+      ctx.filter = 'none';
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = glow;
+      const ringR = Math.max(16, (Number(g.minion.r) || 12) * (1 + rise * 1.35));
+      ctx.strokeStyle = '#9fffe4';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(g.x, g.y + Math.max(2, (Number(g.minion.r) || 12) * 0.28), ringR, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -3400,10 +3567,13 @@ export class GameRenderer {
     const bodyH = baseR * 1.78;
     const headR = baseR * 0.36;
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / 0.75));
+    const darkMetalLife = Math.max(0, Math.min(1, (Number(minion.shieldDarkMetalTtl) || 0) / SHIELD_DARK_METAL_DURATION));
+    const darkMetalActive = darkMetalLife > 0.001;
     if (!cacheRender) {
       const baseRBucket = Math.max(18, Math.min(36, Math.round(baseR)));
       const pushBucket = Math.max(0, Math.min(5, Math.round(pushLife * 5)));
-      const cacheKey = `shield:${sideName}:${baseRBucket}:${pushBucket}`;
+      const darkMetalBucket = Math.max(0, Math.min(5, Math.round(darkMetalLife * 5)));
+      const cacheKey = `shield:${sideName}:${baseRBucket}:${pushBucket}:${darkMetalBucket}`;
       const cacheWidth = Math.ceil(baseRBucket * 6.2 + 64);
       const cacheHeight = Math.ceil(baseRBucket * 7.2 + 72);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -3413,15 +3583,16 @@ export class GameRenderer {
           y: h / 2,
           r: baseRBucket,
           shieldPushTtl: (pushBucket / 5) * 0.75,
+          shieldDarkMetalTtl: (darkMetalBucket / 5) * SHIELD_DARK_METAL_DURATION,
         };
         this.drawShieldBearerSprite(proxy, { showHud: false, cacheRender: true });
       });
       if (drewCached) {
         if (showHud) {
-          ctx.fillStyle = '#d9ecff';
+          ctx.fillStyle = darkMetalActive ? '#d0d7e5' : '#d9ecff';
           ctx.font = 'bold 11px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('SHIELD', minion.x, minion.y - bodyH - headR - 18);
+          ctx.fillText(darkMetalActive ? 'DARK METAL' : 'SHIELD', minion.x, minion.y - bodyH - headR - 18);
           this.drawMinionHpBar(minion, minion.x, minion.y + 2, Math.max(1.4, (baseR / 16) * 1.25));
         }
         return;
@@ -3447,12 +3618,19 @@ export class GameRenderer {
       ctx.ellipse(shieldX, shieldY, shieldW * 0.6, shieldH * 0.5, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (darkMetalActive) {
+      ctx.strokeStyle = this.withAlpha('#d5dde8', 0.16 + darkMetalLife * 0.22);
+      ctx.lineWidth = 1.6 + darkMetalLife * 1.8;
+      ctx.beginPath();
+      ctx.ellipse(shieldX, shieldY, shieldW * (0.62 + darkMetalLife * 0.06), shieldH * (0.52 + darkMetalLife * 0.06), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(scale, scale);
 
-    ctx.fillStyle = '#384e6f';
+    ctx.fillStyle = darkMetalActive ? '#21252d' : '#384e6f';
     ctx.beginPath();
     ctx.moveTo(-bodyW * 0.64, -bodyH * 0.92);
     ctx.lineTo(-bodyW * 0.82, bodyH * 0.9);
@@ -3460,13 +3638,13 @@ export class GameRenderer {
     ctx.lineTo(bodyW * 0.48, -bodyH * 0.92);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = '#a9c5e6';
+    ctx.strokeStyle = darkMetalActive ? '#596171' : '#a9c5e6';
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    ctx.fillStyle = '#25364f';
+    ctx.fillStyle = darkMetalActive ? '#141922' : '#25364f';
     ctx.fillRect(-bodyW * 0.74, -bodyH * 0.5, bodyW * 1.48, bodyH * 0.22);
-    ctx.fillStyle = '#6f86a9';
+    ctx.fillStyle = darkMetalActive ? '#2a303b' : '#6f86a9';
     ctx.fillRect(-bodyW * 0.72, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
     ctx.fillRect(bodyW * 0.14, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
     ctx.restore();
@@ -3477,7 +3655,7 @@ export class GameRenderer {
     const shW = shieldW;
     const shH = shieldH;
     const r = Math.max(8, baseR * 0.42);
-    ctx.fillStyle = '#4f6688';
+    ctx.fillStyle = darkMetalActive ? '#151a20' : '#4f6688';
     ctx.beginPath();
     ctx.moveTo(-shW * 0.5 + r, -shH * 0.5);
     ctx.lineTo(shW * 0.5 - r, -shH * 0.5);
@@ -3490,11 +3668,11 @@ export class GameRenderer {
     ctx.quadraticCurveTo(-shW * 0.5, -shH * 0.5, -shW * 0.5 + r, -shH * 0.5);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = '#d4e5fa';
+    ctx.strokeStyle = darkMetalActive ? '#5c6673' : '#d4e5fa';
     ctx.lineWidth = 2.4;
     ctx.stroke();
 
-    ctx.strokeStyle = '#8eb4de';
+    ctx.strokeStyle = darkMetalActive ? '#2f3948' : '#8eb4de';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(-shW * 0.3, -shH * 0.36);
@@ -3517,10 +3695,10 @@ export class GameRenderer {
     ctx.fill();
 
     if (showHud) {
-      ctx.fillStyle = '#d9ecff';
+      ctx.fillStyle = darkMetalActive ? '#d0d7e5' : '#d9ecff';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('SHIELD', x, y - bodyH - headR - 18);
+      ctx.fillText(darkMetalActive ? 'DARK METAL' : 'SHIELD', x, y - bodyH - headR - 18);
       this.drawMinionHpBar(minion, x, y + 2, Math.max(1.4, (baseR / 16) * 1.25));
     }
   }
@@ -3850,55 +4028,105 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
   }
 
+  drawNecroRevivedOverlay(minion) {
+    if (!minion || !minion.necroRevived) return;
+    const { ctx } = this;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const r = Math.max(10, Number(minion.r) || 12);
+    const t = performance.now() * 0.001;
+    const bob = Math.sin(t * 5 + (Number(minion.id) || 0) * 0.23) * 2.2;
+    const coreY = y - r * 0.9 + bob;
+
+    ctx.save();
+    const aura = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 2.3);
+    aura.addColorStop(0, '#b9ffe4aa');
+    aura.addColorStop(0.55, '#91f5db52');
+    aura.addColorStop(1, '#7fe6d100');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 2.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = '#dcfff4cc';
+    ctx.beginPath();
+    ctx.arc(x, coreY, r * 0.52, Math.PI, 0, false);
+    ctx.lineTo(x + r * 0.5, coreY + r * 0.72);
+    ctx.quadraticCurveTo(x + r * 0.2, coreY + r * 0.45, x, coreY + r * 0.72);
+    ctx.quadraticCurveTo(x - r * 0.2, coreY + r * 0.45, x - r * 0.5, coreY + r * 0.72);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#173338';
+    ctx.beginPath();
+    ctx.arc(x - r * 0.17, coreY - r * 0.05, Math.max(1.2, r * 0.08), 0, Math.PI * 2);
+    ctx.arc(x + r * 0.17, coreY - r * 0.05, Math.max(1.2, r * 0.08), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   drawMinionSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
     const cacheRender = options.cacheRender === true;
     if (minion.dragon) {
       this.drawDragonSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.digger) {
       this.drawDiggerSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.gunner) {
       this.drawGunnerSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.necrominion) {
       this.drawNecroSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.explosive) {
       this.drawBomberSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.hero) {
       this.drawHeroSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.monk) {
       this.drawMonkSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.shieldBearer) {
       this.drawShieldBearerSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.stoneGolem) {
       this.drawStoneGolemSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
     if (minion.president) {
       this.drawPresidentSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
 
     const isSummoned = Boolean(minion.summoned);
     const isRider = Boolean(minion.rider);
+    const riderSuperHorse = Boolean(minion.riderSuperHorse);
     const t = Math.max(0, Math.min(3, minion.tier || 0));
     const stage = Math.max(0, Math.min(5, Math.floor((minion.level || 0) / 4)));
-    const scale = minion.super ? 2 : 1;
+    const scale = (minion.super ? 2 : 1) * (isRider && riderSuperHorse ? 1.22 : 1);
     const bodyR = 12 + t + Math.min(2, stage * 0.35);
     if (!cacheRender) {
       const sideName = minion.side === 'right' ? 'right' : 'left';
@@ -3910,6 +4138,7 @@ export class GameRenderer {
         minion.super ? 1 : 0,
         isSummoned ? 1 : 0,
         isRider ? 1 : 0,
+        riderSuperHorse ? 1 : 0,
         minion.riderChargeReady ? 1 : 0,
       ].join(':');
       const widthBase = isRider ? 188 : 128;
@@ -3928,6 +4157,7 @@ export class GameRenderer {
       });
       if (drewCached) {
         if (showHud) this.drawStandardMinionHud(minion, minion.x, minion.y, bodyR, scale, { isRider });
+        if (!cacheRender) this.drawNecroRevivedOverlay(minion);
         return;
       }
     }
@@ -4178,6 +4408,7 @@ export class GameRenderer {
 
     ctx.restore();
     if (showHud) this.drawStandardMinionHud(minion, x, y, bodyR, scale, { isRider });
+    if (!cacheRender) this.drawNecroRevivedOverlay(minion);
   }
 
   drawDiggerSprite(minion, options = {}) {
@@ -4191,6 +4422,7 @@ export class GameRenderer {
     const y = minion.y;
     const r = Math.max(11, minion.r || 12);
     const dir = sideName === 'left' ? 1 : -1;
+    const goldFinder = Boolean(minion.diggerGoldFinder);
     const phase = Number.isFinite(minion.digPhase) ? minion.digPhase : 0;
     const shovelSwing = Math.sin(phase * 3.1);
     const handY = -r * 0.14 + Math.cos(phase * 2.6) * 2.3;
@@ -4202,7 +4434,7 @@ export class GameRenderer {
       const phaseBuckets = 10;
       const phaseBucket = Math.max(0, Math.min(phaseBuckets - 1, Math.round((wrappedPhase / phaseCycle) * (phaseBuckets - 1))));
       const radiusBucket = Math.max(11, Math.min(18, Math.round(r)));
-      const cacheKey = `digger:${sideName}:${radiusBucket}:${phaseBucket}`;
+      const cacheKey = `digger:${sideName}:${radiusBucket}:${phaseBucket}:${goldFinder ? 1 : 0}`;
       const cacheWidth = Math.ceil(radiusBucket * 5.2 + 42);
       const cacheHeight = Math.ceil(radiusBucket * 4.4 + 42);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -4280,6 +4512,33 @@ export class GameRenderer {
     ctx.arc(x + dir * 2, topY - r * 0.2, 1.05, 0, Math.PI * 2);
     ctx.fill();
 
+    if (goldFinder) {
+      const lampX = x + dir * (r * 0.28);
+      const lampY = topY - r * 0.44;
+      const beamLen = r * 2.05;
+      const beamHalf = r * 0.62;
+      const beam = ctx.createLinearGradient(lampX, lampY, lampX + dir * beamLen, lampY + beamHalf * 0.2);
+      beam.addColorStop(0, '#ffeaa899');
+      beam.addColorStop(0.55, '#ffeaa833');
+      beam.addColorStop(1, '#ffeaa800');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(lampX, lampY - 1.5);
+      ctx.lineTo(lampX + dir * beamLen, lampY - beamHalf);
+      ctx.lineTo(lampX + dir * beamLen, lampY + beamHalf);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#f7bf47';
+      ctx.beginPath();
+      ctx.arc(lampX, lampY, 1.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff4c4';
+      ctx.beginPath();
+      ctx.arc(lampX + dir * 0.6, lampY, 1.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // Slow shovel animation.
     ctx.save();
     ctx.translate(x + dir * (r * 0.24), topY + handY);
@@ -4314,7 +4573,7 @@ export class GameRenderer {
       ctx.fillStyle = '#e3d0ab';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('DIGGER', x, topY - r - 14);
+      ctx.fillText(goldFinder ? 'GOLD FINDER' : 'DIGGER', x, topY - r - 14);
 
       const hpPct = Math.max(0, minion.hp / minion.maxHp);
       const hpW = 28;

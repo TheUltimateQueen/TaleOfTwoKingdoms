@@ -26,6 +26,13 @@ const UPGRADE_COST_RULES = {
   powerLevel: { base: 164, growth: 20, start: 1 },
   specialRateLevel: { base: 182, growth: 22, start: 1 },
   dragonLevel: { base: 236, growth: 26, start: 0 },
+  dragonSuperBreathLevel: { base: 328, growth: 0, start: 0 },
+  shieldDarkMetalLevel: { base: 304, growth: 0, start: 0 },
+  monkHealCircleLevel: { base: 286, growth: 0, start: 0 },
+  necroExpertSummonerLevel: { base: 274, growth: 0, start: 0 },
+  riderSuperHorseLevel: { base: 298, growth: 0, start: 0 },
+  diggerGoldFinderLevel: { base: 282, growth: 0, start: 0 },
+  gunnerSkyCannonLevel: { base: 294, growth: 0, start: 0 },
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
 const UPGRADE_PATH_BY_TYPE = {
@@ -39,11 +46,50 @@ const UPGRADE_PATH_BY_TYPE = {
   powerLevel: 'power',
   specialRateLevel: 'special',
   dragonLevel: 'special',
+  dragonSuperBreathLevel: 'special',
+  shieldDarkMetalLevel: 'special',
+  monkHealCircleLevel: 'special',
+  necroExpertSummonerLevel: 'special',
+  riderSuperHorseLevel: 'special',
+  diggerGoldFinderLevel: 'special',
+  gunnerSkyCannonLevel: 'special',
   superMinionLevel: 'special',
 };
 const UPGRADE_LEVEL_CAPS = {
   volleyLevel: 4,
+  dragonSuperBreathLevel: 1,
+  shieldDarkMetalLevel: 1,
+  monkHealCircleLevel: 1,
+  necroExpertSummonerLevel: 1,
+  riderSuperHorseLevel: 1,
+  diggerGoldFinderLevel: 1,
+  gunnerSkyCannonLevel: 1,
 };
+const DRAGON_SUPER_BREATH_INTERVAL = 5;
+const DRAGON_SUPER_BREATH_COOLDOWN_JITTER = 1.25;
+const DRAGON_SUPER_BREATH_RANGE = 300;
+const DRAGON_SUPER_BREATH_HALF_ANGLE = Math.PI * 0.24;
+const DRAGON_SUPER_BREATH_MINION_DAMAGE_MULT = 2.05;
+const DRAGON_SUPER_BREATH_TOWER_DAMAGE_MULT = 1.48;
+const DRAGON_SUPER_BREATH_LIFT = 34;
+const MONK_HEAL_CIRCLE_INTERVAL = 10;
+const MONK_HEAL_CIRCLE_COOLDOWN_JITTER = 1.6;
+const MONK_HEAL_CIRCLE_RANGE_MULT = 0.62;
+const MONK_HEAL_CIRCLE_HEAL_MULT = 0.56;
+const MONK_HEAL_CIRCLE_SCALE_DECAY = 0.96;
+const SHIELD_DARK_METAL_INTERVAL = 10;
+const SHIELD_DARK_METAL_DURATION = 5;
+const SHIELD_DARK_METAL_DAMAGE_TAKEN_MULT = 0.05;
+const SHIELD_DARK_METAL_COOLDOWN_JITTER = 1.35;
+const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
+const DIGGER_GOLD_FINDER_MINE_TIME = 1;
+const GUNNER_SKY_CANNON_INTERVAL = 9;
+const GUNNER_SKY_CANNON_COOLDOWN_JITTER = 1.4;
+const GUNNER_SKY_CANNON_RADIUS = 86;
+const GUNNER_SKY_CANNON_MINION_DAMAGE_MULT = 1.68;
+const GUNNER_SKY_CANNON_TOWER_DAMAGE_MULT = 0.58;
+const NECRO_EXPERT_REVIVE_RADIUS = 176;
+const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
 const HERO_LINES = [
   'Justice is my cardio!',
   'Hope you brought a villain permit!',
@@ -221,6 +267,13 @@ function serializeSideState(side) {
     powerLevel: Math.max(0, Math.round(Number(state.powerLevel) || 0)),
     specialRateLevel: Math.max(0, Math.round(Number(state.specialRateLevel) || 0)),
     dragonLevel: Math.max(0, Math.round(Number(state.dragonLevel) || 0)),
+    dragonSuperBreathLevel: Math.max(0, Math.round(Number(state.dragonSuperBreathLevel) || 0)),
+    shieldDarkMetalLevel: Math.max(0, Math.round(Number(state.shieldDarkMetalLevel) || 0)),
+    monkHealCircleLevel: Math.max(0, Math.round(Number(state.monkHealCircleLevel) || 0)),
+    necroExpertSummonerLevel: Math.max(0, Math.round(Number(state.necroExpertSummonerLevel) || 0)),
+    riderSuperHorseLevel: Math.max(0, Math.round(Number(state.riderSuperHorseLevel) || 0)),
+    diggerGoldFinderLevel: Math.max(0, Math.round(Number(state.diggerGoldFinderLevel) || 0)),
+    gunnerSkyCannonLevel: Math.max(0, Math.round(Number(state.gunnerSkyCannonLevel) || 0)),
     superMinionLevel: Math.max(0, Math.round(Number(state.superMinionLevel) || 0)),
     upgradeCharge: roundTo(state.upgradeCharge, 1),
     upgradeChargeMax: roundTo(state.upgradeChargeMax, 1),
@@ -291,6 +344,13 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     powerLevel: 1,
     specialRateLevel: 1,
     dragonLevel: 0,
+    dragonSuperBreathLevel: 0,
+    shieldDarkMetalLevel: 0,
+    monkHealCircleLevel: 0,
+    necroExpertSummonerLevel: 0,
+    riderSuperHorseLevel: 0,
+    diggerGoldFinderLevel: 0,
+    gunnerSkyCannonLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: 140,
@@ -447,6 +507,7 @@ class GameRoom {
       maxHp: roundTo(m.maxHp, 1),
       super: Boolean(m.super),
       summoned: Boolean(m.summoned),
+      necroRevived: Boolean(m.necroRevived),
       dragon: Boolean(m.dragon),
       flying: Boolean(m.flying),
       dragonBreathTtl: roundTo(m.dragonBreathTtl, 2),
@@ -460,10 +521,13 @@ class GameRoom {
       gunner: Boolean(m.gunner),
       rider: Boolean(m.rider),
       riderChargeReady: Boolean(m.riderChargeReady),
+      riderSuperHorse: Boolean(m.riderSuperHorse),
       digger: Boolean(m.digger),
+      diggerGoldFinder: Boolean(m.diggerGoldFinder),
       shieldBearer: Boolean(m.shieldBearer),
       shieldPushTtl: roundTo(m.shieldPushTtl, 2),
       shieldPushScale: roundTo(m.shieldPushScale, 3),
+      shieldDarkMetalTtl: roundTo(m.shieldDarkMetalTtl, 2),
       stoneGolem: Boolean(m.stoneGolem),
       golemSmashTtl: roundTo(m.golemSmashTtl, 2),
       golemShieldHp: roundTo(m.golemShieldHp, 1),
@@ -2257,6 +2321,88 @@ class GameRoom {
     this.activePresidents = { left, right };
   }
 
+  nearestResourceIndexForDigger(minion) {
+    if (!minion || !Array.isArray(this.resources) || this.resources.length === 0) return -1;
+    let bestIndex = -1;
+    let bestSq = Infinity;
+    for (let i = 0; i < this.resources.length; i += 1) {
+      const res = this.resources[i];
+      if (!res) continue;
+      const dx = (Number(res.x) || 0) - (Number(minion.x) || 0);
+      const dy = (Number(res.y) || 0) - (Number(minion.y) || 0);
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= bestSq) continue;
+      bestSq = d2;
+      bestIndex = i;
+    }
+    return bestIndex;
+  }
+
+  tickDiggerGoldFinder(minion, dt) {
+    if (!minion || !minion.digger) return false;
+    const sideState = minion.side === 'right' ? this.right : this.left;
+    const active = (Number(sideState?.diggerGoldFinderLevel) || 0) > 0;
+    minion.diggerGoldFinder = active;
+    if (!active) {
+      minion.diggerMineTargetId = null;
+      minion.diggerMineT = 0;
+      return false;
+    }
+
+    const resourceIndex = this.nearestResourceIndexForDigger(minion);
+    if (resourceIndex < 0) {
+      minion.diggerMineTargetId = null;
+      minion.diggerMineT = 0;
+      return false;
+    }
+    const res = this.resources[resourceIndex];
+    if (!res) {
+      minion.diggerMineTargetId = null;
+      minion.diggerMineT = 0;
+      return false;
+    }
+    const resourceId = Number.isFinite(Number(res.id)) ? Number(res.id) : null;
+    if (minion.diggerMineTargetId !== resourceId) {
+      minion.diggerMineTargetId = resourceId;
+      minion.diggerMineT = 0;
+    }
+
+    const targetY = clamp(Number(res.y) || minion.y, TOWER_Y - 190, TOWER_Y + 210);
+    if (!Number.isFinite(minion.digBaseY)) minion.digBaseY = minion.y;
+    minion.digBaseY += (targetY - minion.digBaseY) * Math.min(1, dt * 4.2);
+
+    const dx = (Number(res.x) || 0) - (Number(minion.x) || 0);
+    const moveStep = Math.max(26, (Number(minion.speed) || 0) * 1.08) * dt;
+    minion.x += clamp(dx, -moveStep, moveStep);
+
+    const hitR = Math.max(6, Number(res.r) || 14) + Math.max(8, Number(minion.r) || 12) + DIGGER_GOLD_FINDER_PICKUP_PAD;
+    const dy = (Number(res.y) || 0) - (Number(minion.y) || 0);
+    if (dx * dx + dy * dy > hitR * hitR) {
+      minion.diggerMineT = 0;
+      return true;
+    }
+    minion.diggerMineT = Math.min(
+      DIGGER_GOLD_FINDER_MINE_TIME,
+      Math.max(0, Number(minion.diggerMineT) || 0) + dt
+    );
+    if (minion.diggerMineT < DIGGER_GOLD_FINDER_MINE_TIME) {
+      minion.atkCd = Math.max(Number(minion.atkCd) || 0, 0.12);
+      return true;
+    }
+
+    const side = minion.side === 'right' ? this.right : this.left;
+    const gain = this.goldFromResource(side, Number(res.value) || 0);
+    side.gold += gain;
+    this.addUpgradeCharge(side, gain);
+    this.queueHitSfx('resource', res.x, res.y, minion.side);
+    this.queueHitSfx('powerup', minion.x, minion.y - Math.max(6, minion.r * 0.3), minion.side);
+    this.resources.splice(resourceIndex, 1);
+    minion.diggerMineTargetId = null;
+    minion.diggerMineT = 0;
+    minion.atkCd = Math.max(Number(minion.atkCd) || 0, 0.38);
+    return true;
+  }
+
   tickMinions(dt, precomputedTargetBuckets = null, precomputedCarrierCounts = null) {
     const targetBuckets = precomputedTargetBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const carrierCounts = precomputedCarrierCounts || this.buildCandleCarrierCounts();
@@ -2275,7 +2421,29 @@ class GameRoom {
       if (m.hp <= 0) continue;
       m.atkCd = Math.max(0, m.atkCd - dt);
       if (m.dragonBreathTtl > 0) m.dragonBreathTtl = Math.max(0, m.dragonBreathTtl - dt);
+      if (m.dragon) {
+        if (!Number.isFinite(m.dragonSuperBreathCd)) {
+          m.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER;
+        }
+        const sideState = m.side === 'right' ? this.right : this.left;
+        if ((Number(sideState?.dragonSuperBreathLevel) || 0) > 0) {
+          m.dragonSuperBreathCd = Math.max(0, m.dragonSuperBreathCd - dt);
+        } else {
+          m.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER;
+        }
+      }
       if (m.gunFlashTtl > 0) m.gunFlashTtl = Math.max(0, m.gunFlashTtl - dt);
+      if (m.gunner) {
+        if (!Number.isFinite(m.gunnerSkyCannonCd)) {
+          m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+        }
+        const sideState = m.side === 'right' ? this.right : this.left;
+        if ((Number(sideState?.gunnerSkyCannonLevel) || 0) > 0) {
+          m.gunnerSkyCannonCd = Math.max(0, m.gunnerSkyCannonCd - dt);
+        } else {
+          m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+        }
+      }
       if (m.heroLineCd > 0) m.heroLineCd = Math.max(0, m.heroLineCd - dt);
       if (m.hero) {
         if (!Number.isFinite(m.heroSwing)) m.heroSwing = Math.random() * Math.PI * 2;
@@ -2288,6 +2456,25 @@ class GameRoom {
         if (!Number.isFinite(m.shieldPushTtl)) m.shieldPushTtl = 0;
         m.shieldPushTtl = Math.max(0, m.shieldPushTtl - dt);
         if (!Number.isFinite(m.shieldPushScale) || m.shieldPushScale < 1) m.shieldPushScale = SHIELD_PUSH_SCALE;
+        if (!Number.isFinite(m.shieldDarkMetalCd)) {
+          m.shieldDarkMetalCd = SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER;
+        }
+        if (!Number.isFinite(m.shieldDarkMetalTtl)) m.shieldDarkMetalTtl = 0;
+        const sideState = m.side === 'right' ? this.right : this.left;
+        if ((Number(sideState?.shieldDarkMetalLevel) || 0) > 0) {
+          m.shieldDarkMetalCd = Math.max(0, m.shieldDarkMetalCd - dt);
+          m.shieldDarkMetalTtl = Math.max(0, m.shieldDarkMetalTtl - dt);
+          if (m.shieldDarkMetalCd === 0) {
+            m.shieldDarkMetalTtl = SHIELD_DARK_METAL_DURATION;
+            m.shieldDarkMetalCd = SHIELD_DARK_METAL_INTERVAL;
+            this.queueHitSfx('blocked', m.x + (m.side === 'left' ? 1 : -1) * (m.r * 0.7), m.y, m.side);
+            this.queueHitSfx('powerup', m.x, m.y - m.r * 0.38, m.side);
+            this.queueLine('DARK METAL', m.x, m.y - m.r - 18, m.side);
+          }
+        } else {
+          m.shieldDarkMetalTtl = 0;
+          m.shieldDarkMetalCd = SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER;
+        }
       }
       if (m.stoneGolem) {
         if (!Number.isFinite(m.golemSmashTtl)) m.golemSmashTtl = 0;
@@ -2315,7 +2502,15 @@ class GameRoom {
         if (!Number.isFinite(m.digPhase)) m.digPhase = Math.random() * Math.PI * 2;
         if (!Number.isFinite(m.digBaseY)) m.digBaseY = m.y;
         m.digPhase += dt * (1.35 + Math.min(0.65, m.speed / 150));
-        m.y = clamp(m.digBaseY + Math.sin(m.digPhase) * 3.6, TOWER_Y + 52, TOWER_Y + 196);
+        const sideState = m.side === 'right' ? this.right : this.left;
+        const hasGoldFinder = (Number(sideState?.diggerGoldFinderLevel) || 0) > 0;
+        m.diggerGoldFinder = hasGoldFinder;
+        m.y = clamp(
+          m.digBaseY + Math.sin(m.digPhase) * 3.6,
+          hasGoldFinder ? (TOWER_Y - 190) : (TOWER_Y + 52),
+          hasGoldFinder ? (TOWER_Y + 210) : (TOWER_Y + 196)
+        );
+        if (this.tickDiggerGoldFinder(m, dt)) continue;
       }
       if (m.flying) {
         if (!Number.isFinite(m.flyBaseY)) m.flyBaseY = m.y;
@@ -2327,6 +2522,13 @@ class GameRoom {
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
+      const mySideState = m.side === 'right' ? this.right : this.left;
+      const gunnerSkyActive = m.gunner && (Number(mySideState?.gunnerSkyCannonLevel) || 0) > 0;
+      if (m.dragon && (Number(mySideState?.dragonSuperBreathLevel) || 0) > 0 && m.dragonSuperBreathCd === 0) {
+        this.dragonSuperBreath(m, targetBuckets, MINION_TARGET_BUCKET_W);
+        m.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL;
+        m.atkCd = Math.max(m.atkCd, 0.44);
+      }
       const enemyCandle = this.candles?.[enemySideName];
       let candleInReach = false;
       let candleDistSq = Infinity;
@@ -2426,12 +2628,18 @@ class GameRoom {
             this.queueHitSfx('dragonfire', enemyCandle.x, enemyCandle.y - 10, m.side);
             m.atkCd = 0.98;
           } else if (m.gunner) {
-            const muzzleX = m.x + dir * (m.r + 7);
-            const muzzleY = m.y - 2;
-            m.gunFlashTtl = 0.12;
-            this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
-            this.queueHitSfx('gunhit', enemyCandle.x, enemyCandle.y - 9, m.side);
-            m.atkCd = 0.66;
+            if (gunnerSkyActive && (Number(m.gunnerSkyCannonCd) || 0) === 0) {
+              this.gunnerSkyCannon(m, enemyCandle.x, enemyCandle.y - 9, targetBuckets, MINION_TARGET_BUCKET_W);
+              m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+              m.atkCd = 0.9;
+            } else {
+              const muzzleX = m.x + dir * (m.r + 7);
+              const muzzleY = m.y - 2;
+              m.gunFlashTtl = 0.12;
+              this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
+              this.queueHitSfx('gunhit', enemyCandle.x, enemyCandle.y - 9, m.side);
+              m.atkCd = 0.66;
+            }
           } else if (m.rider) {
             m.atkCd = 0.72;
           } else if (m.hero) {
@@ -2465,8 +2673,14 @@ class GameRoom {
             this.dragonBreath(m, target, targetBuckets, MINION_TARGET_BUCKET_W);
             m.atkCd = 1.05;
           } else if (m.gunner) {
-            this.gunnerShot(m, target, targetBuckets, MINION_TARGET_BUCKET_W);
-            m.atkCd = 0.66;
+            if (gunnerSkyActive && (Number(m.gunnerSkyCannonCd) || 0) === 0) {
+              this.gunnerSkyCannon(m, target.x, target.y, targetBuckets, MINION_TARGET_BUCKET_W);
+              m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+              m.atkCd = 0.9;
+            } else {
+              this.gunnerShot(m, target, targetBuckets, MINION_TARGET_BUCKET_W);
+              m.atkCd = 0.66;
+            }
           } else if (m.rider) {
             this.riderStrikeMinion(m, target);
             m.atkCd = 0.72;
@@ -2504,13 +2718,19 @@ class GameRoom {
             this.queueHitSfx('dragonfire', impactX, impactY, m.side);
             m.atkCd = 0.92;
           } else if (m.gunner) {
-            this.applyMinionTowerDamage(m, enemySideName, m.dmg * 0.72, enemyX, TOWER_Y - 24);
-            const muzzleX = m.x + dir * (m.r + 7);
-            const muzzleY = m.y - 2;
-            m.gunFlashTtl = 0.12;
-            this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
-            this.queueHitSfx('gunhit', enemyX, TOWER_Y - 24, m.side);
-            m.atkCd = 0.72;
+            if (gunnerSkyActive && (Number(m.gunnerSkyCannonCd) || 0) === 0) {
+              this.gunnerSkyCannon(m, enemyX, TOWER_Y - 24, targetBuckets, MINION_TARGET_BUCKET_W);
+              m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+              m.atkCd = 0.92;
+            } else {
+              this.applyMinionTowerDamage(m, enemySideName, m.dmg * 0.72, enemyX, TOWER_Y - 24);
+              const muzzleX = m.x + dir * (m.r + 7);
+              const muzzleY = m.y - 2;
+              m.gunFlashTtl = 0.12;
+              this.queueHitSfx('gunhit', muzzleX, muzzleY, m.side);
+              this.queueHitSfx('gunhit', enemyX, TOWER_Y - 24, m.side);
+              m.atkCd = 0.72;
+            }
           } else if (m.rider) {
             this.riderStrikeTower(m, enemySideName, enemyX, TOWER_Y - 18);
             m.atkCd = 0.72;
@@ -2663,6 +2883,9 @@ class GameRoom {
         minion.golemShieldHp -= absorbed;
         remaining -= absorbed;
       }
+    }
+    if (remaining > 0 && minion.shieldBearer && (Number(minion.shieldDarkMetalTtl) || 0) > 0) {
+      remaining *= SHIELD_DARK_METAL_DAMAGE_TAKEN_MULT;
     }
     if (remaining > 0) minion.hp -= remaining;
     this.queueDamageNumber(dmg, minion.x, minion.y - Math.max(8, minion.r * 0.25));
@@ -2888,6 +3111,7 @@ class GameRoom {
     if (!Number.isFinite(base)) return 0;
     let chance = base + this.statSpecialRateBonus(side);
     if (type === 'dragon') chance += Math.max(0, (Number(side?.dragonLevel) || 0) - 1) * 0.014;
+    if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     if (type === 'super') chance += Math.max(0, (Number(side?.superMinionLevel) || 0) - 1) * 0.018;
     return clamp(chance, 0.08, 0.92);
   }
@@ -2930,6 +3154,83 @@ class GameRoom {
     );
   }
 
+  pointInDragonCone(targetX, targetY, originX, originY, dir, range, halfAngle = DRAGON_SUPER_BREATH_HALF_ANGLE) {
+    const dx = (Number(targetX) || 0) - (Number(originX) || 0);
+    const dy = (Number(targetY) || 0) - (Number(originY) || 0);
+    const forward = dx * (dir >= 0 ? 1 : -1);
+    if (forward <= 0 || forward > range) return false;
+    const lateral = Math.abs(dy);
+    const maxLateral = Math.tan(halfAngle) * forward + 8;
+    return lateral <= maxLateral;
+  }
+
+  dragonSuperBreath(dragon, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!dragon || !dragon.dragon) return;
+    const dir = dragon.side === 'left' ? 1 : -1;
+    const sideName = dragon.side === 'right' ? 'right' : 'left';
+    const enemySideName = sideName === 'left' ? 'right' : 'left';
+    const mouthX = dragon.x + dir * (dragon.r * 0.98);
+    const mouthY = dragon.y - dragon.r * 0.34;
+    const range = DRAGON_SUPER_BREATH_RANGE + dragon.r * 2.2;
+    const halfAngle = DRAGON_SUPER_BREATH_HALF_ANGLE;
+
+    if (Number.isFinite(dragon.flyBaseY)) {
+      dragon.flyBaseY = clamp(dragon.flyBaseY - DRAGON_SUPER_BREATH_LIFT, TOWER_Y - 230, TOWER_Y + 140);
+    }
+    dragon.dragonBreathTtl = 0.34;
+    dragon.dragonBreathToX = mouthX + dir * range;
+    dragon.dragonBreathToY = mouthY - 8;
+
+    this.queueHitSfx('dragonfire', mouthX, mouthY, dragon.side);
+    this.queueHitSfx('explosion', mouthX + dir * (range * 0.52), mouthY - 8, dragon.side);
+    for (let i = 0; i < 6; i += 1) {
+      const t = (i + 1) / 6;
+      const forward = range * (0.34 + 0.66 * t);
+      const coneHalfW = Math.tan(halfAngle) * forward;
+      const offsetY = (Math.random() * 2 - 1) * coneHalfW;
+      this.queueHitSfx('dragonfire', mouthX + dir * forward, mouthY + offsetY, dragon.side);
+    }
+
+    const victims = [];
+    this.forEachEnemyMinionInRadius(
+      dragon.side,
+      mouthX,
+      mouthY,
+      range,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!this.pointInDragonCone(other.x, other.y, mouthX, mouthY, dir, range, halfAngle)) return;
+        victims.push(other);
+      }
+    );
+
+    for (const victim of victims) {
+      if (!victim || victim.removed || victim.side === dragon.side) continue;
+      const forward = Math.max(0, ((Number(victim.x) || 0) - mouthX) * dir);
+      const distScalar = 1 - Math.min(1, forward / range);
+      const damage = dragon.dmg * DRAGON_SUPER_BREATH_MINION_DAMAGE_MULT * (0.72 + distScalar * 0.42);
+      this.dealMinionDamage(dragon, victim, damage, 'dragonfire');
+      victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+      if (victim.hp <= 0) this.killMinionByRef(victim, dragon.side, { goldScalar: 0.85 });
+    }
+
+    const enemyCandle = this.candles?.[enemySideName];
+    if (enemyCandle && !enemyCandle.destroyed && !enemyCandle.delivering) {
+      if (this.pointInDragonCone(enemyCandle.x, enemyCandle.y - 8, mouthX, mouthY, dir, range, halfAngle)) {
+        this.hitCandleWithMinion(enemyCandle, dragon);
+        this.queueHitSfx('dragonfire', enemyCandle.x, enemyCandle.y - 10, dragon.side);
+      }
+    }
+
+    const enemyX = sideName === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+    const towerY = TOWER_Y - 26;
+    if (this.pointInDragonCone(enemyX, towerY, mouthX, mouthY, dir, range, halfAngle)) {
+      this.applyMinionTowerDamage(dragon, enemySideName, dragon.dmg * DRAGON_SUPER_BREATH_TOWER_DAMAGE_MULT, enemyX, towerY);
+      this.queueHitSfx('towerhit', enemyX, towerY, enemySideName);
+    }
+  }
+
   gunnerShot(gunner, target, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     const dir = gunner.side === 'left' ? 1 : -1;
     const muzzleX = gunner.x + dir * (gunner.r + 7);
@@ -2958,6 +3259,61 @@ class GameRoom {
     );
   }
 
+  gunnerSkyCannon(gunner, impactX, impactY, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!gunner || !gunner.gunner) return;
+    const sideName = gunner.side === 'right' ? 'right' : 'left';
+    const enemySideName = sideName === 'left' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const enemyTowerX = sideName === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+    const strikeX = clamp(Number(impactX) || enemyTowerX, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38);
+    const strikeY = clamp(Number(impactY) || (TOWER_Y - 24), TOWER_Y - 220, TOWER_Y + 210);
+    const muzzleX = gunner.x + dir * (gunner.r + 7);
+    const muzzleY = gunner.y - 2;
+    const skyX = strikeX - dir * (56 + Math.random() * 44);
+    const skyY = strikeY - (145 + Math.random() * 30);
+    const radius = GUNNER_SKY_CANNON_RADIUS + Math.max(0, (Number(gunner.r) || 12) * 0.42);
+
+    gunner.gunFlashTtl = Math.max(Number(gunner.gunFlashTtl) || 0, 0.16);
+    this.queueHitSfx('gunhit', muzzleX, muzzleY, sideName);
+    this.queueHitSfx('powerup', skyX, skyY, sideName);
+    this.queueHitSfx('explosion', strikeX, strikeY, sideName);
+    this.queueLine('SKY CANNON!', gunner.x, gunner.y - gunner.r - 18, sideName);
+
+    const victims = [];
+    this.forEachEnemyMinionInRadius(
+      sideName,
+      strikeX,
+      strikeY,
+      radius,
+      minionBuckets,
+      bucketW,
+      (other) => victims.push(other)
+    );
+
+    for (const victim of victims) {
+      if (!victim || victim.removed || victim.side === sideName) continue;
+      const dx = victim.x - strikeX;
+      const dy = victim.y - strikeY;
+      const dist = Math.hypot(dx, dy);
+      const t = 1 - Math.min(1, dist / radius);
+      const damage = gunner.dmg * GUNNER_SKY_CANNON_MINION_DAMAGE_MULT * (0.66 + t * 0.44);
+      this.dealMinionDamage(gunner, victim, damage, 'gunshot');
+      victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+      if (victim.hp <= 0) this.killMinionByRef(victim, sideName, { goldScalar: 0.88 });
+    }
+
+    const enemyCandle = this.candles?.[enemySideName];
+    if (enemyCandle && !enemyCandle.destroyed && !enemyCandle.delivering) {
+      const dx = enemyCandle.x - strikeX;
+      const dy = (enemyCandle.y - 8) - strikeY;
+      if (dx * dx + dy * dy <= radius * radius) this.hitCandleWithMinion(enemyCandle, gunner);
+    }
+
+    if (Math.abs(strikeX - enemyTowerX) <= radius * 0.86) {
+      this.applyMinionTowerDamage(gunner, enemySideName, gunner.dmg * GUNNER_SKY_CANNON_TOWER_DAMAGE_MULT, enemyTowerX, TOWER_Y - 24);
+    }
+  }
+
   riderHitDamage(rider, hitX = null, hitY = null) {
     const base = Math.max(0, Number(rider?.dmg) || 0);
     if (!rider || !rider.rider || !rider.riderChargeReady) return base;
@@ -2968,7 +3324,8 @@ class GameRoom {
     const threshold = Math.max(90, Number(rider.riderChargeDistance) || 170);
     if (distance < threshold) return base;
 
-    const mul = Math.max(1.4, Number(rider.riderChargeMul) || 2.2);
+    const baseMul = Math.max(1.4, Number(rider.riderChargeMul) || 2.2);
+    const mul = rider.riderSuperHorse ? Math.max(baseMul, baseMul * 1.28) : baseMul;
     if (Number.isFinite(hitX) && Number.isFinite(hitY)) this.queueHitSfx('powerup', hitX, hitY, rider.side);
     return base * mul;
   }
@@ -3069,6 +3426,16 @@ class GameRoom {
     if (!monk || !monk.monk) return;
     if (!Number.isFinite(monk.monkAge)) monk.monkAge = 0;
     monk.monkAge += dt;
+    const sideState = monk.side === 'right' ? this.right : this.left;
+    const healCircleActive = (Number(sideState?.monkHealCircleLevel) || 0) > 0;
+    if (!Number.isFinite(monk.monkHealCircleCd)) {
+      monk.monkHealCircleCd = MONK_HEAL_CIRCLE_INTERVAL + Math.random() * MONK_HEAL_CIRCLE_COOLDOWN_JITTER;
+    }
+    if (healCircleActive) {
+      monk.monkHealCircleCd = Math.max(0, monk.monkHealCircleCd - dt);
+    } else {
+      monk.monkHealCircleCd = MONK_HEAL_CIRCLE_INTERVAL + Math.random() * MONK_HEAL_CIRCLE_COOLDOWN_JITTER;
+    }
 
     const minScale = Math.max(0.16, Number(monk.monkHealMinScale) || 0.24);
     const decayPerSec = Math.max(0, Number(monk.monkHealDecayPerSec) || 0.014);
@@ -3123,6 +3490,32 @@ class GameRoom {
     desiredY = clamp(desiredY, TOWER_Y - 130, TOWER_Y + 140);
     monk.y += (desiredY - monk.y) * Math.min(1, dt * 2.8);
 
+    if (healCircleActive && monk.monkHealCircleCd === 0) {
+      const baseHeal = Math.max(12, Number(monk.monkHealBase) || Math.max(32, monk.maxHp * 0.48));
+      const pulseHeal = baseHeal * Math.max(minScale, monk.monkHealScale || 1) * MONK_HEAL_CIRCLE_HEAL_MULT;
+      const pulseRange = Math.max(84, (Math.max(90, Number(monk.monkHealRange) || 170) * MONK_HEAL_CIRCLE_RANGE_MULT));
+      const pulseR2 = pulseRange * pulseRange;
+      let healedAny = false;
+      for (const ally of this.minions) {
+        if (!ally || ally.side !== monk.side) continue;
+        const missing = Math.max(0, (Number(ally.maxHp) || 0) - (Number(ally.hp) || 0));
+        if (missing <= 0.5) continue;
+        const dx = ally.x - monk.x;
+        const dy = ally.y - monk.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > pulseR2) continue;
+        const healed = this.healMinion(ally, pulseHeal);
+        if (healed <= 0) continue;
+        healedAny = true;
+      }
+      if (healedAny) {
+        this.queueHitSfx('healcircle', monk.x, monk.y, monk.side, { r: roundTo(pulseRange, 1) });
+        this.queueHitSfx('powerup', monk.x, monk.y - 6, monk.side);
+        monk.monkHealScale = Math.max(minScale, monk.monkHealScale * MONK_HEAL_CIRCLE_SCALE_DECAY);
+      }
+      monk.monkHealCircleCd = MONK_HEAL_CIRCLE_INTERVAL + Math.random() * MONK_HEAL_CIRCLE_COOLDOWN_JITTER;
+    }
+
     if (!target || monk.atkCd > 0) return;
 
     const baseHeal = Math.max(12, Number(monk.monkHealBase) || Math.max(32, monk.maxHp * 0.48));
@@ -3138,6 +3531,12 @@ class GameRoom {
     const stepDecay = Math.max(0.55, Math.min(0.99, Number(monk.monkHealStepDecay) || 0.86));
     monk.monkHealScale = Math.max(minScale, monk.monkHealScale * stepDecay);
     monk.atkCd = Math.max(0.3, Number(monk.monkHealCd) || 0.92);
+    this.queueHitSfx('healbeam', target.x, target.y - Math.max(8, target.r * 0.2), monk.side, {
+      fromX: monk.x,
+      fromY: monk.y - Math.max(10, monk.r * 0.48),
+      toX: target.x,
+      toY: target.y - Math.max(8, target.r * 0.2),
+    });
     this.queueHitSfx('powerup', monk.x, monk.y - 6, monk.side);
     this.queueHitSfx('powerup', target.x, target.y - Math.max(8, target.r * 0.2), monk.side);
   }
@@ -3241,11 +3640,14 @@ class GameRoom {
       level: Math.max(0, Math.round(Number(minion.level) || 0)),
       super: Boolean(minion.super),
       summoned: Boolean(minion.summoned),
+      necroRevived: Boolean(minion.necroRevived),
       explosive: Boolean(minion.explosive),
       gunner: Boolean(minion.gunner),
       rider: Boolean(minion.rider),
       riderChargeReady: Boolean(minion.riderChargeReady),
+      riderSuperHorse: Boolean(minion.riderSuperHorse),
       digger: Boolean(minion.digger),
+      diggerGoldFinder: Boolean(minion.diggerGoldFinder),
       shieldBearer: Boolean(minion.shieldBearer),
       stoneGolem: Boolean(minion.stoneGolem),
       monk: Boolean(minion.monk),
@@ -3264,6 +3666,7 @@ class GameRoom {
       gunFlashTtl: 0,
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      shieldDarkMetalTtl: roundTo(minion.shieldDarkMetalTtl, 2),
       golemSmashTtl: 0,
       golemShieldHp: 0,
       golemShieldMax: 0,
@@ -3284,6 +3687,12 @@ class GameRoom {
       triggerExplosion = false,
       impactDamage = null,
     } = options;
+
+    if (this.tryNecroExpertRevive(minion, killerSide)) {
+      minion.removed = true;
+      this.minions.splice(index, 1);
+      return;
+    }
 
     this.awardMinionKillGold(killerSide, goldScalar);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
@@ -3336,16 +3745,227 @@ class GameRoom {
     this.queueLine('Cue the tragic violin solo!', x, y - (hero.r || 16) - 45, hero.side);
   }
 
+  canNecroExpertRevive(minion) {
+    if (!minion || minion.removed) return false;
+    if ((Number(minion.hp) || 0) > 0) return false;
+    if (minion.summoned || minion.necroRevived) return false;
+    if (minion.candleCarrier) return false;
+    return true;
+  }
+
+  findClosestNecroReviver(minion, radius = NECRO_EXPERT_REVIVE_RADIUS) {
+    if (!minion) return null;
+    const radiusSq = radius * radius;
+    let best = null;
+    let bestSq = Infinity;
+    for (const other of this.minions) {
+      if (!other || other.removed || !other.necrominion) continue;
+      if ((Number(other.hp) || 0) <= 0) continue;
+      if (other.id === minion.id) continue;
+      const sideState = other.side === 'right' ? this.right : this.left;
+      if ((Number(sideState?.necroExpertSummonerLevel) || 0) <= 0) continue;
+      const dx = other.x - minion.x;
+      const dy = other.y - minion.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > radiusSq || d2 >= bestSq) continue;
+      bestSq = d2;
+      best = other;
+    }
+    return best;
+  }
+
+  createNecroRevivedMinion(minion, reviver) {
+    if (!minion || !reviver) return null;
+    const sideName = reviver.side === 'right' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const revivedMaxHp = Math.max(1, Math.round(Math.max(1, Number(minion.maxHp) || 1) * NECRO_EXPERT_REVIVE_HP_FRACTION));
+    const x = clamp((Number(minion.x) || 0) + dir * 8 + (Math.random() * 10 - 5), TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+    const y = clamp((Number(minion.y) || 0) + (Math.random() * 8 - 4), TOWER_Y - 190, TOWER_Y + 190);
+    const revived = {
+      ...minion,
+      id: this.seq++,
+      side: sideName,
+      x,
+      y,
+      hp: revivedMaxHp,
+      maxHp: revivedMaxHp,
+      atkCd: Math.max(0.18, Number(minion.atkCd) || 0),
+      removed: false,
+      summoned: true,
+      necroRevived: true,
+      candleCarrier: false,
+      candleCarrierSide: null,
+      candleBurnTtl: 0,
+      candleBurnTick: 0,
+      hitFlashTtl: 0,
+      gunnerSkyCannonCd: 0,
+      diggerMineTargetId: null,
+      diggerMineT: 0,
+      failedSpecialType: null,
+    };
+
+    if (revived.flying) {
+      revived.flyBaseY = y;
+      if (!Number.isFinite(revived.flyPhase)) revived.flyPhase = Math.random() * Math.PI * 2;
+      revived.dragonBreathTtl = 0;
+      revived.dragonBreathToX = null;
+      revived.dragonBreathToY = null;
+      revived.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL * 0.5;
+    }
+    if (revived.digger) {
+      revived.digBaseY = y;
+      if (!Number.isFinite(revived.digPhase)) revived.digPhase = Math.random() * Math.PI * 2;
+    }
+    if (revived.gunner) {
+      const sideState = sideName === 'right' ? this.right : this.left;
+      revived.gunnerSkyCannonCd = (Number(sideState?.gunnerSkyCannonLevel) || 0) > 0
+        ? (GUNNER_SKY_CANNON_INTERVAL * 0.42 + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER)
+        : (GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER);
+    }
+    if (revived.rider) {
+      revived.riderChargeReady = true;
+      revived.riderChargeStartX = x;
+    }
+    if (revived.hero) {
+      revived.heroRetreating = false;
+      revived.heroArrowHits = 0;
+    }
+    if (revived.monk) {
+      revived.monkFirstHeal = true;
+      revived.monkHealScale = Math.max(0.4, Number(revived.monkHealScale) || 1);
+      revived.monkHealCircleCd = MONK_HEAL_CIRCLE_INTERVAL;
+    }
+    if (revived.president) {
+      revived.presidentSetup = false;
+      revived.presidentPodiumX = sideName === 'left'
+        ? (700 + Math.random() * 55)
+        : (WORLD_W - (700 + Math.random() * 55));
+      revived.presidentPodiumY = TOWER_Y + 18 + (Math.random() * 24 - 12);
+      revived.presidentSpeechCd = 1 + Math.random() * 1.4;
+    }
+    return revived;
+  }
+
+  tryNecroExpertRevive(minion, killerSide = null) {
+    if (!this.canNecroExpertRevive(minion)) return false;
+    const reviver = this.findClosestNecroReviver(minion);
+    if (!reviver) return false;
+    const revived = this.createNecroRevivedMinion(minion, reviver);
+    if (!revived) return false;
+    this.minions.push(revived);
+    this.queueHitSfx('powerup', revived.x, revived.y - Math.max(6, revived.r * 0.2), reviver.side);
+    this.queueHitSfx('revive', revived.x, revived.y, reviver.side, { killerSide, ghost: revived });
+    return true;
+  }
+
+  createNecroServant(minion, x, y, options = {}) {
+    const hpMul = Number.isFinite(options.hpMul) ? Math.max(0.1, options.hpMul) : 1;
+    const dmgMul = Number.isFinite(options.dmgMul) ? Math.max(0.1, options.dmgMul) : 1;
+    const speedMul = Number.isFinite(options.speedMul) ? Math.max(0.2, options.speedMul) : 1;
+    const radiusMul = Number.isFinite(options.radiusMul) ? Math.max(0.25, options.radiusMul) : 1;
+    const levelMul = Number.isFinite(options.levelMul) ? Math.max(0.2, options.levelMul) : 1;
+    const tierOffset = Number.isFinite(options.tierOffset) ? Math.round(options.tierOffset) : 0;
+    const atkCd = Number.isFinite(options.atkCd) ? Math.max(0, options.atkCd) : (Math.random() * 0.18);
+
+    const baseHp = Math.max(30, (Number(minion?.maxHp) || 0) * 0.38) * hpMul;
+    const baseDmg = Math.max(7, (Number(minion?.dmg) || 0) * 0.42) * dmgMul;
+    const speed = Math.max(56, (Number(minion?.speed) || 0) * 1.14) * speedMul;
+    const radius = Math.max(10, (Number(minion?.r) || 0) * 0.52 * radiusMul);
+    const baseTier = Math.max(0, Math.min(2, ((Number(minion?.tier) || 0) - 1)));
+    const tier = Math.max(0, Math.min(2, baseTier + tierOffset));
+    const level = Math.max(1, Math.floor(Math.max(1, Number(minion?.level) || 1) * 0.55 * levelMul));
+
+    return {
+      id: this.seq++,
+      side: minion.side,
+      x,
+      y,
+      hp: baseHp,
+      maxHp: baseHp,
+      dmg: baseDmg,
+      speed,
+      atkCd,
+      r: radius,
+      tier,
+      level,
+      super: false,
+      explosive: false,
+      explosiveLevel: 1,
+      necrominion: false,
+      summoned: true,
+      necroRevived: false,
+      dragon: false,
+      flying: false,
+      gunner: false,
+      rider: false,
+      riderChargeReady: false,
+      riderSuperHorse: false,
+      riderChargeStartX: null,
+      riderChargeDistance: 0,
+      riderChargeMul: 1,
+      digger: false,
+      diggerGoldFinder: false,
+      diggerMineTargetId: null,
+      diggerMineT: 0,
+      shieldBearer: false,
+      shieldPushCd: 0,
+      shieldPushTtl: 0,
+      shieldPushScale: 1,
+      shieldDarkMetalCd: 0,
+      shieldDarkMetalTtl: 0,
+      stoneGolem: false,
+      golemSmashTtl: 0,
+      golemShieldHp: 0,
+      golemShieldMax: 0,
+      golemShieldTtl: 0,
+      hitFlashTtl: 0,
+      digPhase: null,
+      digBaseY: null,
+      monk: false,
+      monkAge: 0,
+      monkHealBase: 0,
+      monkHealRange: 0,
+      monkHealCd: 0,
+      monkHealScale: 0,
+      monkHealMinScale: 0,
+      monkHealDecayPerSec: 0,
+      monkHealStepDecay: 1,
+      monkFirstHeal: false,
+      monkFirstHealMul: 1,
+      monkKeepBehind: 0,
+      monkHealCircleCd: 0,
+      hero: false,
+      heroArrowHits: 0,
+      heroSlashRadius: 0,
+      heroLineCd: 0,
+      heroSwing: 0,
+      heroRetreating: false,
+      heroRetreatHpPct: 0,
+      heroReturnHpPct: 0,
+      heroHealPerSec: 0,
+      president: false,
+      presidentSetup: false,
+      presidentPodiumX: null,
+      presidentPodiumY: null,
+      presidentAuraRadius: 0,
+      presidentAuraMult: 1,
+      presidentSpeechCd: 0,
+      gunRange: 0,
+      gunDragonMul: 1,
+      gunFlashTtl: 0,
+      gunnerSkyCannonCd: 0,
+      dragonSuperBreathCd: 0,
+      candleCarrier: false,
+      candleCarrierSide: null,
+      candleBurnTtl: 0,
+      candleBurnTick: 0,
+      failedSpecialType: null,
+    };
+  }
+
   raiseNecroServants(minion) {
     const servantCount = minion.super ? 6 : 4;
     const ring = minion.r + 22;
-    const baseHp = Math.max(30, minion.maxHp * 0.38);
-    const baseDmg = Math.max(7, minion.dmg * 0.42);
-    const speed = Math.max(56, minion.speed * 1.14);
-    const radius = Math.max(10, minion.r * 0.52);
-    const tier = Math.max(0, Math.min(2, (minion.tier || 0) - 1));
-    const level = Math.max(1, Math.floor((minion.level || 1) * 0.55));
-
     this.queueHitSfx('powerup', minion.x, minion.y, minion.side);
 
     for (let i = 0; i < servantCount; i += 1) {
@@ -3353,82 +3973,7 @@ class GameRoom {
       const radial = ring + (Math.random() * 14 - 7);
       const x = clamp(minion.x + Math.cos(angle) * radial, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
       const y = clamp(minion.y + Math.sin(angle) * Math.min(28, ring * 0.55), TOWER_Y - 170, TOWER_Y + 170);
-
-      this.minions.push({
-        id: this.seq++,
-        side: minion.side,
-        x,
-        y,
-        hp: baseHp,
-        maxHp: baseHp,
-        dmg: baseDmg,
-        speed,
-        atkCd: Math.random() * 0.18,
-        r: radius,
-        tier,
-        level,
-        super: false,
-        explosive: false,
-        explosiveLevel: 1,
-        necrominion: false,
-        summoned: true,
-        dragon: false,
-        flying: false,
-        gunner: false,
-        rider: false,
-        riderChargeReady: false,
-        riderChargeStartX: null,
-        riderChargeDistance: 0,
-        riderChargeMul: 1,
-        digger: false,
-        shieldBearer: false,
-        shieldPushCd: 0,
-        shieldPushTtl: 0,
-        shieldPushScale: 1,
-        stoneGolem: false,
-        golemSmashTtl: 0,
-        golemShieldHp: 0,
-        golemShieldMax: 0,
-        golemShieldTtl: 0,
-        hitFlashTtl: 0,
-        digPhase: null,
-        digBaseY: null,
-        monk: false,
-        monkAge: 0,
-        monkHealBase: 0,
-        monkHealRange: 0,
-        monkHealCd: 0,
-        monkHealScale: 0,
-        monkHealMinScale: 0,
-        monkHealDecayPerSec: 0,
-        monkHealStepDecay: 1,
-        monkFirstHeal: false,
-        monkFirstHealMul: 1,
-        monkKeepBehind: 0,
-        hero: false,
-        heroArrowHits: 0,
-        heroSlashRadius: 0,
-        heroLineCd: 0,
-        heroSwing: 0,
-        heroRetreating: false,
-        heroRetreatHpPct: 0,
-        heroReturnHpPct: 0,
-        heroHealPerSec: 0,
-        president: false,
-        presidentSetup: false,
-        presidentPodiumX: null,
-        presidentPodiumY: null,
-        presidentAuraRadius: 0,
-        presidentAuraMult: 1,
-        presidentSpeechCd: 0,
-        gunRange: 0,
-        gunDragonMul: 1,
-        gunFlashTtl: 0,
-        candleCarrier: false,
-        candleCarrierSide: null,
-        candleBurnTtl: 0,
-        candleBurnTick: 0,
-      });
+      this.minions.push(this.createNecroServant(minion, x, y));
     }
   }
 
@@ -3682,10 +4227,16 @@ class GameRoom {
     }
 
     if (isRider) {
+      const riderSuperHorse = (Number(side.riderSuperHorseLevel) || 0) > 0;
       hp *= 0.9;
       dmg *= 1.08 + Math.min(0.18, side.unitLevel * 0.012);
       speed *= 1.52;
       radius = Math.max(18, radius + 1);
+      if (riderSuperHorse) {
+        hp *= 4;
+        radius = Math.max(24, radius * 1.34);
+        speed *= 1.1;
+      }
       visualPower += 7;
     }
 
@@ -3776,6 +4327,7 @@ class GameRoom {
       explosiveLevel: 1,
       necrominion: isNecrominion,
       summoned: false,
+      necroRevived: false,
       dragon: isDragon,
       flying: isDragon,
       flyBaseY: isDragon ? spawnY : null,
@@ -3786,14 +4338,24 @@ class GameRoom {
       gunner: isGunner,
       rider: isRider,
       riderChargeReady: isRider,
+      riderSuperHorse: isRider && (Number(side.riderSuperHorseLevel) || 0) > 0,
       riderChargeStartX: isRider ? x : null,
-      riderChargeDistance: isRider ? (165 + side.spawnLevel * 5) : 0,
-      riderChargeMul: isRider ? (2.05 + Math.min(0.35, side.unitLevel * 0.02)) : 1,
+      riderChargeDistance: isRider
+        ? ((Number(side.riderSuperHorseLevel) || 0) > 0 ? 142 : 165) + side.spawnLevel * 5
+        : 0,
+      riderChargeMul: isRider
+        ? (2.05 + Math.min(0.35, side.unitLevel * 0.02) + ((Number(side.riderSuperHorseLevel) || 0) > 0 ? 0.72 : 0))
+        : 1,
       digger: isDigger,
+      diggerGoldFinder: isDigger && (Number(side.diggerGoldFinderLevel) || 0) > 0,
+      diggerMineTargetId: null,
+      diggerMineT: 0,
       shieldBearer: isShieldBearer,
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      shieldDarkMetalCd: isShieldBearer ? (SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER) : 0,
+      shieldDarkMetalTtl: 0,
       stoneGolem: isStoneGolem,
       golemSmashTtl: 0,
       golemShieldHp: isStoneGolem ? hp : 0,
@@ -3814,6 +4376,7 @@ class GameRoom {
       monkFirstHeal: isMonk,
       monkFirstHealMul: isMonk ? 2.8 : 1,
       monkKeepBehind: isMonk ? (138 + side.spawnLevel * 3) : 0,
+      monkHealCircleCd: isMonk ? (MONK_HEAL_CIRCLE_INTERVAL + Math.random() * MONK_HEAL_CIRCLE_COOLDOWN_JITTER) : 0,
       hero: isHero,
       heroArrowHits: 0,
       heroSlashRadius: isHero ? (84 + side.unitLevel * 2.4) : 0,
@@ -3833,6 +4396,7 @@ class GameRoom {
       gunRange: isGunner ? 198 + side.arrowLevel * 10 + side.unitLevel * 6 : 0,
       gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
       gunFlashTtl: 0,
+      gunnerSkyCannonCd: isGunner ? (GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER) : 0,
       candleCarrier: false,
       candleCarrierSide: null,
       candleBurnTtl: 0,
@@ -3896,6 +4460,11 @@ class GameRoom {
     return (Number(side?.[type]) || 0) >= cap;
   }
 
+  isUpgradeUnlocked(side, type) {
+    if (type === 'dragonSuperBreathLevel') return (Number(side?.dragonLevel) || 0) > 0;
+    return true;
+  }
+
   spawnMirroredResource() {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
@@ -3946,8 +4515,9 @@ class GameRoom {
   }
 
   pickUpgradeType(side, excludedTypes = new Set(), excludedPaths = new Set()) {
-    const pool = UPGRADE_TYPES.filter((type) => !this.isUpgradeCapped(side, type));
-    const sourcePool = pool.length ? pool : UPGRADE_TYPES;
+    const unlockedPool = UPGRADE_TYPES.filter((type) => this.isUpgradeUnlocked(side, type));
+    const uncappedPool = unlockedPool.filter((type) => !this.isUpgradeCapped(side, type));
+    const sourcePool = uncappedPool.length ? uncappedPool : (unlockedPool.length ? unlockedPool : UPGRADE_TYPES);
 
     const withPathSpread = sourcePool.filter((type) => (
       !excludedTypes.has(type)
@@ -4052,6 +4622,79 @@ class GameRoom {
 
     if (type === 'superMinionLevel') {
       this.spawnMinion(sideName, { forceType: 'super', countSpawn: false });
+      return;
+    }
+
+    if (type === 'dragonSuperBreathLevel') {
+      this.spawnMinion(sideName, { forceType: 'dragon', countSpawn: false });
+      this.queueHitSfx('dragonfire', towerX + dir * 34, towerY - 14, sideName);
+      return;
+    }
+
+    if (type === 'shieldDarkMetalLevel') {
+      this.spawnMinion(sideName, { forceType: 'shield', countSpawn: false });
+      this.queueHitSfx('blocked', towerX + dir * 30, towerY - 4, sideName);
+      return;
+    }
+
+    if (type === 'monkHealCircleLevel') {
+      this.spawnMinion(sideName, { forceType: 'monk', countSpawn: false });
+      this.queueHitSfx('healcircle', towerX + dir * 20, towerY - 8, sideName, { r: 90 });
+      return;
+    }
+
+    if (type === 'necroExpertSummonerLevel') {
+      this.spawnMinion(sideName, { forceType: 'necrominion', countSpawn: false });
+      this.queueHitSfx('revive', towerX + dir * 18, towerY - 2, sideName, {
+        ghost: {
+          side: sideName,
+          x: towerX + dir * 18,
+          y: towerY - 2,
+          r: 16,
+          tier: 1,
+          level: 6,
+          super: false,
+          summoned: true,
+          necroRevived: true,
+          explosive: false,
+          gunner: false,
+          rider: false,
+          riderChargeReady: false,
+          digger: false,
+          shieldBearer: false,
+          stoneGolem: false,
+          monk: false,
+          hero: false,
+          president: false,
+          dragon: false,
+          flying: false,
+          necrominion: true,
+          failedSpecialType: null,
+          digPhase: 0,
+          flyPhase: 0,
+          heroSwing: 0,
+          shieldDarkMetalTtl: 0,
+        },
+      });
+      return;
+    }
+
+    if (type === 'riderSuperHorseLevel') {
+      this.spawnMinion(sideName, { forceType: 'rider', countSpawn: false });
+      this.queueHitSfx('powerup', towerX + dir * 26, towerY - 6, sideName);
+      return;
+    }
+
+    if (type === 'diggerGoldFinderLevel') {
+      this.spawnMinion(sideName, { forceType: 'digger', countSpawn: false });
+      this.queueHitSfx('resource', towerX + dir * 24, towerY - 4, sideName);
+      return;
+    }
+
+    if (type === 'gunnerSkyCannonLevel') {
+      this.spawnMinion(sideName, { forceType: 'gunner', countSpawn: false });
+      this.queueHitSfx('gunhit', towerX + dir * 24, towerY - 8, sideName);
+      this.queueHitSfx('explosion', towerX + dir * 52, towerY - 30, sideName);
       return;
     }
 

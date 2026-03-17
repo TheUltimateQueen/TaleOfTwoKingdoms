@@ -18,6 +18,13 @@ export const UPGRADE_TYPES = [
   'powerLevel',
   'specialRateLevel',
   'dragonLevel',
+  'dragonSuperBreathLevel',
+  'shieldDarkMetalLevel',
+  'monkHealCircleLevel',
+  'necroExpertSummonerLevel',
+  'riderSuperHorseLevel',
+  'diggerGoldFinderLevel',
+  'gunnerSkyCannonLevel',
   'superMinionLevel',
 ];
 export const SHOT_POWER_TYPES = ['multiShot', 'ultraShot', 'pierceShot', 'flameShot'];
