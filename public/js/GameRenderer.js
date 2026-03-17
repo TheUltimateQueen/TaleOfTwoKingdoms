@@ -187,6 +187,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   super: 0.3,
 };
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
+const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 
 const FAILED_SPECIAL_HAT_STYLES = {
   dragon: { code: 'DR', cap: '#5f86b3', brim: '#aec8e7' },
@@ -1804,7 +1805,13 @@ export class GameRenderer {
     return Math.max(0.08, Math.min(0.92, chance));
   }
 
+  candleSpawnChance(sideState) {
+    const chance = CANDLE_SPAWN_BASE_CHANCE + this.specialSpawnRateBonus(sideState);
+    return Math.max(CANDLE_SPAWN_BASE_CHANCE, Math.min(0.92, chance));
+  }
+
   specialSpawnChanceForRow(sideState, rowType) {
+    if (rowType === 'candle') return this.candleSpawnChance(sideState);
     const specialType = ROW_TO_SPECIAL_TYPE[rowType];
     if (!specialType) return null;
     if (specialType === 'hero' && !sideState?.towerDamagedOnce) return 0;
@@ -2076,6 +2083,9 @@ export class GameRenderer {
         const etaSec = candleActive ? 0 : candleCd;
         const cycleSeconds = Math.max(1, this.spawnEveryForSide(sideState) * Math.max(1, every));
         const progress = candleActive ? 1 : Math.max(0, Math.min(1, 1 - etaSec / cycleSeconds));
+        const candleRollSuccess = typeof sideState?.candleRollSuccess === 'boolean'
+          ? sideState.candleRollSuccess
+          : null;
         return {
           ...row,
           level: levelOf[row.type],
@@ -2087,7 +2097,7 @@ export class GameRenderer {
           etaSec,
           candleActive,
           rollChance,
-          lastRollSuccess,
+          lastRollSuccess: candleRollSuccess,
         };
       }
       const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
@@ -2254,10 +2264,10 @@ export class GameRenderer {
       ctx.fillStyle = rowStatusColor;
       ctx.fillText(rowStatusTag, colStatusX, ry + 1);
       const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
-      if (rowChancePct != null && row.unlocked && row.type !== 'militia' && row.type !== 'candle') {
+      if (rowChancePct != null && row.unlocked && row.type !== 'militia') {
         ctx.fillStyle = '#9fc8ef';
         ctx.fillText(`${rowChancePct}%`, colChanceX, ry + 1);
-      } else if (!row.unlocked && row.type !== 'militia' && row.type !== 'candle') {
+      } else if (!row.unlocked && row.type !== 'militia') {
         ctx.fillStyle = '#7f8aa0';
         ctx.fillText('LOCK', colChanceX, ry + 1);
       }
@@ -2278,7 +2288,7 @@ export class GameRenderer {
           ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
         } else {
           ctx.fillStyle = '#b8c8e2';
-          ctx.fillText(`x${active} train ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
+          ctx.fillText(`x${active} roll ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
         }
       } else if (!row.unlocked) {
         ctx.fillStyle = '#9da8ba';

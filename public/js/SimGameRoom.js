@@ -106,6 +106,7 @@ const GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS = 2;
 const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
 const GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY = 0.24;
 const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
+const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
 const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
 const NECRO_REVIVE_SHIELD_SECONDS = 2;
@@ -317,6 +318,9 @@ function serializeSideState(side) {
     candleCd: roundTo(state.candleCd, 2),
     candleSpawnInSpawns: Math.max(0, Math.round(Number(state.candleSpawnInSpawns) || 0)),
     candleActive: Boolean(state.candleActive),
+    candleRollSuccess: typeof state.candleRollSuccess === 'boolean' ? state.candleRollSuccess : null,
+    candleRollChance: finiteOrNull(state.candleRollChance, 3),
+    candleRollValue: finiteOrNull(state.candleRollValue, 3),
     specialFailType: typeof state.specialFailType === 'string' ? state.specialFailType : null,
     specialFailTtl: roundTo(state.specialFailTtl, 2),
     specialRollType: typeof state.specialRollType === 'string' ? state.specialRollType : null,
@@ -391,6 +395,9 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     candleCd: 0,
     candleSpawnInSpawns: 0,
     candleActive: false,
+    candleRollSuccess: null,
+    candleRollChance: null,
+    candleRollValue: null,
     specialFailType: null,
     specialFailTtl: 0,
     specialRollType: null,
@@ -1089,6 +1096,11 @@ class GameRoom {
     return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
   }
 
+  statCandleSpawnChance(side) {
+    const bonus = this.statSpecialRateBonus(side);
+    return clamp(CANDLE_SPAWN_BASE_CHANCE + bonus, CANDLE_SPAWN_BASE_CHANCE, 0.92);
+  }
+
   candleSpawnEtaSeconds(sideName = 'left') {
     const side = sideName === 'right' ? 'right' : 'left';
     const sideState = this[side];
@@ -1110,7 +1122,13 @@ class GameRoom {
     }
     sideState.candleSpawnInSpawns = Math.max(0, Math.floor(sideState.candleSpawnInSpawns) - 1);
     if (sideState.candleSpawnInSpawns <= 0) {
-      this.spawnCandleUnit(side);
+      const chance = this.statCandleSpawnChance(sideState);
+      const roll = Math.random();
+      const success = roll <= chance;
+      sideState.candleRollChance = chance;
+      sideState.candleRollValue = roll;
+      sideState.candleRollSuccess = success;
+      if (success) this.spawnCandleUnit(side);
       sideState.candleSpawnInSpawns = this.statCandleEvery(sideState);
     }
     sideState.candleCd = this.candleSpawnEtaSeconds(side);
@@ -4166,7 +4184,6 @@ class GameRoom {
     if (!minion || minion.removed) return false;
     if ((Number(minion.hp) || 0) > 0) return false;
     if (minion.summoned || minion.necroRevived) return false;
-    if (minion.candleCarrier) return false;
     return true;
   }
 
