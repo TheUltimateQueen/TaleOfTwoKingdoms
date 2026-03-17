@@ -2343,6 +2343,17 @@ export class GameRenderer {
     const { ctx } = this;
     const category = upgradeCategory(card.type);
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+    const fitCardText = (text, maxWidth) => {
+      const raw = String(text || '');
+      if (!raw) return '';
+      if (ctx.measureText(raw).width <= maxWidth) return raw;
+      const ellipsis = '...';
+      let out = raw;
+      while (out.length > 0 && ctx.measureText(`${out}${ellipsis}`).width > maxWidth) {
+        out = out.slice(0, -1);
+      }
+      return out ? `${out}${ellipsis}` : ellipsis;
+    };
     ctx.fillStyle = style.panel;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
     ctx.fillStyle = style.glow;
@@ -2358,10 +2369,12 @@ export class GameRenderer {
 
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
-    ctx.fillText(UPGRADE_LABELS[card.type] || 'Upgrade', card.x, card.y - 5);
+    const titleText = fitCardText(UPGRADE_LABELS[card.type] || 'Upgrade', Math.max(20, card.w - 8));
+    ctx.fillText(titleText, card.x, card.y - 5);
     ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    ctx.fillText(UPGRADE_HINTS[card.type] || 'upgrade effect', card.x, card.y + 4);
+    const hintText = fitCardText(UPGRADE_HINTS[card.type] || 'upgrade effect', Math.max(18, card.w - 6));
+    ctx.fillText(hintText, card.x, card.y + 4);
     ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';
     ctx.fillText(`cost ${Math.max(1, Math.round(Number(card.cost) || 0))}`, card.x, card.y + 13);
