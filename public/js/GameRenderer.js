@@ -1955,9 +1955,12 @@ export class GameRenderer {
       ctx.fillStyle = rowStatusColor;
       ctx.fillText(rowStatusTag, colStatusX, ry + 1);
       const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
-      if (rowChancePct != null && row.type !== 'militia' && row.type !== 'candle') {
+      if (rowChancePct != null && row.unlocked && row.type !== 'militia' && row.type !== 'candle') {
         ctx.fillStyle = '#9fc8ef';
         ctx.fillText(`${rowChancePct}%`, colChanceX, ry + 1);
+      } else if (!row.unlocked && row.type !== 'militia' && row.type !== 'candle') {
+        ctx.fillStyle = '#7f8aa0';
+        ctx.fillText('LOCK', colChanceX, ry + 1);
       }
       ctx.fillStyle = '#c7d4e9';
       const active = Math.max(0, Number(row.activeCount) || 0);
