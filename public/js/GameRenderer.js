@@ -150,6 +150,17 @@ const UPGRADE_CATEGORY_STYLE = {
   },
 };
 
+const UPGRADE_CATEGORY_ORDER = ['arrow', 'unit', 'economy', 'power', 'special', 'misc'];
+
+const UPGRADE_CATEGORY_TOWER_LABEL = {
+  arrow: 'Arrow',
+  unit: 'Units',
+  economy: 'Economy',
+  power: 'Power',
+  special: 'Specials',
+  misc: 'Other',
+};
+
 const ROW_TO_SPECIAL_TYPE = {
   necro: 'necrominion',
   gunner: 'gunner',
@@ -1480,6 +1491,294 @@ export class GameRenderer {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  drawUpgradeGlyph(type, x, y, size = 7, color = '#1f2230') {
+    const { ctx } = this;
+    const s = Math.max(4, Number(size) || 7);
+    const lineW = Math.max(1, s * 0.18);
+
+    const drawArrow = (sx, sy, ex, ey, headScale = 0.3) => {
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const ang = Math.atan2(dy, dx);
+      const headLen = s * headScale;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - Math.cos(ang - Math.PI / 6) * headLen, ey - Math.sin(ang - Math.PI / 6) * headLen);
+      ctx.lineTo(ex - Math.cos(ang + Math.PI / 6) * headLen, ey - Math.sin(ang + Math.PI / 6) * headLen);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    const drawBurst = (cx, cy, innerR, outerR, rays) => {
+      for (let i = 0; i < rays; i += 1) {
+        const ang = (Math.PI * 2 * i) / rays;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR);
+        ctx.lineTo(cx + Math.cos(ang) * outerR, cy + Math.sin(ang) * outerR);
+        ctx.stroke();
+      }
+    };
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    switch (type) {
+      case 'arrowLevel': {
+        drawArrow(-0.62 * s, 0.52 * s, 0.58 * s, -0.5 * s, 0.34);
+        ctx.beginPath();
+        ctx.moveTo(-0.58 * s, 0.4 * s);
+        ctx.lineTo(-0.38 * s, 0.58 * s);
+        ctx.lineTo(-0.52 * s, 0.62 * s);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'unitLevel': {
+        ctx.lineWidth = Math.max(1.2, s * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(-0.44 * s, 0.5 * s);
+        ctx.lineTo(0.5 * s, -0.44 * s);
+        ctx.moveTo(-0.5 * s, -0.44 * s);
+        ctx.lineTo(0.44 * s, 0.5 * s);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0.58 * s, -0.52 * s);
+        ctx.lineTo(0.36 * s, -0.3 * s);
+        ctx.lineTo(0.7 * s, -0.26 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0.52 * s, 0.58 * s);
+        ctx.lineTo(0.3 * s, 0.36 * s);
+        ctx.lineTo(0.26 * s, 0.7 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillRect(-0.58 * s, 0.42 * s, 0.2 * s, 0.14 * s);
+        ctx.fillRect(-0.56 * s, -0.56 * s, 0.2 * s, 0.14 * s);
+        break;
+      }
+      case 'volleyLevel': {
+        drawArrow(-0.6 * s, 0.55 * s, -0.16 * s, -0.5 * s, 0.26);
+        drawArrow(-0.12 * s, 0.55 * s, 0.22 * s, -0.5 * s, 0.26);
+        drawArrow(0.34 * s, 0.55 * s, 0.56 * s, -0.5 * s, 0.26);
+        break;
+      }
+      case 'spawnLevel': {
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.54 * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -0.28 * s);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0.24 * s, 0.08 * s);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-0.9 * s, -0.26 * s);
+        ctx.lineTo(-0.56 * s, -0.26 * s);
+        ctx.moveTo(-0.86 * s, 0.04 * s);
+        ctx.lineTo(-0.48 * s, 0.04 * s);
+        ctx.stroke();
+        break;
+      }
+      case 'unitHpLevel': {
+        ctx.beginPath();
+        ctx.moveTo(0, 0.58 * s);
+        ctx.bezierCurveTo(-0.64 * s, 0.14 * s, -0.62 * s, -0.44 * s, 0, -0.12 * s);
+        ctx.bezierCurveTo(0.62 * s, -0.44 * s, 0.64 * s, 0.14 * s, 0, 0.58 * s);
+        ctx.fill();
+        break;
+      }
+      case 'resourceLevel': {
+        ctx.beginPath();
+        ctx.moveTo(0, -0.62 * s);
+        ctx.lineTo(0.56 * s, -0.08 * s);
+        ctx.lineTo(0, 0.62 * s);
+        ctx.lineTo(-0.56 * s, -0.08 * s);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-0.5 * s, -0.08 * s);
+        ctx.lineTo(0.5 * s, -0.08 * s);
+        ctx.stroke();
+        break;
+      }
+      case 'bountyLevel': {
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.56 * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = `bold ${Math.max(7, Math.round(s * 1.2))}px sans-serif`;
+        ctx.fillText('$', 0, 0);
+        break;
+      }
+      case 'powerLevel': {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i += 1) {
+          const ang = (-Math.PI / 2) + (Math.PI * 2 * i) / 10;
+          const r = i % 2 === 0 ? 0.62 * s : 0.28 * s;
+          const px = Math.cos(ang) * r;
+          const py = Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'specialRateLevel': {
+        const box = 1.06 * s;
+        const half = box / 2;
+        const radius = Math.max(1.8, s * 0.16);
+        ctx.beginPath();
+        ctx.moveTo(-half + radius, -half);
+        ctx.lineTo(half - radius, -half);
+        ctx.quadraticCurveTo(half, -half, half, -half + radius);
+        ctx.lineTo(half, half - radius);
+        ctx.quadraticCurveTo(half, half, half - radius, half);
+        ctx.lineTo(-half + radius, half);
+        ctx.quadraticCurveTo(-half, half, -half, half - radius);
+        ctx.lineTo(-half, -half + radius);
+        ctx.quadraticCurveTo(-half, -half, -half + radius, -half);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(-0.22 * s, -0.18 * s, 0.13 * s, 0, Math.PI * 2);
+        ctx.arc(0.22 * s, 0.02 * s, 0.13 * s, 0, Math.PI * 2);
+        ctx.arc(-0.02 * s, 0.24 * s, 0.13 * s, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'dragonLevel': {
+        ctx.beginPath();
+        ctx.moveTo(-0.64 * s, 0.32 * s);
+        ctx.lineTo(-0.2 * s, -0.54 * s);
+        ctx.lineTo(0.2 * s, -0.18 * s);
+        ctx.lineTo(0.56 * s, -0.28 * s);
+        ctx.lineTo(0.38 * s, 0.06 * s);
+        ctx.lineTo(0.62 * s, 0.42 * s);
+        ctx.lineTo(0.12 * s, 0.26 * s);
+        ctx.lineTo(-0.18 * s, 0.54 * s);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'dragonSuperBreathLevel': {
+        ctx.beginPath();
+        ctx.moveTo(0, -0.62 * s);
+        ctx.lineTo(0.58 * s, 0.36 * s);
+        ctx.lineTo(0.12 * s, 0.18 * s);
+        ctx.lineTo(0, 0.62 * s);
+        ctx.lineTo(-0.12 * s, 0.18 * s);
+        ctx.lineTo(-0.58 * s, 0.36 * s);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'shieldDarkMetalLevel': {
+        ctx.beginPath();
+        ctx.moveTo(0, -0.64 * s);
+        ctx.lineTo(0.54 * s, -0.34 * s);
+        ctx.lineTo(0.4 * s, 0.38 * s);
+        ctx.lineTo(0, 0.64 * s);
+        ctx.lineTo(-0.4 * s, 0.38 * s);
+        ctx.lineTo(-0.54 * s, -0.34 * s);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'monkHealCircleLevel': {
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.58 * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillRect(-0.13 * s, -0.44 * s, 0.26 * s, 0.88 * s);
+        ctx.fillRect(-0.44 * s, -0.13 * s, 0.88 * s, 0.26 * s);
+        break;
+      }
+      case 'necroExpertSummonerLevel': {
+        ctx.beginPath();
+        ctx.arc(0, -0.08 * s, 0.46 * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(-0.18 * s, -0.14 * s, 0.08 * s, 0, Math.PI * 2);
+        ctx.arc(0.18 * s, -0.14 * s, 0.08 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(-0.22 * s, 0.22 * s, 0.44 * s, 0.16 * s);
+        drawArrow(0, 0.66 * s, 0, 0.3 * s, 0.24);
+        break;
+      }
+      case 'riderSuperHorseLevel': {
+        ctx.lineWidth = Math.max(1.2, s * 0.22);
+        ctx.beginPath();
+        ctx.moveTo(-0.46 * s, -0.42 * s);
+        ctx.quadraticCurveTo(0, 0.68 * s, 0.46 * s, -0.42 * s);
+        ctx.stroke();
+        ctx.fillRect(-0.48 * s, -0.5 * s, 0.16 * s, 0.2 * s);
+        ctx.fillRect(0.32 * s, -0.5 * s, 0.16 * s, 0.2 * s);
+        break;
+      }
+      case 'diggerGoldFinderLevel': {
+        ctx.beginPath();
+        ctx.moveTo(-0.34 * s, 0.48 * s);
+        ctx.lineTo(0.32 * s, -0.3 * s);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-0.5 * s, -0.06 * s);
+        ctx.lineTo(0.02 * s, -0.24 * s);
+        ctx.lineTo(-0.08 * s, -0.44 * s);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0.5 * s, 0.34 * s, 0.16 * s, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'gunnerSkyCannonLevel': {
+        ctx.beginPath();
+        ctx.arc(-0.14 * s, 0.26 * s, 0.72 * s, Math.PI * 1.06, Math.PI * 1.52);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0.38 * s, -0.26 * s, 0.16 * s, 0, Math.PI * 2);
+        ctx.fill();
+        drawBurst(0.56 * s, -0.44 * s, 0.06 * s, 0.24 * s, 6);
+        break;
+      }
+      case 'superMinionLevel': {
+        ctx.beginPath();
+        ctx.moveTo(-0.62 * s, 0.42 * s);
+        ctx.lineTo(-0.52 * s, -0.02 * s);
+        ctx.lineTo(-0.22 * s, 0.16 * s);
+        ctx.lineTo(0, -0.36 * s);
+        ctx.lineTo(0.22 * s, 0.16 * s);
+        ctx.lineTo(0.52 * s, -0.02 * s);
+        ctx.lineTo(0.62 * s, 0.42 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, 0.26 * s, 0.1 * s, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      default: {
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.2 * s, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+    }
+
+    ctx.restore();
+  }
+
   spawnEveryForSide(sideState) {
     const spawnLevel = Math.max(1, Number(sideState?.spawnLevel) || 1);
     return Math.max(0.65, 2.2 - spawnLevel * 0.09);
@@ -2188,59 +2487,92 @@ export class GameRenderer {
       if (count <= 0) continue;
       const category = upgradeCategory(spec.type);
       const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
-      out.push({ ...spec, count, color: style.badge });
+      out.push({ ...spec, count, category, style, color: style.badge });
     }
     return out;
   }
 
-  drawTowerUpgradeBadges(side, x, y, sideState) {
+  getTowerUpgradeGroups(sideState) {
     const badges = this.getUpgradeBadgeData(sideState);
-    if (!badges.length) return;
+    if (!badges.length) return [];
+    const groups = [];
+    for (const category of UPGRADE_CATEGORY_ORDER) {
+      const items = badges.filter((badge) => badge.category === category);
+      if (!items.length) continue;
+      const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+      groups.push({
+        category,
+        style,
+        label: UPGRADE_CATEGORY_TOWER_LABEL[category] || style.tag || 'Upgrades',
+        items,
+      });
+    }
+    return groups;
+  }
+
+  drawTowerUpgradeBadges(side, x, y, sideState) {
+    const groups = this.getTowerUpgradeGroups(sideState);
+    if (!groups.length) return;
 
     const { ctx } = this;
     const dir = side === 'left' ? 1 : -1;
-    const columns = 2;
-    const stepX = 21;
-    const stepY = 22;
-    const r = 8;
-    const ox = x + dir * 30;
-    const oy = y - 124;
+    const cols = 2;
+    const iconStepX = 21;
+    const iconStepY = 20;
+    const iconR = 8;
+    const groupGap = 8;
+    const startX = x + dir * 30;
+    let startY = y - 126;
+    const railLeft = Math.min(startX, startX + dir * iconStepX) - 10;
+    const railRight = Math.max(startX, startX + dir * iconStepX) + 10;
 
-    for (let i = 0; i < badges.length; i += 1) {
-      const b = badges[i];
-      const col = i % columns;
-      const row = Math.floor(i / columns);
-      const bx = ox + dir * col * stepX;
-      const by = oy + row * stepY;
+    for (let g = 0; g < groups.length; g += 1) {
+      const group = groups[g];
+      const rows = Math.ceil(group.items.length / cols);
 
-      ctx.fillStyle = '#09101ddd';
-      ctx.beginPath();
-      ctx.arc(bx, by, r + 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      for (let i = 0; i < group.items.length; i += 1) {
+        const badge = group.items[i];
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const bx = startX + dir * col * iconStepX;
+        const by = startY + row * iconStepY;
 
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      ctx.arc(bx, by, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#fef7d2cc';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-
-      ctx.fillStyle = '#1f2230';
-      ctx.font = 'bold 7px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(b.code, bx, by + 2.5);
-
-      if (b.count > 1) {
-        const tx = bx + dir * 10;
-        const ty = by - 7;
-        ctx.fillStyle = '#18120ccf';
+        ctx.fillStyle = '#09101ddd';
         ctx.beginPath();
-        ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+        ctx.arc(bx, by, iconR + 2.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#ffe7a6';
-        ctx.font = 'bold 7px sans-serif';
-        ctx.fillText(`${b.count}`, tx, ty + 2.5);
+
+        ctx.fillStyle = badge.color;
+        ctx.beginPath();
+        ctx.arc(bx, by, iconR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fef7d2cc';
+        ctx.lineWidth = 1.15;
+        ctx.stroke();
+        this.drawUpgradeGlyph(badge.type, bx, by, 6.2, '#1f2230');
+
+        if (badge.count > 1) {
+          const tx = bx + dir * 9;
+          const ty = by - 8;
+          ctx.fillStyle = '#18120cd8';
+          ctx.beginPath();
+          ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffe7a6';
+          ctx.font = 'bold 7px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${badge.count}`, tx, ty + 2.4);
+        }
+      }
+
+      startY += rows * iconStepY + groupGap;
+      if (g < groups.length - 1) {
+        ctx.strokeStyle = this.withAlpha(group.style.border, 0.55);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(railLeft, startY - groupGap / 2);
+        ctx.lineTo(railRight, startY - groupGap / 2);
+        ctx.stroke();
       }
     }
   }
@@ -2346,6 +2678,7 @@ export class GameRenderer {
     const { ctx } = this;
     const category = upgradeCategory(card.type);
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+    const textX = card.x + 10;
     const fitCardText = (text, maxWidth) => {
       const raw = String(text || '');
       if (!raw) return '';
@@ -2365,19 +2698,34 @@ export class GameRenderer {
     ctx.lineWidth = 2;
     ctx.strokeRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
 
+    const iconX = card.x - card.w / 2 + 11;
+    const iconY = card.y - card.h / 2 + 10.5;
+    ctx.fillStyle = '#0c1526d4';
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 8.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = style.badge;
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fef7d2cc';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    this.drawUpgradeGlyph(card.type, iconX, iconY, 5.8, '#1f2230');
+
     ctx.fillStyle = style.hint;
     ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(style.tag, card.x, card.y - 15);
+    ctx.fillText(style.tag, textX, card.y - 15);
 
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
-    const titleText = fitCardText(UPGRADE_LABELS[card.type] || 'Upgrade', Math.max(20, card.w - 8));
-    ctx.fillText(titleText, card.x, card.y - 5);
+    const titleText = fitCardText(UPGRADE_LABELS[card.type] || 'Upgrade', Math.max(20, card.w - 22));
+    ctx.fillText(titleText, textX, card.y - 5);
     ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    const hintText = fitCardText(UPGRADE_HINTS[card.type] || 'upgrade effect', Math.max(18, card.w - 6));
-    ctx.fillText(hintText, card.x, card.y + 4);
+    const hintText = fitCardText(UPGRADE_HINTS[card.type] || 'upgrade effect', Math.max(18, card.w - 24));
+    ctx.fillText(hintText, textX, card.y + 4);
     ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';
     ctx.fillText(`cost ${Math.max(1, Math.round(Number(card.cost) || 0))}`, card.x, card.y + 13);
