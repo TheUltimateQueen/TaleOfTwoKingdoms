@@ -209,6 +209,7 @@ const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
 const MAX_REVIVE_SPIRITS = 90;
+const MAX_HEAL_CIRCLES = 42;
 const TOWER_HIT_PARTICLE_COLORS = ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'];
 const BLOCKED_PARTICLE_COLORS = ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'];
 const CANDLE_HIT_FIRE_COLORS = ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'];
@@ -237,6 +238,7 @@ export class GameRenderer {
     this.heroLines = [];
     this.deathGhosts = [];
     this.reviveSpirits = [];
+    this.healCircles = [];
     this.towerShake = {
       left: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
       right: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
@@ -465,6 +467,9 @@ export class GameRenderer {
 
     for (const res of snapshot.resources) this.drawResourceNode(res);
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
+    if (Array.isArray(snapshot.cannonBalls)) {
+      for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
+    }
     for (const card of snapshot.upgradeCards) this.drawUpgradeCard(card);
     if (Array.isArray(snapshot.candleScorches)) {
       for (let i = 0; i < snapshot.candleScorches.length; i += 1) {
@@ -476,6 +481,8 @@ export class GameRenderer {
     }
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
     if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
+    this.updateHealCircles(dt);
+    this.drawHealCircles();
     this.updateReviveSpirits(dt);
     this.drawReviveSpirits();
     this.updateDeathGhosts(dt);
@@ -704,6 +711,16 @@ export class GameRenderer {
           220
         );
       }
+      this.healCircles.push({
+        x: px,
+        y: py,
+        r,
+        life: 0.95,
+        maxLife: 0.95,
+      });
+      if (this.healCircles.length > MAX_HEAL_CIRCLES) {
+        this.healCircles.splice(0, this.healCircles.length - MAX_HEAL_CIRCLES);
+      }
       return;
     }
 
@@ -801,6 +818,11 @@ export class GameRenderer {
       riderSuperHorse: Boolean(ghost.riderSuperHorse),
       digger: Boolean(ghost.digger),
       diggerGoldFinder: Boolean(ghost.diggerGoldFinder),
+      dragonSuperBreathUpgraded: Boolean(ghost.dragonSuperBreathUpgraded),
+      shieldDarkMetalUpgraded: Boolean(ghost.shieldDarkMetalUpgraded),
+      monkHealCircleUpgraded: Boolean(ghost.monkHealCircleUpgraded),
+      necroExpertUpgraded: Boolean(ghost.necroExpertUpgraded),
+      gunnerSkyCannonUpgraded: Boolean(ghost.gunnerSkyCannonUpgraded),
       digPhase: Number.isFinite(ghost.digPhase) ? ghost.digPhase : 0.8,
       monk: Boolean(ghost.monk),
       monkHealScale: Number.isFinite(ghost.monkHealScale) ? ghost.monkHealScale : 1,
@@ -863,10 +885,18 @@ export class GameRenderer {
     const ghostMinion = this.createGhostMinion(event.ghost, event.side, event.x, event.y);
     if (!ghostMinion) return;
     const life = 0.62 + Math.random() * 0.22;
+    const fromX = Number.isFinite(event.fromX) ? event.fromX : ghostMinion.x;
+    const fromY = Number.isFinite(event.fromY) ? event.fromY : (ghostMinion.y - Math.max(12, ghostMinion.r * 0.6));
+    const toX = Number.isFinite(event.toX) ? event.toX : ghostMinion.x;
+    const toY = Number.isFinite(event.toY) ? event.toY : (ghostMinion.y - Math.max(8, ghostMinion.r * 0.22));
     this.reviveSpirits.push({
       minion: ghostMinion,
       x: ghostMinion.x,
       y: ghostMinion.y + Math.max(8, ghostMinion.r * 0.25),
+      fromX,
+      fromY,
+      toX,
+      toY,
       drift: Math.random() * 12 - 6,
       phase: Math.random() * Math.PI * 2,
       life,
@@ -991,6 +1021,19 @@ export class GameRenderer {
       write += 1;
     }
     this.reviveSpirits.length = write;
+  }
+
+  updateHealCircles(dt) {
+    if (!Array.isArray(this.healCircles) || this.healCircles.length === 0) return;
+    let write = 0;
+    for (let i = 0; i < this.healCircles.length; i += 1) {
+      const ring = this.healCircles[i];
+      ring.life -= dt;
+      if (ring.life <= 0) continue;
+      this.healCircles[write] = ring;
+      write += 1;
+    }
+    this.healCircles.length = write;
   }
 
   updateDamageTexts(dt) {
@@ -1297,6 +1340,26 @@ export class GameRenderer {
       const scale = 0.42 + rise * 0.92;
       const glow = 0.2 + life * 0.42;
 
+      const beamFromX = Number.isFinite(g.fromX) ? g.fromX : g.x;
+      const beamFromY = Number.isFinite(g.fromY) ? g.fromY : g.y;
+      const beamToX = Number.isFinite(g.toX) ? g.toX : g.x;
+      const beamToY = Number.isFinite(g.toY) ? g.toY : g.y;
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.24 + life * 0.58;
+      const beamGrad = ctx.createLinearGradient(beamFromX, beamFromY, beamToX, beamToY);
+      beamGrad.addColorStop(0, '#ffffff');
+      beamGrad.addColorStop(0.5, '#f8fdff');
+      beamGrad.addColorStop(1, '#eff8ff');
+      ctx.strokeStyle = beamGrad;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 1.8 + life * 2.8;
+      ctx.beginPath();
+      ctx.moveTo(beamFromX, beamFromY);
+      ctx.lineTo(beamToX, beamToY);
+      ctx.stroke();
+      ctx.restore();
+
       ctx.save();
       ctx.translate(g.x, g.y);
       ctx.scale(scale, scale);
@@ -1319,6 +1382,42 @@ export class GameRenderer {
     }
     ctx.globalAlpha = 1;
     ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  drawHealCircles() {
+    if (!Array.isArray(this.healCircles) || this.healCircles.length === 0) return;
+    const { ctx } = this;
+    for (const ring of this.healCircles) {
+      const life = Math.max(0, Math.min(1, ring.life / ring.maxLife));
+      const x = Number(ring.x) || 0;
+      const y = Number(ring.y) || 0;
+      const baseR = Math.max(28, Number(ring.r) || 96);
+      const expand = 1 + (1 - life) * 0.2;
+      const drawR = baseR * expand;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.2 + life * 0.35;
+      const glow = ctx.createRadialGradient(x, y, drawR * 0.3, x, y, drawR * 1.15);
+      glow.addColorStop(0, '#ceffcf66');
+      glow.addColorStop(0.62, '#7ff0a355');
+      glow.addColorStop(1, '#7ff0a300');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, drawR * 1.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.35 + life * 0.5;
+      ctx.strokeStyle = '#b9ffd4';
+      ctx.lineWidth = 2.4 + life * 1.6;
+      ctx.beginPath();
+      ctx.arc(x, y, drawR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }
 
@@ -2309,6 +2408,38 @@ export class GameRenderer {
     ctx.fillText(SHOT_POWER_LABELS[power.type] || 'Power', power.x, power.y + 3);
   }
 
+  drawCannonBall(ball) {
+    if (!ball) return;
+    const { ctx } = this;
+    const x = Number(ball.x) || 0;
+    const y = Number(ball.y) || 0;
+    const r = Math.max(6, Number(ball.r) || 12);
+    const sideName = ball.side === 'right' ? 'right' : 'left';
+    const tint = sideName === 'left' ? '#87baff' : '#ff9f9f';
+
+    const glow = ctx.createRadialGradient(x, y, 2, x, y, r * 2.4);
+    glow.addColorStop(0, '#fff4d1bb');
+    glow.addColorStop(0.45, `${tint}66`);
+    glow.addColorStop(1, `${tint}00`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#2a2f3a';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c7d2e8';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd8a6';
+    ctx.beginPath();
+    ctx.arc(x - r * 0.22, y - r * 0.24, Math.max(1.3, r * 0.22), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   drawResourceNode(res) {
     const { ctx } = this;
     ctx.fillStyle = '#fef1b8';
@@ -2754,6 +2885,36 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+
+    const reviveShieldMax = Math.max(0, Number(minion.reviveShieldMax) || 0);
+    const reviveShieldHp = Math.max(0, Number(minion.reviveShieldHp) || 0);
+    const reviveShieldTtl = Math.max(0, Number(minion.reviveShieldTtl) || 0);
+    const reviveShieldMaxTtl = Math.max(0.01, Number(minion.reviveShieldMaxTtl) || 2);
+    if (reviveShieldMax > 0 && reviveShieldHp > 0 && reviveShieldTtl > 0) {
+      const frac = Math.max(0, Math.min(1, reviveShieldHp / reviveShieldMax));
+      const fade = Math.max(0, Math.min(1, reviveShieldTtl / reviveShieldMaxTtl));
+      const sy = hpY - 9;
+      ctx.fillStyle = '#0d1524cc';
+      ctx.fillRect(hpX, sy, hpW, 3);
+      ctx.fillStyle = this.withAlpha('#eff7ff', 0.38 + fade * 0.5);
+      ctx.fillRect(hpX, sy, hpW * frac, 3);
+    }
+
+    if (minion.necrominion) {
+      const shieldMax = Math.max(0, Number(minion.necroShieldMax) || 0);
+      const shieldHp = Math.max(0, Number(minion.necroShieldHp) || 0);
+      const shieldTtl = Math.max(0, Number(minion.necroShieldTtl) || 0);
+      const shieldMaxTtl = Math.max(0.01, Number(minion.necroShieldMaxTtl) || 20);
+      if (shieldMax > 0 && shieldHp > 0 && shieldTtl > 0) {
+        const hpFrac = Math.max(0, Math.min(1, shieldHp / shieldMax));
+        const fade = Math.max(0, Math.min(1, shieldTtl / shieldMaxTtl));
+        const sy = hpY - 5;
+        ctx.fillStyle = '#0d1524cc';
+        ctx.fillRect(hpX, sy, hpW, 3);
+        ctx.fillStyle = this.withAlpha('#97f5ff', 0.35 + fade * 0.5);
+        ctx.fillRect(hpX, sy, hpW * hpFrac, 3);
+      }
+    }
   }
 
   minionHitFlashLife(minion) {
@@ -2828,13 +2989,14 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const upgraded = Boolean(minion.gunnerSkyCannonUpgraded);
     const scale = minion.super ? 1.34 : 1;
     const bodyW = 22 * scale;
     const bodyH = 18 * scale;
     if (!cacheRender) {
       const flashNorm = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
       const flashBucket = Math.max(0, Math.min(3, Math.round(flashNorm * 3)));
-      const cacheKey = `gunner:${sideName}:${minion.super ? 1 : 0}:${flashBucket}`;
+      const cacheKey = `gunner:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${flashBucket}`;
       const cacheWidth = Math.ceil(bodyW * 4 + 40);
       const cacheHeight = Math.ceil(bodyH * 3 + 44);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -2904,18 +3066,41 @@ export class GameRenderer {
     ctx.fillRect(bodyW * 0.12, bodyH * 0.48, bodyW * 0.22, bodyH * 0.48);
 
     // Rifle.
-    const gunLen = bodyW * 1.35;
+    const gunLen = bodyW * (upgraded ? 1.82 : 1.35);
     const gunY = -bodyH * 0.06;
     ctx.strokeStyle = '#dce9ff';
-    ctx.lineWidth = 3.1;
+    ctx.lineWidth = upgraded ? 4.2 : 3.1;
     ctx.beginPath();
     ctx.moveTo(bodyW * 0.18 * dir, gunY);
     ctx.lineTo((bodyW * 0.18 + gunLen) * dir, gunY - 1.2);
     ctx.stroke();
     ctx.fillStyle = '#415a7e';
-    ctx.fillRect(Math.min(bodyW * 0.04 * dir, (bodyW * 0.64) * dir), gunY - 3.2, Math.abs(bodyW * 0.6), 6.4);
+    ctx.fillRect(
+      Math.min(bodyW * 0.04 * dir, (bodyW * (upgraded ? 0.94 : 0.64)) * dir),
+      gunY - (upgraded ? 4.4 : 3.2),
+      Math.abs(bodyW * (upgraded ? 0.9 : 0.6)),
+      upgraded ? 8.8 : 6.4
+    );
+    if (upgraded) {
+      ctx.fillStyle = '#5a7398';
+      ctx.fillRect(
+        Math.min(bodyW * 0.14 * dir, (bodyW * 0.74) * dir),
+        gunY - 7.6,
+        Math.abs(bodyW * 0.6),
+        3.2
+      );
+      ctx.fillStyle = '#7f97bb';
+      ctx.beginPath();
+      ctx.arc((bodyW * 0.18 + gunLen) * dir, gunY - 1.2, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = '#1f2a3b';
-    ctx.fillRect(Math.min((-bodyW * 0.04) * dir, (bodyW * 0.12) * dir), gunY + 1.2, Math.abs(bodyW * 0.16), 3.6);
+    ctx.fillRect(
+      Math.min((-bodyW * (upgraded ? 0.14 : 0.04)) * dir, (bodyW * 0.12) * dir),
+      gunY + 1.2,
+      Math.abs(bodyW * (upgraded ? 0.26 : 0.16)),
+      upgraded ? 4.2 : 3.6
+    );
 
     if (flash > 0) {
       const muzzleX = (bodyW * 0.18 + gunLen) * dir;
@@ -2947,10 +3132,17 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const upgraded = Boolean(minion.necroExpertUpgraded);
     const scale = minion.super ? 1.45 : 1.08;
     const bodyR = 12 * scale;
+    const shieldMax = Math.max(0, Number(minion.necroShieldMax) || 0);
+    const shieldHp = Math.max(0, Number(minion.necroShieldHp) || 0);
+    const shieldTtl = Math.max(0, Number(minion.necroShieldTtl) || 0);
+    const shieldMaxTtl = Math.max(0.01, Number(minion.necroShieldMaxTtl) || 20);
+    const shieldLife = shieldMax > 0 ? Math.max(0, Math.min(1, (shieldHp / shieldMax) * (shieldTtl / shieldMaxTtl))) : 0;
     if (!cacheRender) {
-      const cacheKey = `necro:${sideName}:${minion.super ? 1 : 0}`;
+      const shieldBucket = Math.max(0, Math.min(6, Math.round(shieldLife * 6)));
+      const cacheKey = `necro:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${shieldBucket}`;
       const cacheWidth = Math.ceil(bodyR * 4 + 42);
       const cacheHeight = Math.ceil(bodyR * 4 + 42);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -2987,6 +3179,14 @@ export class GameRenderer {
     ctx.arc(x, y - 2, auraR, 0, Math.PI * 2);
     ctx.fill();
 
+    if (shieldLife > 0) {
+      ctx.strokeStyle = this.withAlpha('#a3f4ff', 0.28 + shieldLife * 0.52);
+      ctx.lineWidth = 1.8 + shieldLife * 1.8;
+      ctx.beginPath();
+      ctx.arc(x, y - bodyR * 0.08, bodyR * (1.28 + shieldLife * 0.18), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.save();
     ctx.translate(x, y);
 
@@ -3019,6 +3219,27 @@ export class GameRenderer {
     ctx.arc(-bodyR * 0.16, -bodyR * 0.72, bodyR * 0.08, 0, Math.PI * 2);
     ctx.arc(bodyR * 0.16, -bodyR * 0.72, bodyR * 0.08, 0, Math.PI * 2);
     ctx.fill();
+
+    if (upgraded) {
+      ctx.fillStyle = '#d6b95b';
+      ctx.beginPath();
+      ctx.moveTo(-bodyR * 0.5, -bodyR * 1.14);
+      ctx.lineTo(-bodyR * 0.34, -bodyR * 1.52);
+      ctx.lineTo(-bodyR * 0.14, -bodyR * 1.18);
+      ctx.lineTo(0, -bodyR * 1.58);
+      ctx.lineTo(bodyR * 0.14, -bodyR * 1.18);
+      ctx.lineTo(bodyR * 0.34, -bodyR * 1.52);
+      ctx.lineTo(bodyR * 0.5, -bodyR * 1.14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#f7e59b';
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+      ctx.fillStyle = '#8cffd1';
+      ctx.beginPath();
+      ctx.arc(0, -bodyR * 1.32, bodyR * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.strokeStyle = '#7ff7bf';
     ctx.lineWidth = 1.3;
     ctx.beginPath();
@@ -3299,12 +3520,13 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const upgraded = Boolean(minion.monkHealCircleUpgraded);
     const scale = minion.super ? 1.18 : 1.04;
     const bodyR = 13 * scale;
     const healScale = Number.isFinite(minion.monkHealScale) ? minion.monkHealScale : 1;
     if (!cacheRender) {
       const healBucket = Math.max(0, Math.min(4, Math.round(healScale * 4)));
-      const cacheKey = `monk:${sideName}:${minion.super ? 1 : 0}:${healBucket}`;
+      const cacheKey = `monk:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${healBucket}`;
       const cacheWidth = Math.ceil(bodyR * 4.6 + 44);
       const cacheHeight = Math.ceil(bodyR * 4.4 + 44);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -3343,6 +3565,13 @@ export class GameRenderer {
     ctx.beginPath();
     ctx.arc(x, y + 2, bodyR * 1.28, 0, Math.PI * 2);
     ctx.stroke();
+    if (upgraded) {
+      ctx.strokeStyle = 'rgba(180, 255, 215, 0.48)';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(x, y + 2, bodyR * 1.76, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -3357,6 +3586,12 @@ export class GameRenderer {
     ctx.stroke();
     ctx.fillStyle = '#8f4f24';
     ctx.fillRect(-bodyR * 0.2, -bodyR * 0.9, bodyR * 0.4, bodyR * 1.7);
+    if (upgraded) {
+      ctx.fillStyle = '#7fd9a5';
+      ctx.beginPath();
+      ctx.arc(0, -bodyR * 0.16, bodyR * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Head.
     ctx.fillStyle = '#efcfb0';
@@ -3558,6 +3793,7 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const upgraded = Boolean(minion.shieldDarkMetalUpgraded);
     const x = minion.x;
     const y = minion.y;
     const dir = sideName === 'left' ? 1 : -1;
@@ -3573,7 +3809,7 @@ export class GameRenderer {
       const baseRBucket = Math.max(18, Math.min(36, Math.round(baseR)));
       const pushBucket = Math.max(0, Math.min(5, Math.round(pushLife * 5)));
       const darkMetalBucket = Math.max(0, Math.min(5, Math.round(darkMetalLife * 5)));
-      const cacheKey = `shield:${sideName}:${baseRBucket}:${pushBucket}:${darkMetalBucket}`;
+      const cacheKey = `shield:${sideName}:${baseRBucket}:${upgraded ? 1 : 0}:${pushBucket}:${darkMetalBucket}`;
       const cacheWidth = Math.ceil(baseRBucket * 6.2 + 64);
       const cacheHeight = Math.ceil(baseRBucket * 7.2 + 72);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -3647,6 +3883,22 @@ export class GameRenderer {
     ctx.fillStyle = darkMetalActive ? '#2a303b' : '#6f86a9';
     ctx.fillRect(-bodyW * 0.72, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
     ctx.fillRect(bodyW * 0.14, bodyH * 0.48, bodyW * 0.58, bodyH * 0.25);
+    if (upgraded) {
+      ctx.fillStyle = '#a8f0ff';
+      for (let i = -1; i <= 1; i += 1) {
+        const gemX = i * bodyW * 0.24;
+        const gemY = -bodyH * 0.22;
+        const gemW = bodyW * 0.12;
+        const gemH = bodyW * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(gemX, gemY - gemH);
+        ctx.lineTo(gemX + gemW, gemY);
+        ctx.lineTo(gemX, gemY + gemH);
+        ctx.lineTo(gemX - gemW, gemY);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
     ctx.restore();
 
     ctx.save();
@@ -3682,6 +3934,21 @@ export class GameRenderer {
     ctx.moveTo(-shW * 0.3, shH * 0.36);
     ctx.lineTo(shW * 0.26, shH * 0.36);
     ctx.stroke();
+    if (upgraded) {
+      ctx.fillStyle = darkMetalActive ? '#e9f4ff' : '#c6f6ff';
+      const gemR = Math.max(3.2, baseR * 0.12);
+      for (let i = -1; i <= 1; i += 1) {
+        const gx = -shW * 0.12 + i * shW * 0.2;
+        const gy = -shH * 0.16 + Math.abs(i) * shH * 0.18;
+        ctx.beginPath();
+        ctx.moveTo(gx, gy - gemR);
+        ctx.lineTo(gx + gemR, gy);
+        ctx.lineTo(gx, gy + gemR);
+        ctx.lineTo(gx - gemR, gy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
     ctx.restore();
 
     // Head is drawn above the shield top so players can target it.
@@ -4124,6 +4391,16 @@ export class GameRenderer {
     const isSummoned = Boolean(minion.summoned);
     const isRider = Boolean(minion.rider);
     const riderSuperHorse = Boolean(minion.riderSuperHorse);
+    const riderGaitPhase = isRider && riderSuperHorse
+      ? (Number.isFinite(minion.riderGaitPhase)
+        ? minion.riderGaitPhase
+        : (Number(minion.x) || 0) * 0.085)
+      : 0;
+    const riderGaitCycle = Math.PI * 2;
+    const riderGaitWrapped = ((riderGaitPhase % riderGaitCycle) + riderGaitCycle) % riderGaitCycle;
+    const riderGaitBucket = isRider && riderSuperHorse
+      ? Math.max(0, Math.min(11, Math.round((riderGaitWrapped / riderGaitCycle) * 11)))
+      : 0;
     const t = Math.max(0, Math.min(3, minion.tier || 0));
     const stage = Math.max(0, Math.min(5, Math.floor((minion.level || 0) / 4)));
     const scale = (minion.super ? 2 : 1) * (isRider && riderSuperHorse ? 1.22 : 1);
@@ -4139,6 +4416,7 @@ export class GameRenderer {
         isSummoned ? 1 : 0,
         isRider ? 1 : 0,
         riderSuperHorse ? 1 : 0,
+        riderGaitBucket,
         minion.riderChargeReady ? 1 : 0,
       ].join(':');
       const widthBase = isRider ? 188 : 128;
@@ -4152,6 +4430,7 @@ export class GameRenderer {
           y: h / 2,
           tier: t,
           level: stage * 4,
+          riderGaitPhase: (riderGaitBucket / 11) * riderGaitCycle,
         };
         this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
       });
@@ -4193,6 +4472,7 @@ export class GameRenderer {
       const horseBody = bodyR * 1.28;
       const horseY = bodyR * 0.78;
       const chargeGlow = Boolean(minion.riderChargeReady);
+      const legSwing = riderSuperHorse ? Math.sin(riderGaitPhase) * (bodyR * 0.3) : 0;
       const neckX = dir * horseBody * 0.74;
       const neckY = horseY - bodyR * 0.32;
       const headX = dir * horseBody * 1.06;
@@ -4261,13 +4541,13 @@ export class GameRenderer {
       ctx.lineWidth = 1.7;
       ctx.beginPath();
       ctx.moveTo(-horseBody * 0.66, horseY + bodyR * 0.14);
-      ctx.lineTo(-horseBody * 0.7, horseY + bodyR * 1.03);
+      ctx.lineTo(-horseBody * 0.7 + legSwing * 0.46, horseY + bodyR * 1.03);
       ctx.moveTo(-horseBody * 0.2, horseY + bodyR * 0.17);
-      ctx.lineTo(-horseBody * 0.18, horseY + bodyR * 1.08);
+      ctx.lineTo(-horseBody * 0.18 - legSwing * 0.38, horseY + bodyR * 1.08);
       ctx.moveTo(horseBody * 0.25, horseY + bodyR * 0.13);
-      ctx.lineTo(horseBody * 0.28, horseY + bodyR * 1.02);
+      ctx.lineTo(horseBody * 0.28 - legSwing * 0.42, horseY + bodyR * 1.02);
       ctx.moveTo(horseBody * 0.68, horseY + bodyR * 0.08);
-      ctx.lineTo(horseBody * 0.72, horseY + bodyR * 0.92);
+      ctx.lineTo(horseBody * 0.72 + legSwing * 0.34, horseY + bodyR * 0.92);
       ctx.stroke();
       if (chargeGlow) {
         ctx.strokeStyle = '#ffd88d88';
@@ -4601,6 +4881,7 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const upgraded = Boolean(minion.dragonSuperBreathUpgraded);
     const palette = TEAM_COLORS[minion.side];
     const dir = sideName === 'left' ? 1 : -1;
     const x = minion.x;
@@ -4675,7 +4956,7 @@ export class GameRenderer {
       const phaseBuckets = 12;
       const phaseBucket = Math.max(0, Math.min(phaseBuckets - 1, Math.round((wrappedPhase / phaseCycle) * (phaseBuckets - 1))));
       const radiusBucket = Math.max(14, Math.min(36, Math.round(baseR)));
-      const cacheKey = `dragon:${sideName}:${minion.super ? 1 : 0}:${radiusBucket}:${phaseBucket}`;
+      const cacheKey = `dragon:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${radiusBucket}:${phaseBucket}`;
       const cacheWidth = Math.ceil(radiusBucket * 8 * scale + 96);
       const cacheHeight = Math.ceil(radiusBucket * 5.6 * scale + 110);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -4739,6 +5020,19 @@ export class GameRenderer {
     ctx.moveTo(-dir * (bodyW * 0.5), 2);
     ctx.lineTo(dir * (bodyW * 0.45), 2);
     ctx.stroke();
+    if (upgraded) {
+      ctx.fillStyle = '#9fd1ff';
+      for (let i = 0; i < 5; i += 1) {
+        const spikeX = -dir * (bodyW * (0.44 - i * 0.2));
+        const spikeH = bodyH * (0.34 + i * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(spikeX, -bodyH * 0.26);
+        ctx.lineTo(spikeX + dir * 4.2, -bodyH * 0.26 - spikeH);
+        ctx.lineTo(spikeX + dir * 8.2, -bodyH * 0.24);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
 
     const headX = dir * (bodyW * 0.82);
     const headY = -bodyH * 0.28;
@@ -4758,6 +5052,16 @@ export class GameRenderer {
     ctx.moveTo(headX - dir * 1, headY - bodyH * 0.88);
     ctx.lineTo(headX + dir * 2, headY - bodyH * 1.36);
     ctx.stroke();
+    if (upgraded) {
+      ctx.strokeStyle = '#dce9ff';
+      ctx.lineWidth = 2.1;
+      ctx.beginPath();
+      ctx.moveTo(headX + dir * 1, headY - bodyH * 0.72);
+      ctx.lineTo(headX + dir * 10.5, headY - bodyH * 1.72);
+      ctx.moveTo(headX - dir * 4, headY - bodyH * 0.58);
+      ctx.lineTo(headX + dir * 1.8, headY - bodyH * 1.46);
+      ctx.stroke();
+    }
 
     ctx.fillStyle = '#f8fbff';
     ctx.beginPath();
