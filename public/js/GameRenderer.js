@@ -2515,16 +2515,16 @@ export class GameRenderer {
     if (!groups.length) return;
 
     const { ctx } = this;
-    const dir = side === 'left' ? 1 : -1;
+    const badgeDir = side === 'left' ? -1 : 1;
     const cols = 2;
     const iconStepX = 21;
     const iconStepY = 20;
     const iconR = 8;
     const groupGap = 8;
-    const startX = x + dir * 30;
+    const startX = x + badgeDir * 30;
     let startY = y - 126;
-    const railLeft = Math.min(startX, startX + dir * iconStepX) - 10;
-    const railRight = Math.max(startX, startX + dir * iconStepX) + 10;
+    const railLeft = Math.min(startX, startX + badgeDir * iconStepX) - 10;
+    const railRight = Math.max(startX, startX + badgeDir * iconStepX) + 10;
 
     for (let g = 0; g < groups.length; g += 1) {
       const group = groups[g];
@@ -2534,7 +2534,7 @@ export class GameRenderer {
         const badge = group.items[i];
         const col = i % cols;
         const row = Math.floor(i / cols);
-        const bx = startX + dir * col * iconStepX;
+        const bx = startX + badgeDir * col * iconStepX;
         const by = startY + row * iconStepY;
 
         ctx.fillStyle = '#09101ddd';
@@ -2552,7 +2552,7 @@ export class GameRenderer {
         this.drawUpgradeGlyph(badge.type, bx, by, 6.2, '#1f2230');
 
         if (badge.count > 1) {
-          const tx = bx + dir * 9;
+          const tx = bx + badgeDir * 9;
           const ty = by - 8;
           ctx.fillStyle = '#18120cd8';
           ctx.beginPath();
