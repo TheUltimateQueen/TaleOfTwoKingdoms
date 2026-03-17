@@ -2682,13 +2682,67 @@ class GameRoom {
 
       // Expert necros are backline supports: hold a safe position to enable revives.
       if (m.necrominion && m.necroExpertUpgraded) {
-        // Mirror monk backline pathing, but keep necro about one unit farther back.
+        // Backline rule:
+        // 1) Lead necro stays behind the most front ally.
+        // 2) Additional necros choose (persistently) a 50/50 anchor:
+        //    - behind second-most-front ally
+        //    - behind the necro ahead of them.
         const homeX = m.side === 'left' ? TOWER_X_LEFT + 78 : TOWER_X_RIGHT - 78;
-        const allyFrontX = this.allyFrontX(m.side, m.id);
-        const frontRef = Number.isFinite(allyFrontX) ? allyFrontX : homeX + dir * 120;
+        const forwardSort = m.side === 'left'
+          ? ((a, b) => (Number(b?.x) || 0) - (Number(a?.x) || 0))
+          : ((a, b) => (Number(a?.x) || 0) - (Number(b?.x) || 0));
+        const frontlineAllies = [];
+        const expertNecros = [m];
+        for (const ally of this.minions) {
+          if (!ally || ally.side !== m.side || ally.id === m.id || ally.removed) continue;
+          if ((Number(ally.hp) || 0) <= 0) continue;
+          if (ally.necrominion && ally.necroExpertUpgraded) {
+            expertNecros.push(ally);
+            continue;
+          }
+          if (ally.monk || ally.president) continue;
+          frontlineAllies.push(ally);
+        }
+        frontlineAllies.sort(forwardSort);
+        expertNecros.sort(forwardSort);
+
+        const myNecroRank = expertNecros.findIndex((ally) => ally.id === m.id);
+        const leadFront = frontlineAllies[0] || null;
+        const rankFront = (myNecroRank > 0 && frontlineAllies.length > 0)
+          ? (frontlineAllies[Math.min(frontlineAllies.length - 1, myNecroRank)] || leadFront)
+          : leadFront;
+        let anchor = leadFront;
+
+        if (expertNecros.length > 1 && myNecroRank > 0) {
+          if (m.necroBacklineMode !== 'second' && m.necroBacklineMode !== 'necro') {
+            m.necroBacklineMode = Math.random() < 0.5 ? 'second' : 'necro';
+          }
+          if (m.necroBacklineMode === 'necro') {
+            anchor = expertNecros[myNecroRank - 1] || rankFront || leadFront;
+          } else {
+            anchor = rankFront || leadFront || expertNecros[myNecroRank - 1] || null;
+          }
+        }
+
+        const anchorX = Number(anchor?.x);
+        const anchorY = Number(anchor?.y);
+        const fallbackFrontX = this.allyFrontX(m.side, m.id);
+        const frontRef = Number.isFinite(anchorX)
+          ? anchorX
+          : (Number.isFinite(fallbackFrontX) ? fallbackFrontX : homeX + dir * 120);
         const monkKeepBehind = Math.max(90, 138 + (Math.max(1, Number(mySideState?.spawnLevel) || 1) * 3));
         const extraBack = Math.max(18, Number(m.r) || 14);
-        const keepBehind = monkKeepBehind + extraBack;
+        let keepBehind = monkKeepBehind + extraBack;
+        if (anchor) {
+          const maxBackGap = Math.max(
+            40,
+            NECRO_EXPERT_REVIVE_RADIUS
+              - Math.max(0, Number(m.r) || 14)
+              - Math.max(0, Number(anchor.r) || 14)
+              - 8
+          );
+          keepBehind = Math.min(keepBehind, maxBackGap);
+        }
 
         let desiredX = frontRef - dir * keepBehind;
         desiredX = clamp(desiredX, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
@@ -2698,48 +2752,7 @@ class GameRoom {
         if (m.side === 'left') desiredX = Math.max(desiredX, homeX);
         else desiredX = Math.min(desiredX, homeX);
 
-        // Light lane-following like monk so necro doesn't freeze on a single Y.
-        const followRange = Math.max(110, Number(m.necroReviveRadius) || NECRO_EXPERT_REVIVE_RADIUS * 1.2);
-        const followR2 = followRange * followRange;
-        let desiredY = m.y;
-        let bestScore = -Infinity;
-        let followAlly = null;
-        for (const ally of this.minions) {
-          if (!ally || ally.side !== m.side || ally.id === m.id) continue;
-          if ((Number(ally.hp) || 0) <= 0) continue;
-          const missing = Math.max(0, (Number(ally.maxHp) || 0) - (Number(ally.hp) || 0));
-          if (missing <= 0.5) continue;
-          const dx = ally.x - m.x;
-          const dy = ally.y - m.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 > followR2) continue;
-          const dist = Math.sqrt(d2);
-          const missingPct = missing / Math.max(1, ally.maxHp || 1);
-          const frontBias = ally.side === 'left' ? (ally.x / WORLD_W) : ((WORLD_W - ally.x) / WORLD_W);
-          const score = missingPct * 1.5 + (1 - dist / followRange) * 0.7 + frontBias * 0.24;
-          if (score > bestScore) {
-            bestScore = score;
-            followAlly = ally;
-            desiredY = ally.y;
-          }
-        }
-
-        if (followAlly) {
-          const maxBackGap = Math.max(
-            40,
-            NECRO_EXPERT_REVIVE_RADIUS
-              - Math.max(0, Number(m.r) || 14)
-              - Math.max(0, Number(followAlly.r) || 14)
-              - 8
-          );
-          const followGap = Math.min(keepBehind, maxBackGap);
-          desiredX = (Number(followAlly.x) || desiredX) - dir * followGap;
-          desiredX = clamp(desiredX, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
-          if (m.side === 'left') desiredX = Math.min(desiredX, advanceLimit);
-          else desiredX = Math.max(desiredX, advanceLimit);
-          if (m.side === 'left') desiredX = Math.max(desiredX, homeX);
-          else desiredX = Math.min(desiredX, homeX);
-        }
+        let desiredY = Number.isFinite(anchorY) ? anchorY : m.y;
 
         const xDelta = desiredX - m.x;
         const moveStep = Math.max(26, m.speed * 0.9) * dt;
