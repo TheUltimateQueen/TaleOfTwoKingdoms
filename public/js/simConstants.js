@@ -25,6 +25,7 @@ export const UPGRADE_TYPES = [
   'riderSuperHorseLevel',
   'diggerGoldFinderLevel',
   'gunnerSkyCannonLevel',
+  'presidentExecutiveOrderLevel',
   'superMinionLevel',
 ];
 export const SHOT_POWER_TYPES = ['multiShot', 'ultraShot', 'pierceShot', 'flameShot'];

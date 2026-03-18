@@ -33,6 +33,47 @@ const LOCAL_KEYBOARD_CODES = new Set([
   'ArrowLeft',
   'ArrowRight',
 ]);
+const TEST_SETTINGS_STORAGE_KEY = 'totk_test_settings_v4';
+const TEST_SPECIAL_UPGRADE_KEYS = [
+  'dragonSuperBreathLevel',
+  'shieldDarkMetalLevel',
+  'monkHealCircleLevel',
+  'necroExpertSummonerLevel',
+  'riderSuperHorseLevel',
+  'diggerGoldFinderLevel',
+  'gunnerSkyCannonLevel',
+  'presidentExecutiveOrderLevel',
+];
+const TEST_UPGRADE_MAX = {
+  volleyLevel: 4,
+  dragonSuperBreathLevel: 1,
+  shieldDarkMetalLevel: 1,
+  monkHealCircleLevel: 1,
+  necroExpertSummonerLevel: 1,
+  riderSuperHorseLevel: 1,
+  diggerGoldFinderLevel: 1,
+  gunnerSkyCannonLevel: 1,
+  presidentExecutiveOrderLevel: 1,
+};
+const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'hero', 'president', 'super']);
+const TEST_SPECIAL_LABELS = {
+  dragon: 'Dragon',
+  shield: 'Shield',
+  digger: 'Digger',
+  necrominion: 'Necro',
+  gunner: 'Gunner',
+  rider: 'Rider',
+  monk: 'Monk',
+  hero: 'Hero',
+  president: 'President',
+  super: 'Super',
+};
+
+function clampNumber(value, min, max, fallback = min) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
 
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
@@ -119,6 +160,7 @@ export class GameClient {
     this.displayMode = 'menu';
     this.cursorHiddenForIdle = false;
     this.cursorLastActivityAt = performance.now();
+    this.testSettings = this.defaultTestSettings();
 
     this.bindDom();
     this.bindEvents();
@@ -154,6 +196,17 @@ export class GameClient {
     this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
+    this.testSettingsPanel = document.getElementById('testSettingsPanel');
+    this.testSettingsSummary = document.getElementById('testSettingsSummary');
+    this.testApplyToInput = document.getElementById('testApplyToInput');
+    this.testForceSpecialTypeInput = document.getElementById('testForceSpecialTypeInput');
+    this.testForceSpecialMinAliveInput = document.getElementById('testForceSpecialMinAliveInput');
+    this.testOffBtn = document.getElementById('testOffBtn');
+    this.testSpecialsBtn = document.getElementById('testSpecialsBtn');
+    this.testResetBtn = document.getElementById('testResetBtn');
+    this.testSettingsMsg = document.getElementById('testSettingsMsg');
+    this.testQuickSummary = document.getElementById('testQuickSummary');
+    this.testSpecialUpgradeInputs = Array.from(document.querySelectorAll('[data-test-special-upgrade]'));
 
     this.leftHud = document.getElementById('leftHud');
     this.rightHud = document.getElementById('rightHud');
@@ -187,6 +240,7 @@ export class GameClient {
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
       this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest());
+      this.initTestSettingsUi();
       this.setCreateMode(this.state.createMode);
       window.addEventListener('keydown', (event) => this.handleLocalKeyboardKey(event, true));
       window.addEventListener('keyup', (event) => this.handleLocalKeyboardKey(event, false));
@@ -255,6 +309,9 @@ export class GameClient {
       if (this.isController) return;
       if (this.hostAuthoritative && this.localRoom) {
         this.localRoom.restartMatch();
+        if (typeof this.localRoom.setDebugConfig === 'function') {
+          this.localRoom.setDebugConfig(this.readSettingsFromTestDom());
+        }
         this.pushHostState(true);
       }
       if (this.restartMsg) this.restartMsg.textContent = '';
@@ -347,10 +404,14 @@ export class GameClient {
 
   initLocalHostRoom() {
     if (this.isController || !this.state.roomId) return;
-    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, { mode: this.state.mode });
+    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, {
+      mode: this.state.mode,
+      debugConfig: this.readSettingsFromTestDom(),
+    });
     this.nextHostStateEmitAt = 0;
     this.startHostAuthorityLoop();
     this.pushHostState(true);
+    this.updateTestQuickSummary();
   }
 
   applyHostRoster(payload = {}) {
@@ -404,7 +465,10 @@ export class GameClient {
     this.setCreateMode('1v1');
     this.requestRoomModeChange('1v1');
 
-    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, { mode: '1v1' });
+    this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, {
+      mode: '1v1',
+      debugConfig: this.readSettingsFromTestDom(),
+    });
     this.localRoom.players = {
       left: [{ id: '__LOCAL_WEST__', name: 'West Keyboard', slot: 0 }],
       right: [{ id: '__LOCAL_EAST__', name: 'East Keyboard', slot: 0 }],
@@ -439,6 +503,7 @@ export class GameClient {
     this.setDisplayMode('game');
     this.startHostAuthorityLoop();
     this.pushHostState(true);
+    this.updateTestQuickSummary();
   }
 
   handleLocalKeyboardKey(event, pressed) {
@@ -583,6 +648,209 @@ export class GameClient {
     this.state.createMode = normalized;
     this.syncModeToggleButtons(this.mode2PlayersBtn, this.mode4PlayersBtn, normalized);
     this.syncModeToggleButtons(this.lobbyMode2PlayersBtn, this.lobbyMode4PlayersBtn, normalized);
+  }
+
+  defaultTestSettings() {
+    const upgrades = {
+      arrowLevel: 1,
+      unitLevel: 1,
+      volleyLevel: 0,
+      spawnLevel: 1,
+      unitHpLevel: 1,
+      resourceLevel: 1,
+      bountyLevel: 1,
+      powerLevel: 1,
+      specialRateLevel: 1,
+      dragonLevel: 0,
+      superMinionLevel: 0,
+      dragonSuperBreathLevel: 0,
+      shieldDarkMetalLevel: 0,
+      monkHealCircleLevel: 0,
+      necroExpertSummonerLevel: 0,
+      riderSuperHorseLevel: 0,
+      diggerGoldFinderLevel: 0,
+      gunnerSkyCannonLevel: 0,
+      presidentExecutiveOrderLevel: 0,
+    };
+    return {
+      enabled: false,
+      applyTo: 'both',
+      forceSpecialType: null,
+      forceSpecialMinAlive: 1,
+      upgrades,
+    };
+  }
+
+  normalizeTestSettings(raw = null) {
+    const base = this.defaultTestSettings();
+    const cfg = (raw && typeof raw === 'object') ? raw : {};
+    const normalized = {
+      enabled: Boolean(cfg.enabled),
+      applyTo: (cfg.applyTo === 'left' || cfg.applyTo === 'right') ? cfg.applyTo : 'both',
+      forceSpecialType: (typeof cfg.forceSpecialType === 'string' && TEST_FORCED_SPECIAL_TYPES.has(cfg.forceSpecialType))
+        ? cfg.forceSpecialType
+        : null,
+      forceSpecialMinAlive: Math.max(1, Math.floor(clampNumber(cfg.forceSpecialMinAlive, 1, 12, 1))),
+      upgrades: {},
+    };
+    const sourceUpgrades = (cfg.upgrades && typeof cfg.upgrades === 'object') ? cfg.upgrades : {};
+    for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
+      const max = Number.isFinite(TEST_UPGRADE_MAX[key]) ? TEST_UPGRADE_MAX[key] : 30;
+      const fallback = base.upgrades[key] || 0;
+      normalized.upgrades[key] = Math.max(0, Math.floor(clampNumber(sourceUpgrades[key], 0, max, fallback)));
+    }
+    if (normalized.upgrades.dragonSuperBreathLevel > 0 && normalized.upgrades.dragonLevel <= 0) {
+      normalized.upgrades.dragonLevel = 1;
+    }
+    return normalized;
+  }
+
+  loadTestSettingsFromStorage() {
+    try {
+      const raw = window.localStorage.getItem(TEST_SETTINGS_STORAGE_KEY);
+      if (!raw) return this.defaultTestSettings();
+      return this.normalizeTestSettings(JSON.parse(raw));
+    } catch {
+      return this.defaultTestSettings();
+    }
+  }
+
+  saveTestSettingsToStorage(settings = null) {
+    const normalized = this.normalizeTestSettings(settings || this.testSettings || this.defaultTestSettings());
+    this.testSettings = normalized;
+    try {
+      window.localStorage.setItem(TEST_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  applySettingsToTestDom(settings = null) {
+    const cfg = this.normalizeTestSettings(settings || this.testSettings || this.defaultTestSettings());
+    if (this.testApplyToInput) this.testApplyToInput.value = cfg.applyTo;
+    if (this.testForceSpecialTypeInput) this.testForceSpecialTypeInput.value = cfg.forceSpecialType || '';
+    if (this.testForceSpecialMinAliveInput) this.testForceSpecialMinAliveInput.value = String(cfg.forceSpecialMinAlive || 1);
+    const specialByKey = new Map(this.testSpecialUpgradeInputs.map((el) => [el?.dataset?.testSpecialUpgrade, el]));
+    for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
+      const input = specialByKey.get(key);
+      if (!input) continue;
+      input.checked = (cfg.upgrades?.[key] || 0) > 0;
+    }
+    this.updateTestQuickSummary(cfg);
+  }
+
+  readSettingsFromTestDom() {
+    const base = this.defaultTestSettings();
+    const settings = {
+      enabled: Boolean(this.testSettingsPanel?.open),
+      applyTo: this.testApplyToInput?.value || 'both',
+      forceSpecialType: this.testForceSpecialTypeInput?.value || null,
+      forceSpecialMinAlive: this.testForceSpecialMinAliveInput?.value,
+      upgrades: { ...base.upgrades },
+    };
+    for (const input of this.testSpecialUpgradeInputs) {
+      const key = input?.dataset?.testSpecialUpgrade;
+      if (!key) continue;
+      settings.upgrades[key] = input.checked ? 1 : 0;
+    }
+    return this.normalizeTestSettings(settings);
+  }
+
+  updateTestQuickSummary(settings = null) {
+    if (!this.testQuickSummary) return;
+    const cfg = this.normalizeTestSettings(settings || this.readSettingsFromTestDom());
+    const forceLabel = cfg.forceSpecialType
+      ? `Focus ${TEST_SPECIAL_LABELS[cfg.forceSpecialType] || cfg.forceSpecialType} >= ${cfg.forceSpecialMinAlive}`
+      : 'Normal random specials';
+    let enabledCount = 0;
+    for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
+      if ((cfg.upgrades?.[key] || 0) > 0) enabledCount += 1;
+    }
+    const testState = cfg.enabled ? 'TEST ON' : 'TEST OFF';
+    const liveState = (this.hostAuthoritative && this.localRoom) ? 'LIVE' : 'SAVED';
+    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
+    if (this.testSettingsSummary) {
+      this.testSettingsSummary.textContent = cfg.enabled
+        ? 'Secret Test Settings - Testing ON'
+        : 'Secret Test Settings - Testing OFF';
+    }
+  }
+
+  setTestSettingsMessage(message, isError = false) {
+    if (!this.testSettingsMsg) return;
+    this.testSettingsMsg.textContent = message || '';
+    this.testSettingsMsg.style.color = isError ? '#ffb0a6' : '';
+  }
+
+  applyTestSettingsNow(options = {}) {
+    const silent = Boolean(options?.silent);
+    const cfg = this.readSettingsFromTestDom();
+    this.saveTestSettingsToStorage(cfg);
+    this.applySettingsToTestDom(cfg);
+    this.updateTestQuickSummary(cfg);
+    if (!this.hostAuthoritative || this.isController) {
+      if (!silent) this.setTestSettingsMessage('Saved test config. It applies on the host display.');
+      return cfg;
+    }
+    if (!this.localRoom || typeof this.localRoom.setDebugConfig !== 'function') {
+      if (!silent) this.setTestSettingsMessage('Saved test config. It will apply when the host room starts.');
+      return cfg;
+    }
+    this.localRoom.setDebugConfig(cfg);
+    this.pushHostState(true);
+    if (!silent) this.setTestSettingsMessage(cfg.enabled ? 'Applied test settings to the active room.' : 'Testing paused.');
+    return cfg;
+  }
+
+  initTestSettingsUi() {
+    if (this.isController) return;
+    this.testSettings = this.loadTestSettingsFromStorage();
+    this.applySettingsToTestDom(this.testSettings);
+    this.updateTestQuickSummary(this.testSettings);
+
+    const persistOnly = () => {
+      const cfg = this.readSettingsFromTestDom();
+      this.saveTestSettingsToStorage(cfg);
+      this.updateTestQuickSummary(cfg);
+      this.setTestSettingsMessage('');
+      this.applyTestSettingsNow({ silent: true });
+    };
+    const allInputs = [
+      this.testApplyToInput,
+      this.testForceSpecialTypeInput,
+      this.testForceSpecialMinAliveInput,
+      ...this.testSpecialUpgradeInputs,
+    ];
+    for (const input of allInputs) {
+      input?.addEventListener('change', persistOnly);
+      input?.addEventListener('input', persistOnly);
+    }
+    this.testSettingsPanel?.addEventListener('toggle', persistOnly);
+
+    this.testOffBtn?.addEventListener('click', () => {
+      if (this.testSettingsPanel) this.testSettingsPanel.open = false;
+      this.applyTestSettingsNow();
+    });
+    this.testResetBtn?.addEventListener('click', () => {
+      this.testSettings = this.defaultTestSettings();
+      this.saveTestSettingsToStorage(this.testSettings);
+      this.applySettingsToTestDom(this.testSettings);
+      this.updateTestQuickSummary(this.testSettings);
+      this.applyTestSettingsNow();
+    });
+    this.testSpecialsBtn?.addEventListener('click', () => {
+      const next = this.readSettingsFromTestDom();
+      next.enabled = true;
+      for (const key of TEST_SPECIAL_UPGRADE_KEYS) next.upgrades[key] = 1;
+      if (next.upgrades.dragonLevel <= 0) next.upgrades.dragonLevel = 1;
+      this.saveTestSettingsToStorage(next);
+      this.applySettingsToTestDom(next);
+      this.updateTestQuickSummary(next);
+      this.applyTestSettingsNow({ silent: true });
+      this.setTestSettingsMessage('Special upgrades enabled.');
+    });
+
+    this.applyTestSettingsNow({ silent: true });
   }
 
   setupAudio() {

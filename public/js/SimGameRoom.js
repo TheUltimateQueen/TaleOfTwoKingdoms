@@ -33,6 +33,7 @@ const UPGRADE_COST_RULES = {
   riderSuperHorseLevel: { base: 298, growth: 0, start: 0 },
   diggerGoldFinderLevel: { base: 282, growth: 0, start: 0 },
   gunnerSkyCannonLevel: { base: 294, growth: 0, start: 0 },
+  presidentExecutiveOrderLevel: { base: 306, growth: 0, start: 0 },
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
 const UPGRADE_PATH_BY_TYPE = {
@@ -53,6 +54,7 @@ const UPGRADE_PATH_BY_TYPE = {
   riderSuperHorseLevel: 'special',
   diggerGoldFinderLevel: 'special',
   gunnerSkyCannonLevel: 'special',
+  presidentExecutiveOrderLevel: 'special',
   superMinionLevel: 'special',
 };
 const UPGRADE_LEVEL_CAPS = {
@@ -64,6 +66,7 @@ const UPGRADE_LEVEL_CAPS = {
   riderSuperHorseLevel: 1,
   diggerGoldFinderLevel: 1,
   gunnerSkyCannonLevel: 1,
+  presidentExecutiveOrderLevel: 1,
 };
 const DRAGON_SUPER_BREATH_INTERVAL = 5;
 const DRAGON_SUPER_BREATH_COOLDOWN_JITTER = 1.25;
@@ -89,6 +92,12 @@ const SHIELD_DARK_METAL_INTERVAL = 10;
 const SHIELD_DARK_METAL_DURATION = 5;
 const SHIELD_DARK_METAL_DAMAGE_TAKEN_MULT = 0.05;
 const SHIELD_DARK_METAL_COOLDOWN_JITTER = 1.35;
+const PRESIDENT_EXECUTIVE_ORDER_MIN_INTERVAL = 1;
+const PRESIDENT_EXECUTIVE_ORDER_MAX_INTERVAL = 6;
+const PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL = 0.9;
+const PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL = 0.55;
+const PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT = 0.5;
+const PRESIDENT_EXECUTIVE_ORDER_HITS = 4;
 const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
 const DIGGER_GOLD_FINDER_MINE_TIME = 1;
 const NECRO_SELF_SHIELD_FADE_SECONDS = 20;
@@ -203,7 +212,7 @@ const CANDLE_CART_HALF_W = 34;
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
-const CANDLE_FIRE_INTERVAL = 1.22;
+const CANDLE_FIRE_INTERVAL = 1.22 / 3;
 const CANDLE_FIRE_SPLASH_R = 64;
 const CANDLE_SCORCH_DPS_ALLY = 0;
 const CANDLE_SCORCH_DPS_ENEMY = 0.25;
@@ -231,6 +240,24 @@ const MINION_TARGET_RADIUS_PAD = 84;
 const MAX_DAMAGE_EVENTS_PER_TICK = 240;
 const MAX_BUCKET_CELL_POOL = 2200;
 const ROOM_SIDES = ['left', 'right'];
+const DEBUG_RATE_MIN = 0.25;
+const DEBUG_RATE_MAX = 6;
+const DEBUG_CANDLE_BONUS_MIN = -0.5;
+const DEBUG_CANDLE_BONUS_MAX = 0.8;
+const DEBUG_SPECIAL_OVERRIDE_MIN = 0;
+const DEBUG_SPECIAL_OVERRIDE_MAX = 0.99;
+const DEBUG_FORCE_SPECIAL_TYPES = new Set([
+  'dragon',
+  'shield',
+  'digger',
+  'necrominion',
+  'gunner',
+  'rider',
+  'monk',
+  'hero',
+  'president',
+  'super',
+]);
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -246,8 +273,22 @@ function mirroredX(x) {
   return WORLD_W - x;
 }
 
+function presidentPodiumTargetX(sideName = 'left') {
+  const centerX = WORLD_W * 0.5;
+  const towerX = sideName === 'right' ? TOWER_X_RIGHT : TOWER_X_LEFT;
+  const base = (towerX + centerX) * 0.5;
+  const jitter = Math.random() * 26 - 13;
+  return clamp(base + jitter, TOWER_X_LEFT + 80, TOWER_X_RIGHT - 80);
+}
+
 function randomFrom(list) {
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function presidentExecutiveOrderCooldown() {
+  const min = PRESIDENT_EXECUTIVE_ORDER_MIN_INTERVAL;
+  const max = PRESIDENT_EXECUTIVE_ORDER_MAX_INTERVAL;
+  return min + Math.random() * Math.max(0, max - min);
 }
 
 function roundTo(value, places = 1) {
@@ -262,6 +303,60 @@ function finiteOrNull(value, places = 1) {
   if (!Number.isFinite(n)) return null;
   const f = 10 ** places;
   return Math.round(n * f) / f;
+}
+
+function normalizeDebugConfig(raw = null) {
+  const cfg = (raw && typeof raw === 'object') ? raw : {};
+  const enabled = Boolean(cfg.enabled);
+  const applyTo = (cfg.applyTo === 'left' || cfg.applyTo === 'right') ? cfg.applyTo : 'both';
+  const spawnRateMultiplier = clamp(Number(cfg.spawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+  const specialSpawnRateMultiplier = clamp(Number(cfg.specialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+  const resourceRateMultiplier = clamp(Number(cfg.resourceRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+  const powerDropRateMultiplier = clamp(Number(cfg.powerDropRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+  const startingGoldRaw = Number(cfg.startingGold);
+  const startingGold = Number.isFinite(startingGoldRaw)
+    ? clamp(Math.floor(startingGoldRaw), 0, 999999)
+    : null;
+  const candleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
+  const forcedSpecialType = (typeof cfg.forceSpecialType === 'string' && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType))
+    ? cfg.forceSpecialType
+    : null;
+  const forceSpecialMinAlive = Math.max(1, Math.min(12, Math.floor(Number(cfg.forceSpecialMinAlive) || 1)));
+  const specialChanceOverridesSource = (cfg.specialChanceOverrides && typeof cfg.specialChanceOverrides === 'object')
+    ? cfg.specialChanceOverrides
+    : {};
+  const specialChanceOverrides = {};
+  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+    const fallback = clamp(Number(SPECIAL_SPAWN_BASE_CHANCE[type]) || 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
+    const raw = Number(specialChanceOverridesSource[type]);
+    specialChanceOverrides[type] = Number.isFinite(raw)
+      ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
+      : fallback;
+  }
+
+  const upgrades = {};
+  const source = (cfg.upgrades && typeof cfg.upgrades === 'object') ? cfg.upgrades : {};
+  for (const type of UPGRADE_TYPES) {
+    const cap = UPGRADE_LEVEL_CAPS[type];
+    const value = Math.max(0, Math.floor(Number(source[type]) || 0));
+    upgrades[type] = Number.isFinite(cap) ? Math.min(cap, value) : value;
+  }
+  if (upgrades.dragonSuperBreathLevel > 0 && upgrades.dragonLevel <= 0) upgrades.dragonLevel = 1;
+
+  return {
+    enabled,
+    applyTo,
+    spawnRateMultiplier,
+    specialSpawnRateMultiplier,
+    resourceRateMultiplier,
+    powerDropRateMultiplier,
+    candleChanceBonus,
+    forceSpecialType: forcedSpecialType,
+    forceSpecialMinAlive,
+    startingGold,
+    specialChanceOverrides,
+    upgrades,
+  };
 }
 
 function serializeSideState(side) {
@@ -301,6 +396,7 @@ function serializeSideState(side) {
     riderSuperHorseLevel: Math.max(0, Math.round(Number(state.riderSuperHorseLevel) || 0)),
     diggerGoldFinderLevel: Math.max(0, Math.round(Number(state.diggerGoldFinderLevel) || 0)),
     gunnerSkyCannonLevel: Math.max(0, Math.round(Number(state.gunnerSkyCannonLevel) || 0)),
+    presidentExecutiveOrderLevel: Math.max(0, Math.round(Number(state.presidentExecutiveOrderLevel) || 0)),
     superMinionLevel: Math.max(0, Math.round(Number(state.superMinionLevel) || 0)),
     upgradeCharge: roundTo(state.upgradeCharge, 1),
     upgradeChargeMax: roundTo(state.upgradeChargeMax, 1),
@@ -339,6 +435,14 @@ function serializeSideState(side) {
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
     towerGolemRescueUsed: Boolean(state.towerGolemRescueUsed),
+    debugSpawnRateMultiplier: roundTo(state.debugSpawnRateMultiplier, 2),
+    debugSpecialSpawnRateMultiplier: roundTo(state.debugSpecialSpawnRateMultiplier, 2),
+    debugSpecialChanceOverrides: Object.fromEntries(
+      SPECIAL_SPAWN_QUEUE_ORDER.map((type) => [type, finiteOrNull(state?.debugSpecialChanceOverrides?.[type], 3)])
+    ),
+    debugCandleChanceBonus: roundTo(state.debugCandleChanceBonus, 2),
+    debugForceSpecialType: typeof state.debugForceSpecialType === 'string' ? state.debugForceSpecialType : null,
+    debugForceSpecialMinAlive: Math.max(0, Math.round(Number(state.debugForceSpecialMinAlive) || 0)),
   };
 }
 
@@ -381,6 +485,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     riderSuperHorseLevel: 0,
     diggerGoldFinderLevel: 0,
     gunnerSkyCannonLevel: 0,
+    presidentExecutiveOrderLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: 140,
@@ -417,6 +522,12 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     towerHeroRescueUsed: false,
     towerGolemRescueUsed: false,
     heroLineCd: 0,
+    debugSpawnRateMultiplier: 1,
+    debugSpecialSpawnRateMultiplier: 1,
+    debugSpecialChanceOverrides: {},
+    debugCandleChanceBonus: 0,
+    debugForceSpecialType: null,
+    debugForceSpecialMinAlive: 0,
   };
 }
 
@@ -424,6 +535,7 @@ class GameRoom {
   constructor(id, baseUrl, options = {}) {
     this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
+    this.debugConfig = normalizeDebugConfig(options?.debugConfig || null);
     const left = makeSideState('left', this.archersPerSide);
     const right = makeSideState('right', this.archersPerSide);
 
@@ -451,6 +563,8 @@ class GameRoom {
     this.sharedShotCd = SHOT_INTERVAL;
     this.activePresidents = { left: [], right: [] };
     this.candleCarrierCounts = { left: 0, right: 0 };
+    this.debugResourceRateMultiplier = 1;
+    this.debugPowerDropRateMultiplier = 1;
 
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
@@ -475,8 +589,120 @@ class GameRoom {
     this.right.candleCd = this.candleSpawnEtaSeconds('right');
     this.left.candleActive = false;
     this.right.candleActive = false;
+    this.applyDebugConfigToRoom(false);
+    this.nextResourceAt = this.t + 5 / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
 
     this.seedUpgradeCards();
+  }
+
+  setDebugConfig(rawConfig = null) {
+    this.debugConfig = normalizeDebugConfig(rawConfig || null);
+    this.applyDebugConfigToRoom(true);
+    return this.debugConfig;
+  }
+
+  debugTargetSides() {
+    const applyTo = this.debugConfig?.applyTo;
+    if (applyTo === 'left' || applyTo === 'right') return [applyTo];
+    return ['left', 'right'];
+  }
+
+  applyDebugConfigToRoom(refreshExisting = true) {
+    const cfg = this.debugConfig || normalizeDebugConfig(null);
+    const targets = new Set(cfg.enabled ? this.debugTargetSides() : []);
+    const allSides = ['left', 'right'];
+
+    this.debugResourceRateMultiplier = cfg.enabled
+      ? clamp(Number(cfg.resourceRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX)
+      : 1;
+    this.debugPowerDropRateMultiplier = cfg.enabled
+      ? clamp(Number(cfg.powerDropRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX)
+      : 1;
+
+    for (const sideName of allSides) {
+      const side = this[sideName];
+      if (!side) continue;
+      if (!targets.has(sideName)) {
+        side.debugSpawnRateMultiplier = 1;
+        side.debugSpecialSpawnRateMultiplier = 1;
+        side.debugSpecialChanceOverrides = {};
+        side.debugCandleChanceBonus = 0;
+        side.debugForceSpecialType = null;
+        side.debugForceSpecialMinAlive = 0;
+        continue;
+      }
+      side.debugSpawnRateMultiplier = clamp(Number(cfg.spawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+      side.debugSpecialSpawnRateMultiplier = clamp(Number(cfg.specialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+      side.debugSpecialChanceOverrides = {};
+      for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+        const fallback = clamp(Number(SPECIAL_SPAWN_BASE_CHANCE[type]) || 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
+        const raw = Number(cfg?.specialChanceOverrides?.[type]);
+        side.debugSpecialChanceOverrides[type] = Number.isFinite(raw)
+          ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
+          : fallback;
+      }
+      side.debugCandleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
+      side.debugForceSpecialType = cfg.forceSpecialType && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType)
+        ? cfg.forceSpecialType
+        : null;
+      side.debugForceSpecialMinAlive = side.debugForceSpecialType
+        ? Math.max(1, Math.min(12, Math.floor(Number(cfg.forceSpecialMinAlive) || 1)))
+        : 0;
+      if (Number.isFinite(cfg.startingGold)) {
+        side.gold = Math.max(0, Math.floor(Number(cfg.startingGold) || 0));
+      }
+      const up = cfg.upgrades || {};
+      for (const type of UPGRADE_TYPES) {
+        const cap = this.upgradeLevelCap(type);
+        const raw = Math.max(0, Math.floor(Number(up[type]) || 0));
+        side[type] = Number.isFinite(cap) ? Math.min(cap, raw) : raw;
+      }
+      if ((Number(side.dragonSuperBreathLevel) || 0) > 0 && (Number(side.dragonLevel) || 0) <= 0) {
+        side.dragonLevel = 1;
+      }
+      side.candleSpawnInSpawns = this.statCandleEvery(side);
+      side.candleCd = this.candleSpawnEtaSeconds(sideName);
+      side.minionCd = Math.min(Number(side.minionCd) || 0, 0.16);
+      side.specialFailType = null;
+      side.specialFailTtl = 0;
+      side.specialRollType = null;
+      side.specialRollTtl = 0;
+      side.pendingSpecialSpawns = [];
+    }
+
+    if (refreshExisting) {
+      for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
+      this.nextResourceAt = Math.min(Number(this.nextResourceAt) || this.t + 5, this.t + 0.4);
+      this.nextShotPowerAt = Math.min(Number(this.nextShotPowerAt) || this.t + 7, this.t + 0.6);
+    }
+  }
+
+  refreshDebugMinionFlags(sideName) {
+    const side = this[sideName];
+    if (!side) return;
+    for (const m of this.minions) {
+      if (!m || m.removed || m.side !== sideName) continue;
+      if (m.dragon) {
+        m.dragonSuperBreathUpgraded = (Number(side.dragonSuperBreathLevel) || 0) > 0;
+        if (!m.dragonSuperBreathUpgraded) m.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER;
+      }
+      if (m.shieldBearer) m.shieldDarkMetalUpgraded = (Number(side.shieldDarkMetalLevel) || 0) > 0;
+      if (m.monk) m.monkHealCircleUpgraded = (Number(side.monkHealCircleLevel) || 0) > 0;
+      if (m.necrominion) m.necroExpertUpgraded = (Number(side.necroExpertSummonerLevel) || 0) > 0;
+      if (m.gunner) {
+        m.gunnerSkyCannonUpgraded = (Number(side.gunnerSkyCannonLevel) || 0) > 0;
+        if (!m.gunnerSkyCannonUpgraded) m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
+      }
+      if (m.digger) m.diggerGoldFinder = (Number(side.diggerGoldFinderLevel) || 0) > 0;
+      if (m.rider) m.riderSuperHorse = (Number(side.riderSuperHorseLevel) || 0) > 0;
+      if (m.president) {
+        m.presidentExecutiveOrderUpgraded = (Number(side.presidentExecutiveOrderLevel) || 0) > 0;
+        m.presidentExecutiveOrderCd = m.presidentExecutiveOrderUpgraded
+          ? presidentExecutiveOrderCooldown()
+          : 0;
+      }
+    }
   }
 
   createBucketSet() {
@@ -589,6 +815,16 @@ class GameRoom {
       president: Boolean(m.president),
       presidentSetup: Boolean(m.presidentSetup),
       presidentAuraRadius: roundTo(m.presidentAuraRadius, 1),
+      presidentExecutiveOrderUpgraded: Boolean(m.presidentExecutiveOrderUpgraded),
+      presidentExecutiveOrderSignTtl: roundTo(m.presidentExecutiveOrderSignTtl, 2),
+      presidentExecutiveOrderSignMaxTtl: roundTo(m.presidentExecutiveOrderSignMaxTtl, 2),
+      presidentExecutiveOrderBeamTtl: roundTo(m.presidentExecutiveOrderBeamTtl, 2),
+      presidentExecutiveOrderBeamMaxTtl: roundTo(m.presidentExecutiveOrderBeamMaxTtl, 2),
+      presidentExecutiveOrderBeamToX: finiteOrNull(m.presidentExecutiveOrderBeamToX, 1),
+      presidentExecutiveOrderBeamToY: finiteOrNull(m.presidentExecutiveOrderBeamToY, 1),
+      executiveOrderHitsLeft: Math.max(0, Math.round(Number(m.executiveOrderHitsLeft) || 0)),
+      executiveOrderHitsMax: Math.max(0, Math.round(Number(m.executiveOrderHitsMax) || 0)),
+      executiveOrderBreakTtl: roundTo(m.executiveOrderBreakTtl, 2),
       failedSpecialType: typeof m.failedSpecialType === 'string' ? m.failedSpecialType : null,
       level: Math.max(0, Math.round(Number(m.level) || 0)),
       tier: Math.max(0, Math.round(Number(m.tier) || 0)),
@@ -853,6 +1089,11 @@ class GameRoom {
     this.right.candleCd = this.candleSpawnEtaSeconds('right');
     this.left.candleActive = false;
     this.right.candleActive = false;
+    this.applyDebugConfigToRoom(false);
+    const resourceMul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    const powerMul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
+    this.nextResourceAt = this.t + 5 / resourceMul;
+    this.nextShotPowerAt = this.t + 7 / powerMul;
     this.seedUpgradeCards();
     this.started = this.isReadyToStart();
 
@@ -984,6 +1225,47 @@ class GameRoom {
     };
   }
 
+  minionMatchesSpecialType(minion, type) {
+    if (!minion || !type) return false;
+    if (type === 'dragon') return Boolean(minion.dragon);
+    if (type === 'shield') return Boolean(minion.shieldBearer);
+    if (type === 'digger') return Boolean(minion.digger);
+    if (type === 'necrominion') return Boolean(minion.necrominion);
+    if (type === 'gunner') return Boolean(minion.gunner);
+    if (type === 'rider') return Boolean(minion.rider);
+    if (type === 'monk') return Boolean(minion.monk);
+    if (type === 'hero') return Boolean(minion.hero);
+    if (type === 'president') return Boolean(minion.president);
+    if (type === 'super') return Boolean(minion.super);
+    return false;
+  }
+
+  aliveSpecialCount(sideName, type) {
+    let count = 0;
+    for (const m of this.minions) {
+      if (!m || m.side !== sideName) continue;
+      if ((Number(m.hp) || 0) <= 0) continue;
+      if (!this.minionMatchesSpecialType(m, type)) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  enforceDebugFocusedMinimum(sideName) {
+    const side = this[sideName];
+    if (!side) return;
+    const type = (typeof side.debugForceSpecialType === 'string' && DEBUG_FORCE_SPECIAL_TYPES.has(side.debugForceSpecialType))
+      ? side.debugForceSpecialType
+      : null;
+    if (!type) return;
+    const targetMin = Math.max(1, Math.min(12, Math.floor(Number(side.debugForceSpecialMinAlive) || 1)));
+    const alive = this.aliveSpecialCount(sideName, type);
+    const missing = Math.max(0, targetMin - alive);
+    for (let i = 0; i < missing; i += 1) {
+      this.spawnMinion(sideName, { forceType: type, countSpawn: false });
+    }
+  }
+
   tick(dt) {
     if (!this.started || this.gameOver) return;
     this.t += dt;
@@ -1031,15 +1313,19 @@ class GameRoom {
       this.spawnMinion('right');
       this.right.minionCd = this.statSpawnEvery(this.right);
     }
+    this.enforceDebugFocusedMinimum('left');
+    this.enforceDebugFocusedMinimum('right');
 
     if (this.t >= this.nextResourceAt) {
       this.spawnMirroredResource();
-      this.nextResourceAt = this.t + Math.max(3.2, 6 - this.t / 200);
+      const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+      this.nextResourceAt = this.t + Math.max(0.7, Math.max(3.2, 6 - this.t / 200) / mul);
     }
 
     if (this.t >= this.nextShotPowerAt) {
       this.spawnMirroredShotPower();
-      this.nextShotPowerAt = this.t + Math.max(5.2, 8.8 - this.t / 260);
+      const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
+      this.nextShotPowerAt = this.t + Math.max(0.9, Math.max(5.2, 8.8 - this.t / 260) / mul);
     }
 
     this.syncUpgradeCards('left');
@@ -1151,7 +1437,7 @@ class GameRoom {
   }
 
   statCandleSpawnChance(side) {
-    const bonus = this.statSpecialRateBonus(side);
+    const bonus = this.statSpecialRateBonus(side) + clamp(Number(side?.debugCandleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
     return clamp(CANDLE_SPAWN_BASE_CHANCE + bonus, CANDLE_SPAWN_BASE_CHANCE, 0.92);
   }
 
@@ -2583,6 +2869,9 @@ class GameRoom {
         }
       }
       if (m.gunFlashTtl > 0) m.gunFlashTtl = Math.max(0, m.gunFlashTtl - dt);
+      if ((Number(m.executiveOrderBreakTtl) || 0) > 0) {
+        m.executiveOrderBreakTtl = Math.max(0, (Number(m.executiveOrderBreakTtl) || 0) - dt);
+      }
       if (m.gunner) {
         if (!Number.isFinite(m.gunnerSkyCannonCd)) {
           m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
@@ -2657,6 +2946,30 @@ class GameRoom {
         }
       }
       if (m.president) {
+        const sideState = m.side === 'right' ? this.right : this.left;
+        m.presidentExecutiveOrderUpgraded = (Number(sideState?.presidentExecutiveOrderLevel) || 0) > 0;
+        if (!Number.isFinite(m.presidentExecutiveOrderCd)) {
+          m.presidentExecutiveOrderCd = presidentExecutiveOrderCooldown();
+        }
+        if (!Number.isFinite(m.presidentExecutiveOrderSignTtl)) m.presidentExecutiveOrderSignTtl = 0;
+        if (!Number.isFinite(m.presidentExecutiveOrderSignMaxTtl) || m.presidentExecutiveOrderSignMaxTtl <= 0) {
+          m.presidentExecutiveOrderSignMaxTtl = PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL;
+        }
+        if (!Number.isFinite(m.presidentExecutiveOrderBeamTtl)) m.presidentExecutiveOrderBeamTtl = 0;
+        if (!Number.isFinite(m.presidentExecutiveOrderBeamMaxTtl) || m.presidentExecutiveOrderBeamMaxTtl <= 0) {
+          m.presidentExecutiveOrderBeamMaxTtl = PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL;
+        }
+        m.presidentExecutiveOrderSignTtl = Math.max(0, m.presidentExecutiveOrderSignTtl - dt);
+        m.presidentExecutiveOrderBeamTtl = Math.max(0, m.presidentExecutiveOrderBeamTtl - dt);
+        if (m.presidentExecutiveOrderBeamTtl === 0) {
+          m.presidentExecutiveOrderBeamToX = null;
+          m.presidentExecutiveOrderBeamToY = null;
+        }
+        if (m.presidentExecutiveOrderUpgraded) {
+          m.presidentExecutiveOrderCd = Math.max(0, m.presidentExecutiveOrderCd - dt);
+        } else {
+          m.presidentExecutiveOrderCd = 0;
+        }
         this.tickPresident(m, dt);
         continue;
       }
@@ -3161,6 +3474,22 @@ class GameRoom {
     if (dmg <= 0) return 0;
     let remaining = dmg;
     if (remaining > 0) {
+      if (!Number.isFinite(minion.executiveOrderHitsLeft)) minion.executiveOrderHitsLeft = 0;
+      if (!Number.isFinite(minion.executiveOrderHitsMax) || minion.executiveOrderHitsMax <= 0) {
+        minion.executiveOrderHitsMax = PRESIDENT_EXECUTIVE_ORDER_HITS;
+      }
+      if (!Number.isFinite(minion.executiveOrderBreakTtl)) minion.executiveOrderBreakTtl = 0;
+      if (minion.executiveOrderHitsLeft > 0) {
+        remaining *= PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT;
+        minion.executiveOrderHitsLeft = Math.max(0, minion.executiveOrderHitsLeft - 1);
+        if (minion.executiveOrderHitsLeft <= 0) {
+          minion.executiveOrderBreakTtl = 0.55;
+          this.queueHitSfx('blocked', minion.x, minion.y - Math.max(6, (Number(minion.r) || 12) * 0.55), minion.side);
+          this.queueHitSfx('powerup', minion.x, minion.y - Math.max(8, (Number(minion.r) || 12) * 0.2), minion.side);
+        }
+      }
+    }
+    if (remaining > 0) {
       if (!Number.isFinite(minion.reviveShieldHp)) minion.reviveShieldHp = 0;
       if (!Number.isFinite(minion.reviveShieldTtl)) minion.reviveShieldTtl = 0;
       if (minion.reviveShieldTtl > 0 && minion.reviveShieldHp > 0) {
@@ -3328,7 +3657,9 @@ class GameRoom {
   }
 
   statSpawnEvery(side) {
-    return Math.max(0.65, 2.2 - side.spawnLevel * 0.09);
+    const base = Math.max(0.65, 2.2 - side.spawnLevel * 0.09);
+    const mul = clamp(Number(side?.debugSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+    return Math.max(0.18, base / mul);
   }
 
   statSpecialCooldownMultiplier(matchTimeSec = null) {
@@ -3341,68 +3672,70 @@ class GameRoom {
     return clamp(mult, SPECIAL_COOLDOWN_END_MULT, SPECIAL_COOLDOWN_START_MULT);
   }
 
-  scaleSpecialCooldownEvery(baseEvery) {
+  scaleSpecialCooldownEvery(baseEvery, side = null) {
     if (!Number.isFinite(baseEvery)) return baseEvery;
-    return Math.max(1, Math.round(baseEvery * this.statSpecialCooldownMultiplier()));
+    const scaled = Math.max(1, Math.round(baseEvery * this.statSpecialCooldownMultiplier()));
+    const mul = clamp(Number(side?.debugSpecialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
+    return Math.max(1, Math.round(scaled / mul));
   }
 
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
     const mythicPressure = Math.floor((side.powerLevel + side.economyLevel) / 6);
     const baseEvery = Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statGunnerEvery(side) {
     const tech = Math.floor((side.unitLevel + side.arrowLevel + side.economyLevel) / 6);
     const baseEvery = Math.max(14, 22 - tech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statRiderEvery(side) {
     const cavalryTech = Math.floor((side.unitLevel + side.spawnLevel + side.economyLevel) / 5);
     const baseEvery = Math.max(15, 23 - cavalryTech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statDiggerEvery(side) {
     const burrowTech = Math.floor((side.unitHpLevel + side.spawnLevel + side.economyLevel) / 6);
     const baseEvery = Math.max(14, 24 - burrowTech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statMonkEvery(side) {
     const supportTech = Math.floor((side.unitHpLevel + side.powerLevel + side.resourceLevel) / 7);
     const baseEvery = Math.max(20, 30 - supportTech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statShieldEvery(side) {
     const wallTech = Math.floor((side.unitHpLevel + side.powerLevel + side.spawnLevel) / 6);
     const baseEvery = Math.max(17, 26 - wallTech);
-    return this.scaleSpecialCooldownEvery(baseEvery * 4);
+    return this.scaleSpecialCooldownEvery(baseEvery * 4, side);
   }
 
   statHeroEvery(side) {
     const mythicTech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 7);
     const baseEvery = Math.max(38, 56 - mythicTech) * 10;
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statPresidentEvery(side) {
     const civicTech = Math.floor((side.economyLevel + side.resourceLevel + side.powerLevel) / 6);
     const baseEvery = Math.max(36, 54 - civicTech);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
-  statNecroEvery() {
-    return this.scaleSpecialCooldownEvery(12);
+  statNecroEvery(side = null) {
+    return this.scaleSpecialCooldownEvery(12, side);
   }
 
   statSuperEvery(side) {
     if (side.superMinionLevel <= 0) return Infinity;
     const baseEvery = Math.max(28, 58 - side.superMinionLevel * 4);
-    return this.scaleSpecialCooldownEvery(baseEvery);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statSpecialRateBonus(side) {
@@ -3411,13 +3744,16 @@ class GameRoom {
   }
 
   statSpecialSuccessChance(side, type) {
-    const base = Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
+    const overrideBase = Number(side?.debugSpecialChanceOverrides?.[type]);
+    const base = Number.isFinite(overrideBase)
+      ? overrideBase
+      : Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
     if (!Number.isFinite(base)) return 0;
     let chance = base + this.statSpecialRateBonus(side);
     if (type === 'dragon') chance += Math.max(0, (Number(side?.dragonLevel) || 0) - 1) * 0.014;
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     if (type === 'super') chance += Math.max(0, (Number(side?.superMinionLevel) || 0) - 1) * 0.018;
-    return clamp(chance, 0.08, 0.92);
+    return clamp(chance, 0, 0.99);
   }
 
   dragonHeartCore(minion) {
@@ -4085,6 +4421,16 @@ class GameRoom {
       return;
     }
 
+    if (president.presidentExecutiveOrderUpgraded && (Number(president.presidentExecutiveOrderCd) || 0) === 0) {
+      const target = this.pickPresidentialPardonTarget(president);
+      if (target) {
+        this.triggerPresidentialPardon(president, target);
+        president.presidentExecutiveOrderCd = presidentExecutiveOrderCooldown();
+      } else {
+        president.presidentExecutiveOrderCd = 1.4;
+      }
+    }
+
     if (president.presidentSpeechCd === 0) {
       this.queueLine(
         randomFrom(PRESIDENT_LINES),
@@ -4095,6 +4441,53 @@ class GameRoom {
       president.presidentSpeechCd = PRESIDENT_RANDOM_LINE_INTERVAL;
       this.queueHitSfx('powerup', president.x, president.y - 8, president.side);
     }
+  }
+
+  pickPresidentialPardonTarget(president) {
+    if (!president || !president.side) return null;
+    const sideName = president.side === 'right' ? 'right' : 'left';
+    let best = null;
+    let bestScore = -Infinity;
+    for (const ally of this.minions) {
+      if (!ally || ally.removed || ally.side !== sideName || ally.id === president.id) continue;
+      if ((Number(ally.hp) || 0) <= 0) continue;
+      const dx = (Number(ally.x) || 0) - (Number(president.x) || 0);
+      const dy = (Number(ally.y) || 0) - (Number(president.y) || 0);
+      const dist = Math.hypot(dx, dy);
+      const frontBias = sideName === 'left'
+        ? ((Number(ally.x) || 0) / WORLD_W)
+        : ((WORLD_W - (Number(ally.x) || 0)) / WORLD_W);
+      const maxHp = Math.max(1, Number(ally.maxHp) || 1);
+      const hp = Math.max(0, Number(ally.hp) || 0);
+      const missingPct = Math.max(0, (maxHp - hp) / maxHp);
+      const hasPardon = (Number(ally.executiveOrderHitsLeft) || 0) > 0;
+      const score = frontBias * 1.3 + missingPct * 0.45 - dist * 0.0024 + (hasPardon ? -1.5 : 1.55);
+      if (score > bestScore) {
+        bestScore = score;
+        best = ally;
+      }
+    }
+    return best;
+  }
+
+  triggerPresidentialPardon(president, target) {
+    if (!president || !target) return;
+    target.executiveOrderHitsMax = PRESIDENT_EXECUTIVE_ORDER_HITS;
+    target.executiveOrderHitsLeft = PRESIDENT_EXECUTIVE_ORDER_HITS;
+    target.executiveOrderBreakTtl = 0;
+
+    president.presidentExecutiveOrderSignMaxTtl = PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL;
+    president.presidentExecutiveOrderSignTtl = PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL;
+    president.presidentExecutiveOrderBeamMaxTtl = PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL;
+    president.presidentExecutiveOrderBeamTtl = PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL;
+    president.presidentExecutiveOrderBeamToX = Number(target.x) || 0;
+    president.presidentExecutiveOrderBeamToY = (Number(target.y) || 0) - Math.max(8, (Number(target.r) || 12) * 0.45);
+
+    const signX = (Number(president.x) || 0) + (president.side === 'left' ? 1 : -1) * 10;
+    const signY = (Number(president.y) || 0) - Math.max(8, (Number(president.r) || 16) * 0.45);
+    this.queueHitSfx('upgrade', signX, signY, president.side);
+    this.queueHitSfx('powerup', target.x, target.y - Math.max(8, (Number(target.r) || 12) * 0.45), president.side);
+    this.queueHitSfx('blocked', target.x, target.y - Math.max(8, (Number(target.r) || 12) * 0.25), president.side);
   }
 
   triggerTowerHeroRescue(sideName, x, y) {
@@ -4330,6 +4723,9 @@ class GameRoom {
       reviveShieldMax: originalMaxHp,
       reviveShieldTtl: NECRO_REVIVE_SHIELD_SECONDS,
       reviveShieldMaxTtl: NECRO_REVIVE_SHIELD_SECONDS,
+      executiveOrderHitsLeft: 0,
+      executiveOrderHitsMax: PRESIDENT_EXECUTIVE_ORDER_HITS,
+      executiveOrderBreakTtl: 0,
       failedSpecialType: null,
     };
 
@@ -4347,6 +4743,9 @@ class GameRoom {
       : false;
     revived.gunnerSkyCannonUpgraded = revived.gunner
       ? (Number(sideState?.gunnerSkyCannonLevel) || 0) > 0
+      : false;
+    revived.presidentExecutiveOrderUpgraded = revived.president
+      ? (Number(sideState?.presidentExecutiveOrderLevel) || 0) > 0
       : false;
 
     if (revived.flying) {
@@ -4396,11 +4795,16 @@ class GameRoom {
     }
     if (revived.president) {
       revived.presidentSetup = false;
-      revived.presidentPodiumX = sideName === 'left'
-        ? (700 + Math.random() * 55)
-        : (WORLD_W - (700 + Math.random() * 55));
+      revived.presidentPodiumX = presidentPodiumTargetX(sideName);
       revived.presidentPodiumY = TOWER_Y + 18 + (Math.random() * 24 - 12);
       revived.presidentSpeechCd = 1 + Math.random() * 1.4;
+      revived.presidentExecutiveOrderCd = presidentExecutiveOrderCooldown();
+      revived.presidentExecutiveOrderSignTtl = 0;
+      revived.presidentExecutiveOrderSignMaxTtl = PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL;
+      revived.presidentExecutiveOrderBeamTtl = 0;
+      revived.presidentExecutiveOrderBeamMaxTtl = PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL;
+      revived.presidentExecutiveOrderBeamToX = null;
+      revived.presidentExecutiveOrderBeamToY = null;
     }
     return revived;
   }
@@ -4529,6 +4933,17 @@ class GameRoom {
       presidentAuraRadius: 0,
       presidentAuraMult: 1,
       presidentSpeechCd: 0,
+      presidentExecutiveOrderUpgraded: false,
+      presidentExecutiveOrderCd: 0,
+      presidentExecutiveOrderSignTtl: 0,
+      presidentExecutiveOrderSignMaxTtl: PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL,
+      presidentExecutiveOrderBeamTtl: 0,
+      presidentExecutiveOrderBeamMaxTtl: PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL,
+      presidentExecutiveOrderBeamToX: null,
+      presidentExecutiveOrderBeamToY: null,
+      executiveOrderHitsLeft: 0,
+      executiveOrderHitsMax: PRESIDENT_EXECUTIVE_ORDER_HITS,
+      executiveOrderBreakTtl: 0,
       gunRange: 0,
       gunDragonMul: 1,
       gunFlashTtl: 0,
@@ -4765,7 +5180,6 @@ class GameRoom {
         side.specialFailTtl = SPECIAL_FAIL_TTL;
       }
     }
-
     const isDragon = spawnType === 'dragon';
     const isShieldBearer = spawnType === 'shield';
     const isDigger = spawnType === 'digger';
@@ -4989,11 +5403,22 @@ class GameRoom {
       heroHealPerSec: isHero ? Math.max(96, hp * 0.34) : 0,
       president: isPresident,
       presidentSetup: false,
-      presidentPodiumX: isPresident ? (sideName === 'left' ? (700 + Math.random() * 55) : (WORLD_W - (700 + Math.random() * 55))) : null,
+      presidentPodiumX: isPresident ? presidentPodiumTargetX(sideName) : null,
       presidentPodiumY: isPresident ? (TOWER_Y + 18 + (Math.random() * 24 - 12)) : null,
       presidentAuraRadius: isPresident ? (178 + side.powerLevel * 8) : 0,
       presidentAuraMult: isPresident ? (1.22 + Math.min(0.14, side.powerLevel * 0.02)) : 1,
       presidentSpeechCd: isPresident ? (1 + Math.random() * 1.4) : 0,
+      presidentExecutiveOrderUpgraded: isPresident && (Number(side.presidentExecutiveOrderLevel) || 0) > 0,
+      presidentExecutiveOrderCd: isPresident ? presidentExecutiveOrderCooldown() : 0,
+      presidentExecutiveOrderSignTtl: 0,
+      presidentExecutiveOrderSignMaxTtl: PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL,
+      presidentExecutiveOrderBeamTtl: 0,
+      presidentExecutiveOrderBeamMaxTtl: PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL,
+      presidentExecutiveOrderBeamToX: null,
+      presidentExecutiveOrderBeamToY: null,
+      executiveOrderHitsLeft: 0,
+      executiveOrderHitsMax: PRESIDENT_EXECUTIVE_ORDER_HITS,
+      executiveOrderBreakTtl: 0,
       gunRange: isGunner ? 198 + side.arrowLevel * 10 + side.unitLevel * 6 : 0,
       gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
       gunFlashTtl: 0,
@@ -5306,6 +5731,18 @@ class GameRoom {
       this.spawnMinion(sideName, { forceType: 'gunner', countSpawn: false });
       this.queueHitSfx('gunhit', towerX + dir * 24, towerY - 8, sideName);
       this.queueHitSfx('explosion', towerX + dir * 52, towerY - 30, sideName);
+      return;
+    }
+
+    if (type === 'presidentExecutiveOrderLevel') {
+      this.spawnMinion(sideName, { forceType: 'president', countSpawn: false });
+      for (const m of this.minions) {
+        if (!m || m.removed || !m.president || m.side !== sideName) continue;
+        m.presidentExecutiveOrderUpgraded = true;
+        m.presidentExecutiveOrderCd = presidentExecutiveOrderCooldown();
+      }
+      this.queueHitSfx('upgrade', towerX + dir * 22, towerY - 10, sideName);
+      this.queueHitSfx('blocked', towerX + dir * 42, towerY - 18, sideName);
       return;
     }
 

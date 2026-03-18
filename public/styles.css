@@ -91,7 +91,7 @@ h1, h2 {
   flex-wrap: wrap;
 }
 
-input, button {
+input, button, select {
   border-radius: 10px;
   border: 1px solid var(--edge);
   padding: 10px 12px;
@@ -168,6 +168,153 @@ button:hover {
   border-color: #67d49e;
   color: #052114;
   font-weight: 700;
+}
+
+.test-settings {
+  margin-top: 12px;
+  border: 1px solid #415987;
+  border-radius: 10px;
+  background: #10213a;
+}
+
+.test-settings > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 700;
+  color: #cde0ff;
+}
+
+.test-settings-inner {
+  border-top: 1px solid #35507b;
+  padding: 10px 12px 12px;
+}
+
+.test-help {
+  margin: 0 0 10px;
+  color: #d6e7ff;
+  font-size: 13px;
+}
+
+.test-mode-hint {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid #3c6d4e;
+  border-radius: 8px;
+  background: #123324;
+  color: #bff0cf;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.test-row {
+  align-items: flex-end;
+}
+
+.test-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  font-size: 13px;
+  color: #dbe7ff;
+}
+
+.test-row input,
+.test-row select,
+.test-grid input {
+  min-width: 88px;
+}
+
+.test-group {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #35507b;
+}
+
+.test-group-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #bfd8ff;
+}
+
+.test-summary {
+  margin-top: 8px;
+  color: #b9d6ff;
+}
+
+.test-advanced {
+  margin-top: 8px;
+  border: 1px dashed #35507b;
+  border-radius: 9px;
+  background: #0f1d33;
+}
+
+.test-advanced > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: 700;
+  color: #bfd8ff;
+}
+
+.test-advanced-inner {
+  padding: 4px 10px 10px;
+}
+
+.test-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.test-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #d3e4ff;
+}
+
+.test-special-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px 12px;
+}
+
+.test-special-grid label,
+.test-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #dbe7ff;
+}
+
+.test-check-card {
+  display: grid !important;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px !important;
+  align-items: start !important;
+  padding: 8px;
+  border: 1px solid #2f476e;
+  border-radius: 8px;
+  background: #10223b;
+}
+
+.test-check-card input {
+  grid-row: span 2;
+  margin-top: 2px;
+}
+
+.test-check-title {
+  font-weight: 700;
+  color: #d6e9ff;
+}
+
+.test-check-meta {
+  font-size: 11px;
+  line-height: 1.25;
+  color: #abc8ee;
 }
 
 #roomInput {

@@ -18,6 +18,7 @@ export const UPGRADE_LABELS = {
   riderSuperHorseLevel: 'Rider Super Horse',
   diggerGoldFinderLevel: 'Digger Gold Finder',
   gunnerSkyCannonLevel: 'Gunner Sky Cannon',
+  presidentExecutiveOrderLevel: 'Pardon President',
   superMinionLevel: 'Super Rate+',
 };
 
@@ -39,6 +40,7 @@ export const UPGRADE_HINTS = {
   riderSuperHorseLevel: 'rider hp x4, larger horse, stronger charge hit',
   diggerGoldFinderLevel: 'diggers seek and collect gold resources',
   gunnerSkyCannonLevel: 'gunners fire periodic sky-cannon AoE blasts',
+  presidentExecutiveOrderLevel: 'signs a pardon paper: first 4 hits at 50% damage',
   superMinionLevel: '+super spawn rate',
 };
 

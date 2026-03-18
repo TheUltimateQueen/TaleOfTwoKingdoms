@@ -41,6 +41,94 @@
           <button id="localKeyboardTestBtn" class="local-test-btn" type="button">Play On This Computer (Keyboard)</button>
         </div>
         <p id="localKeyboardHint" class="sub">Keyboard mode: West aims with W/A/S/D and East aims with Arrow keys.</p>
+        <details id="testSettingsPanel" class="test-settings">
+          <summary id="testSettingsSummary">Secret Test Settings - Testing OFF</summary>
+          <div class="test-settings-inner">
+            <p class="test-help">Simple testing panel. Changes apply immediately.</p>
+            <p class="test-mode-hint">Testing is ON while this panel is open.</p>
+            <div class="row test-row">
+              <label>Apply To
+                <select id="testApplyToInput">
+                  <option value="both">Both Sides</option>
+                  <option value="left">West Only</option>
+                  <option value="right">East Only</option>
+                </select>
+              </label>
+              <label>Focus Unit
+                <select id="testForceSpecialTypeInput">
+                  <option value="">Normal random</option>
+                  <option value="dragon">Dragon</option>
+                  <option value="shield">Shield</option>
+                  <option value="digger">Digger</option>
+                  <option value="necrominion">Necro</option>
+                  <option value="gunner">Gunner</option>
+                  <option value="rider">Rider</option>
+                  <option value="monk">Monk</option>
+                  <option value="hero">Hero</option>
+                  <option value="president">President</option>
+                  <option value="super">Super</option>
+                </select>
+              </label>
+              <label>Minimum Focus Alive
+                <input id="testForceSpecialMinAliveInput" type="number" min="1" max="12" step="1" value="1" />
+              </label>
+            </div>
+
+            <div class="row">
+              <button id="testOffBtn" type="button">Testing Off</button>
+              <button id="testSpecialsBtn" type="button">Enable All Special Upgrades</button>
+              <button id="testResetBtn" type="button">Reset</button>
+            </div>
+            <p id="testQuickSummary" class="sub test-summary"></p>
+
+            <div class="test-group">
+              <p class="test-group-title">Special Unit Upgrades</p>
+              <div class="test-special-grid">
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="dragonSuperBreathLevel" type="checkbox" />
+                  <span class="test-check-title">Dragon Super Breath</span>
+                  <span class="test-check-meta">Big cone fire burst every few seconds.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="shieldDarkMetalLevel" type="checkbox" />
+                  <span class="test-check-title">Shield Dark Metal</span>
+                  <span class="test-check-meta">Near-invulnerable window on cooldown.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="monkHealCircleLevel" type="checkbox" />
+                  <span class="test-check-title">Monk Heal Circle</span>
+                  <span class="test-check-meta">Large area heal pulse around monk.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="necroExpertSummonerLevel" type="checkbox" />
+                  <span class="test-check-title">Necro Expert</span>
+                  <span class="test-check-meta">Revives nearby allies with ghost shield.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="riderSuperHorseLevel" type="checkbox" />
+                  <span class="test-check-title">Rider Super Horse</span>
+                  <span class="test-check-meta">Much tankier rider with stronger charge.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="diggerGoldFinderLevel" type="checkbox" />
+                  <span class="test-check-title">Digger Gold Finder</span>
+                  <span class="test-check-meta">Walks to center gold and mines for team.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="gunnerSkyCannonLevel" type="checkbox" />
+                  <span class="test-check-title">Gunner Sky Cannon</span>
+                  <span class="test-check-meta">Calls flare-guided airstrike barrage.</span>
+                </label>
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="presidentExecutiveOrderLevel" type="checkbox" />
+                  <span class="test-check-title">Pardon President</span>
+                  <span class="test-check-meta">Buff paper shields reduce first 4 hits.</span>
+                </label>
+              </div>
+            </div>
+            <p id="testSettingsMsg" class="msg"></p>
+          </div>
+        </details>
         <p id="lobbyModeMsg" class="msg"></p>
         <p id="lobbyMsg" class="msg">Waiting for controllers...</p>
       </section>
