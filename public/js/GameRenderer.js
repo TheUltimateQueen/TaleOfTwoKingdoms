@@ -2790,6 +2790,110 @@ export class GameRenderer {
     const r = Math.max(6, Number(ball.r) || 12);
     const sideName = ball.side === 'right' ? 'right' : 'left';
     const tint = sideName === 'left' ? '#87baff' : '#ff9f9f';
+    const phase = typeof ball.phase === 'string' ? ball.phase : 'fall';
+    const flareX = Number.isFinite(Number(ball.impactX)) ? Number(ball.impactX) : x;
+    const flareY = Number.isFinite(Number(ball.impactY)) ? Number(ball.impactY) : y;
+    const pulseT = performance.now() * 0.001 + (Number(ball.id) || 0) * 0.27;
+    const pulse = 0.72 + Math.sin(pulseT * 9.2) * 0.28;
+    const signalTtl = Math.max(0, Number(ball.signalFlareTtl) || 0);
+    const signalMax = Math.max(0.01, Number(ball.signalFlareMaxTtl) || 0.36);
+    const signalLife = Math.max(0, Math.min(1, signalTtl / signalMax));
+    const signalX = Number.isFinite(Number(ball.signalFlareX)) ? Number(ball.signalFlareX) : flareX;
+    const signalY = Number.isFinite(Number(ball.signalFlareY)) ? Number(ball.signalFlareY) : flareY;
+
+    const drawSignalFlare = () => {
+      if (signalLife <= 0) return;
+      const launch = 1 - signalLife;
+      const topY = signalY - launch * (signalY + 84);
+      ctx.save();
+      ctx.globalAlpha = 0.28 + signalLife * 0.62;
+      const beam = ctx.createLinearGradient(signalX, signalY, signalX, topY);
+      beam.addColorStop(0, '#ffdca3');
+      beam.addColorStop(0.35, '#ffad68');
+      beam.addColorStop(1, '#ff7c4500');
+      ctx.strokeStyle = beam;
+      ctx.lineWidth = 2.2 + signalLife * 2.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(signalX, signalY - 2);
+      ctx.lineTo(signalX, topY);
+      ctx.stroke();
+      ctx.globalAlpha = 0.5 + signalLife * 0.35;
+      ctx.fillStyle = '#ffeec8';
+      ctx.beginPath();
+      ctx.arc(signalX, topY, 1.9 + signalLife * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawFlareMarker = (markerAlpha = 1) => {
+      ctx.save();
+      const flareGlow = ctx.createRadialGradient(flareX, flareY, 2, flareX, flareY, 22 + pulse * 16);
+      flareGlow.addColorStop(0, '#fff5d1');
+      flareGlow.addColorStop(0.38, '#ffaf64d6');
+      flareGlow.addColorStop(1, '#ff7c4500');
+      ctx.globalAlpha = (0.42 + pulse * 0.33) * markerAlpha;
+      ctx.fillStyle = flareGlow;
+      ctx.beginPath();
+      ctx.arc(flareX, flareY, 22 + pulse * 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = (0.6 + pulse * 0.35) * markerAlpha;
+      ctx.strokeStyle = '#ffd59a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(flareX, flareY, 8 + pulse * 3.2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    if (phase === 'flare') {
+      drawSignalFlare();
+      drawFlareMarker(0.52);
+      const vx = Number(ball.vx) || 0;
+      const vy = Number(ball.vy) || -1;
+      const ang = Math.atan2(vy, vx);
+      const nx = Math.cos(ang);
+      const ny = Math.sin(ang);
+      const trailLen = r * 4.6;
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      const trail = ctx.createLinearGradient(x, y, x - nx * trailLen, y - ny * trailLen);
+      trail.addColorStop(0, '#fff5d8');
+      trail.addColorStop(0.45, `${tint}bb`);
+      trail.addColorStop(1, `${tint}00`);
+      ctx.strokeStyle = trail;
+      ctx.lineWidth = Math.max(2.4, r * 0.34);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - nx * trailLen, y - ny * trailLen);
+      ctx.stroke();
+      ctx.fillStyle = '#ffe2b5';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(2.8, r * 0.36), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    // Airstrike flare marker: persists until its bomb impacts.
+    drawSignalFlare();
+    drawFlareMarker(1);
+
+    if (phase === 'mark') {
+      ctx.save();
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = '#ffe8b7';
+      ctx.beginPath();
+      ctx.arc(flareX, flareY - 2.2, 2.8 + pulse * 1.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ff934e';
+      ctx.beginPath();
+      ctx.arc(flareX + Math.sin(pulseT * 7) * 1.2, flareY - 5.8, 1.8 + pulse * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
 
     const glow = ctx.createRadialGradient(x, y, 2, x, y, r * 2.4);
     glow.addColorStop(0, '#fff4d1bb');
@@ -3467,6 +3571,31 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc((bodyW * 0.18 + gunLen) * dir, gunY - 1.2, 2.1, 0, Math.PI * 2);
       ctx.fill();
+
+      // Upward sky-cannon tube so upgraded gunners read clearly.
+      const cannonBaseX = -bodyW * 0.08 * dir;
+      const cannonBaseY = -bodyH * 0.58;
+      const cannonLen = bodyW * 0.84;
+      const cannonAngle = -Math.PI / 2 + dir * 0.19;
+      const cannonTipX = cannonBaseX + Math.cos(cannonAngle) * cannonLen;
+      const cannonTipY = cannonBaseY + Math.sin(cannonAngle) * cannonLen;
+
+      ctx.fillStyle = '#2b3b53';
+      ctx.fillRect(-bodyW * 0.2, -bodyH * 0.64, bodyW * 0.4, bodyH * 0.18);
+      ctx.strokeStyle = '#b7c9e6';
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(cannonBaseX, cannonBaseY);
+      ctx.lineTo(cannonTipX, cannonTipY);
+      ctx.stroke();
+      ctx.fillStyle = '#4f6689';
+      ctx.beginPath();
+      ctx.arc(cannonBaseX, cannonBaseY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#89a8d0';
+      ctx.beginPath();
+      ctx.arc(cannonTipX, cannonTipY, 2.2, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.fillStyle = '#1f2a3b';
     ctx.fillRect(
@@ -3488,6 +3617,30 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(muzzleX + dir * 2.6, muzzleY, flashR * 0.64, 0, Math.PI * 2);
       ctx.fill();
+
+      if (upgraded) {
+        const cannonBaseX = -bodyW * 0.08 * dir;
+        const cannonBaseY = -bodyH * 0.58;
+        const cannonLen = bodyW * 0.84;
+        const cannonAngle = -Math.PI / 2 + dir * 0.19;
+        const cannonTipX = cannonBaseX + Math.cos(cannonAngle) * cannonLen;
+        const cannonTipY = cannonBaseY + Math.sin(cannonAngle) * cannonLen;
+        const cannonFlashR = 1.8 + flash * 4.6;
+        ctx.fillStyle = '#fff4bf';
+        ctx.beginPath();
+        ctx.arc(cannonTipX, cannonTipY, cannonFlashR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffab6a';
+        ctx.beginPath();
+        ctx.arc(
+          cannonTipX + Math.cos(cannonAngle) * 2.2,
+          cannonTipY + Math.sin(cannonAngle) * 2.2,
+          cannonFlashR * 0.62,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
     }
 
     ctx.restore();

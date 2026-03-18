@@ -101,6 +101,11 @@ const GUNNER_SKY_CANNON_SETUP_TIME = 0.72;
 const GUNNER_SKY_CANNON_FALL_SPEED = 312;
 const GUNNER_SKY_CANNON_SKY_SPAWN_Y = 36;
 const GUNNER_SKY_CANNON_IMPACT_PAD = 10;
+const GUNNER_SKY_CANNON_FLARE_SPEED = 880;
+const GUNNER_SKY_CANNON_FLARE_MIN_TRAVEL = 0.12;
+const GUNNER_SKY_CANNON_FLARE_MAX_TRAVEL = 0.5;
+const GUNNER_SKY_CANNON_AIRSTRIKE_MARK_DELAY = 0.52;
+const GUNNER_SKY_CANNON_SIGNAL_FLARE_TTL = 0.36;
 const GUNNER_SKY_CANNON_BARRAGE_CHANCE = 0.5;
 const GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS = 2;
 const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
@@ -637,6 +642,16 @@ class GameRoom {
       x: roundTo(ball.x, 1),
       y: roundTo(ball.y, 1),
       r: roundTo(ball.r, 1),
+      phase: typeof ball.phase === 'string' ? ball.phase : 'fall',
+      flareTtl: roundTo(ball.flareTtl, 2),
+      signalFlareTtl: roundTo(ball.signalFlareTtl, 2),
+      signalFlareMaxTtl: roundTo(ball.signalFlareMaxTtl, 2),
+      signalFlareX: finiteOrNull(ball.signalFlareX, 1),
+      signalFlareY: finiteOrNull(ball.signalFlareY, 1),
+      dropDelay: roundTo(ball.dropDelay, 2),
+      vx: roundTo(ball.vx, 1),
+      vy: roundTo(ball.vy, 1),
+      impactX: roundTo(ball.impactX, 1),
       impactY: roundTo(ball.impactY, 1),
     }));
     const upgradeCards = this.upgradeCards.map((card) => ({
@@ -1066,6 +1081,40 @@ class GameRoom {
     for (let i = 0; i < this.cannonBalls.length; i += 1) {
       const ball = this.cannonBalls[i];
       if (!ball) continue;
+      if ((Number(ball.signalFlareTtl) || 0) > 0) {
+        ball.signalFlareTtl = Math.max(0, (Number(ball.signalFlareTtl) || 0) - dt);
+      }
+      if (ball.phase === 'flare') {
+        ball.flareTtl = Math.max(0, (Number(ball.flareTtl) || 0) - dt);
+        ball.x += (Number(ball.vx) || 0) * dt;
+        ball.y += (Number(ball.vy) || 0) * dt;
+        if (ball.flareTtl <= 0) {
+          ball.phase = 'mark';
+          ball.x = Number(ball.impactX) || ball.x;
+          ball.y = Number(ball.impactY) || ball.y;
+          ball.vx = 0;
+          ball.vy = 0;
+          ball.dropDelay = GUNNER_SKY_CANNON_AIRSTRIKE_MARK_DELAY + Math.random() * 0.14;
+          this.queueHitSfx('powerup', ball.x, ball.y, ball.side);
+        }
+        this.cannonBalls[write] = ball;
+        write += 1;
+        continue;
+      }
+      if (ball.phase === 'mark') {
+        ball.dropDelay = Math.max(0, (Number(ball.dropDelay) || 0) - dt);
+        if (ball.dropDelay <= 0) {
+          ball.phase = 'fall';
+          ball.x = (Number(ball.impactX) || 0) + (Math.random() * 14 - 7);
+          ball.y = GUNNER_SKY_CANNON_SKY_SPAWN_Y;
+          ball.vx = Math.random() * 18 - 9;
+          ball.vy = GUNNER_SKY_CANNON_FALL_SPEED + Math.random() * 36;
+          this.queueHitSfx('powerup', ball.x, ball.y + 8, ball.side);
+        }
+        this.cannonBalls[write] = ball;
+        write += 1;
+        continue;
+      }
       ball.y += (Number(ball.vy) || 0) * dt;
       ball.x += (Number(ball.vx) || 0) * dt;
       const impactY = Number.isFinite(ball.impactY) ? ball.impactY : (TOWER_Y - 18);
@@ -3619,6 +3668,7 @@ class GameRoom {
     }
     gunner.gunnerSkyCannonSetupTtl = GUNNER_SKY_CANNON_SETUP_TIME;
     gunner.gunnerSkyCannonQueue = shotQueue;
+    gunner.gunnerSkyCannonSignalUsed = false;
     gunner.gunnerSkyCannonAimX = Number(shotQueue[0]?.impactX) || strikeX;
     gunner.gunnerSkyCannonAimY = Number(shotQueue[0]?.impactY) || strikeY;
     gunner.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
@@ -3649,9 +3699,20 @@ class GameRoom {
       TOWER_Y - 180,
       TOWER_Y + 212
     );
+    const flareDx = impactX - muzzleX;
+    const flareDy = impactY - muzzleY;
+    const flareDist = Math.hypot(flareDx, flareDy);
+    const flareTravel = clamp(
+      flareDist / Math.max(100, GUNNER_SKY_CANNON_FLARE_SPEED),
+      GUNNER_SKY_CANNON_FLARE_MIN_TRAVEL,
+      GUNNER_SKY_CANNON_FLARE_MAX_TRAVEL
+    );
+    const flareVx = flareDist > 0.001 ? flareDx / flareTravel : 0;
+    const flareVy = flareDist > 0.001 ? flareDy / flareTravel : 0;
+    const shouldSignalFlare = !gunner.gunnerSkyCannonSignalUsed;
+    if (shouldSignalFlare) gunner.gunnerSkyCannonSignalUsed = true;
     gunner.gunFlashTtl = Math.max(Number(gunner.gunFlashTtl) || 0, 0.18);
     this.queueHitSfx('gunhit', muzzleX, muzzleY, sideName);
-    this.queueHitSfx('powerup', impactX, GUNNER_SKY_CANNON_SKY_SPAWN_Y + 8, sideName);
     if (!queued || !queued.length || Math.random() < 0.45) {
       this.queueLine('SKY CANNON!', gunner.x, gunner.y - gunner.r - 18, sideName);
     }
@@ -3659,11 +3720,18 @@ class GameRoom {
     this.cannonBalls.push({
       id: this.seq++,
       side: sideName,
-      x: impactX + (Math.random() * 14 - 7),
-      y: GUNNER_SKY_CANNON_SKY_SPAWN_Y,
+      phase: 'flare',
+      x: muzzleX + dir * 2,
+      y: muzzleY - 2,
       r: 13 + (gunner.super ? 1.5 : 0),
-      vx: Math.random() * 18 - 9,
-      vy: GUNNER_SKY_CANNON_FALL_SPEED + Math.random() * 36,
+      flareTtl: flareTravel,
+      signalFlareTtl: shouldSignalFlare ? GUNNER_SKY_CANNON_SIGNAL_FLARE_TTL : 0,
+      signalFlareMaxTtl: shouldSignalFlare ? GUNNER_SKY_CANNON_SIGNAL_FLARE_TTL : 0,
+      signalFlareX: shouldSignalFlare ? muzzleX : null,
+      signalFlareY: shouldSignalFlare ? muzzleY - 2 : null,
+      vx: flareVx,
+      vy: flareVy,
+      dropDelay: 0,
       impactX,
       impactY,
       baseDamage: this.minionOutgoingDamage(gunner, gunner.dmg),

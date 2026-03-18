@@ -22,6 +22,7 @@ const GAME_OVER_CINEMATIC_MS = 4000;
 const HOST_TICK_MS = 1000 / 30;
 const HOST_STATE_EMIT_MS = 50;
 const LOCAL_KEYBOARD_AIM_SPEED = 0.51;
+const DISPLAY_CURSOR_IDLE_MS = 1200;
 const LOCAL_KEYBOARD_CODES = new Set([
   'KeyW',
   'KeyA',
@@ -115,6 +116,9 @@ export class GameClient {
     this.remoteDisplayCount = 0;
     this.localKeyboardTestActive = false;
     this.localPressedKeys = new Set();
+    this.displayMode = 'menu';
+    this.cursorHiddenForIdle = false;
+    this.cursorLastActivityAt = performance.now();
 
     this.bindDom();
     this.bindEvents();
@@ -189,6 +193,9 @@ export class GameClient {
       window.addEventListener('blur', () => {
         this.localPressedKeys.clear();
       });
+      window.addEventListener('pointermove', () => this.handleDisplayPointerActivity());
+      window.addEventListener('mousemove', () => this.handleDisplayPointerActivity());
+      window.addEventListener('mousedown', () => this.handleDisplayPointerActivity());
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -963,11 +970,13 @@ export class GameClient {
       }
 
       this.setPostGamePanel(now >= this.gameOverRevealAtMs, snapshot);
+      this.updateDisplayCursorIdle(now);
       return;
     }
 
     this.resetGameOverPresentation();
     this.setPostGamePanel(false);
+    this.updateDisplayCursorIdle(performance.now());
   }
 
   startRenderLoop() {
@@ -975,12 +984,14 @@ export class GameClient {
       if (!this.isController && this.state.snapshot && this.state.world) {
         this.renderer.draw(this.state.snapshot, this.state.world);
       }
+      this.updateDisplayCursorIdle(performance.now());
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
   }
 
   setDisplayMode(mode) {
+    this.displayMode = mode;
     this.menu.classList.toggle('hidden', mode !== 'menu');
     this.lobby.classList.toggle('hidden', mode !== 'lobby');
     this.canvas.classList.toggle('hidden', mode !== 'game');
@@ -997,6 +1008,41 @@ export class GameClient {
         this.stopVoiceType('president');
       }
     }
+    this.updateDisplayCursorIdle(performance.now());
+  }
+
+  handleDisplayPointerActivity() {
+    this.cursorLastActivityAt = performance.now();
+    if (this.cursorHiddenForIdle) this.setDisplayCursorHidden(false);
+  }
+
+  shouldAutoHideDisplayCursor() {
+    if (this.isController) return false;
+    if (this.displayMode !== 'game') return false;
+    const snapshot = this.state.snapshot;
+    if (!snapshot || !snapshot.started) return false;
+    if (snapshot.gameOver) return false;
+    return true;
+  }
+
+  updateDisplayCursorIdle(nowMs) {
+    if (this.isController) return;
+    if (!this.shouldAutoHideDisplayCursor()) {
+      this.cursorLastActivityAt = nowMs;
+      if (this.cursorHiddenForIdle) this.setDisplayCursorHidden(false);
+      return;
+    }
+    const idleMs = nowMs - this.cursorLastActivityAt;
+    if (idleMs >= DISPLAY_CURSOR_IDLE_MS) this.setDisplayCursorHidden(true);
+  }
+
+  setDisplayCursorHidden(hidden) {
+    if (this.isController) return;
+    const value = hidden ? 'none' : '';
+    if (document.documentElement) document.documentElement.style.cursor = value;
+    if (document.body) document.body.style.cursor = value;
+    if (this.canvas) this.canvas.style.cursor = value;
+    this.cursorHiddenForIdle = Boolean(hidden);
   }
 
   setControllerMode(joined) {
