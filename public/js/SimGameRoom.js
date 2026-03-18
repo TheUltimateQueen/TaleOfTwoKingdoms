@@ -123,6 +123,7 @@ const HERO_LINES = [
   'I slash, therefore I am!',
   'Fear my perfectly timed monologue!',
 ];
+const HERO_RANDOM_LINE_INTERVAL = 5;
 const HERO_DEATH_LINES = [
   'Tell my fans... I was fabulous!',
   'No sequel? This is a travesty!',
@@ -191,6 +192,7 @@ const PRESIDENT_LINES = [
   'We came here to win this battlefield!',
   'Stay strong, stay sharp, stay united!',
 ];
+const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
 const CANDLE_WAX_MAX = 96;
 const CANDLE_MAX_HOLDERS = 8;
 const CANDLE_FAST_HOLDERS = 6;
@@ -414,6 +416,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
     towerGolemRescueUsed: false,
+    heroLineCd: 0,
   };
 }
 
@@ -997,6 +1000,8 @@ class GameRoom {
     this.right.specialFailTtl = Math.max(0, (Number(this.right.specialFailTtl) || 0) - dt);
     this.left.specialRollTtl = Math.max(0, (Number(this.left.specialRollTtl) || 0) - dt);
     this.right.specialRollTtl = Math.max(0, (Number(this.right.specialRollTtl) || 0) - dt);
+    this.left.heroLineCd = Math.max(0, (Number(this.left.heroLineCd) || 0) - dt);
+    this.right.heroLineCd = Math.max(0, (Number(this.right.heroLineCd) || 0) - dt);
     if (this.left.specialFailTtl === 0) this.left.specialFailType = null;
     if (this.right.specialFailTtl === 0) this.right.specialFailType = null;
     // Keep last special roll result visible for UI history; TTL controls recency only.
@@ -3881,6 +3886,7 @@ class GameRoom {
 
   heroSlash(hero, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!hero || !hero.hero) return;
+    const sideState = hero.side === 'right' ? this.right : this.left;
     const slashR = Math.max(70, Number(hero.heroSlashRadius) || 88);
     const damage = this.minionOutgoingDamage(hero, hero.dmg * 0.96);
     let hitAny = false;
@@ -3911,9 +3917,14 @@ class GameRoom {
     }
 
     this.queueHitSfx('powerup', hero.x, hero.y - 8, hero.side);
-    if ((hitAny || hero.atkCd === 0) && (hero.heroLineCd || 0) === 0) {
+    if (
+      (hitAny || hero.atkCd === 0)
+      && (hero.heroLineCd || 0) === 0
+      && ((Number(sideState?.heroLineCd) || 0) === 0)
+    ) {
       this.queueLine(randomFrom(HERO_LINES), hero.x, hero.y - hero.r - 26, hero.side);
-      hero.heroLineCd = 0.38;
+      hero.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
+      if (sideState) sideState.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
     }
   }
 
@@ -4067,7 +4078,7 @@ class GameRoom {
         if (this.activePresidents?.[sideName] && !this.activePresidents[sideName].includes(president)) {
           this.activePresidents[sideName].push(president);
         }
-        president.presidentSpeechCd = 0.2;
+        president.presidentSpeechCd = PRESIDENT_RANDOM_LINE_INTERVAL;
         this.queueHitSfx('upgrade', president.x, president.y - 4, president.side);
         this.queueLine('Citizens, we stand together!', president.x, president.y - president.r - 28, president.side);
       }
@@ -4081,7 +4092,7 @@ class GameRoom {
         president.y - president.r - 28,
         president.side
       );
-      president.presidentSpeechCd = 2.2 + Math.random() * 2.2;
+      president.presidentSpeechCd = PRESIDENT_RANDOM_LINE_INTERVAL;
       this.queueHitSfx('powerup', president.x, president.y - 8, president.side);
     }
   }
