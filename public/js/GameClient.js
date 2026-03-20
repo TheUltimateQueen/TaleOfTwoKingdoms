@@ -1,7 +1,7 @@
 import { GameRenderer } from './GameRenderer.js';
 import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
-import { SHOT_POWER_LABELS } from './constants.js';
+import { SHOT_POWER_LABELS, UPGRADE_LABELS } from './constants.js';
 import { GameRoom as SimGameRoom } from './SimGameRoom.js';
 
 const VOICE_GAP_MIN_MS = 2000;
@@ -68,6 +68,63 @@ const TEST_SPECIAL_LABELS = {
   president: 'President',
   super: 'Super',
 };
+const POST_UPGRADE_CODES = {
+  arrowLevel: 'AR',
+  unitLevel: 'UN',
+  volleyLevel: 'VO',
+  spawnLevel: 'SP',
+  unitHpLevel: 'HP',
+  resourceLevel: 'RS',
+  bountyLevel: 'KG',
+  powerLevel: 'PW',
+  specialRateLevel: 'SR',
+  dragonLevel: 'DR',
+  dragonSuperBreathLevel: 'SB',
+  shieldDarkMetalLevel: 'DM',
+  monkHealCircleLevel: 'HC',
+  necroExpertSummonerLevel: 'NE',
+  riderSuperHorseLevel: 'RH',
+  diggerGoldFinderLevel: 'GF',
+  gunnerSkyCannonLevel: 'SC',
+  presidentExecutiveOrderLevel: 'EO',
+  superMinionLevel: 'SU',
+};
+const POST_UPGRADE_ICONS = {
+  arrowLevel: '🏹',
+  unitLevel: '⚔️',
+  volleyLevel: '🪶',
+  spawnLevel: '👥',
+  unitHpLevel: '🛡️',
+  resourceLevel: '💰',
+  bountyLevel: '🎯',
+  powerLevel: '⚡',
+  specialRateLevel: '✨',
+  dragonLevel: '🐉',
+  dragonSuperBreathLevel: '🔥',
+  shieldDarkMetalLevel: '🧱',
+  monkHealCircleLevel: '💚',
+  necroExpertSummonerLevel: '☠️',
+  riderSuperHorseLevel: '🐎',
+  diggerGoldFinderLevel: '⛏️',
+  gunnerSkyCannonLevel: '💣',
+  presidentExecutiveOrderLevel: '📜',
+  superMinionLevel: '⭐',
+};
+function colorWithAlpha(color, alpha = 1) {
+  const safe = Math.max(0, Math.min(1, Number(alpha) || 0));
+  if (typeof color !== 'string') return `rgba(255,255,255,${safe})`;
+  const hex = color.trim();
+  const longHex = /^#([0-9a-fA-F]{6})$/;
+  const shortHex = /^#([0-9a-fA-F]{3})$/;
+  let normalized = null;
+  if (longHex.test(hex)) normalized = hex.slice(1);
+  else if (shortHex.test(hex)) normalized = hex.slice(1).split('').map((ch) => `${ch}${ch}`).join('');
+  if (!normalized) return color;
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${safe})`;
+}
 
 function clampNumber(value, min, max, fallback = min) {
   const n = Number(value);
@@ -152,6 +209,7 @@ export class GameClient {
     this.voiceState = null;
     this.voicePresence = { hero: false, president: false };
     this.gameOverLatched = false;
+    this.gameOverLatchedAtMs = 0;
     this.gameOverRevealAtMs = 0;
     this.nextGameOverBoomAtMs = 0;
     this.hostAuthoritative = false;
@@ -165,6 +223,21 @@ export class GameClient {
     this.cursorHiddenForIdle = false;
     this.cursorLastActivityAt = performance.now();
     this.testSettings = this.defaultTestSettings();
+    this.postGameReportData = null;
+    this.postGameRenderedKey = null;
+    this.postGamePreviewDataUrl = '';
+    this.postUpgradeFeedEvents = [];
+    this.postUpgradeScrubRatio = 0;
+    this.postUpgradeScrubRaf = 0;
+    this.controllerRematch = {
+      gameOver: false,
+      requested: false,
+      votes: 0,
+      totalConnected: 0,
+      requiredPlayers: 0,
+      missingPlayers: 0,
+      immediateRematchReady: false,
+    };
 
     this.bindDom();
     this.bindEvents();
@@ -181,6 +254,9 @@ export class GameClient {
     this.controllerPanel = document.getElementById('controllerPanel');
     this.controllerJoin = document.getElementById('controllerJoin');
     this.controllerMsg = document.getElementById('controllerMsg');
+    this.controllerRematchPanel = document.getElementById('controllerRematchPanel');
+    this.controllerRematchBtn = document.getElementById('controllerRematchBtn');
+    this.controllerRematchStatus = document.getElementById('controllerRematchStatus');
 
     this.canvas = document.getElementById('game');
     this.renderer = new GameRenderer(this.canvas);
@@ -236,6 +312,11 @@ export class GameClient {
     this.postGameTitle = document.getElementById('postGameTitle');
     this.postGameStats = document.getElementById('postGameStats');
     this.postGameExplain = document.getElementById('postGameExplain');
+    this.postGamePreview = document.getElementById('postGamePreview');
+    this.postSummaryGrid = document.getElementById('postSummaryGrid');
+    this.postCompareRows = document.getElementById('postCompareRows');
+    this.postEconChart = document.getElementById('postEconChart');
+    this.postUpgradeTimeline = document.getElementById('postUpgradeTimeline');
     this.restartMatchBtn = document.getElementById('restartMatchBtn');
     this.restartMsg = document.getElementById('restartMsg');
 
@@ -247,6 +328,12 @@ export class GameClient {
   }
 
   bindEvents() {
+    this.controllerRematchBtn?.addEventListener('click', () => {
+      if (!this.isController || !this.state.roomId) return;
+      const wantsRematch = !Boolean(this.controllerRematch?.requested);
+      this.requestControllerRematch(wantsRematch);
+    });
+
     if (!this.isController) {
       this.mode2PlayersBtn?.addEventListener('click', () => this.setCreateMode('1v1'));
       this.mode4PlayersBtn?.addEventListener('click', () => this.setCreateMode('2v2'));
@@ -271,7 +358,14 @@ export class GameClient {
       window.addEventListener('pointermove', () => this.handleDisplayPointerActivity());
       window.addEventListener('mousemove', () => this.handleDisplayPointerActivity());
       window.addEventListener('mousedown', () => this.handleDisplayPointerActivity());
-      window.addEventListener('resize', () => this.renderLobbyPhonePreviews());
+      window.addEventListener('resize', () => {
+        this.renderLobbyPhonePreviews();
+        if (!this.postGamePanel?.classList.contains('hidden') && this.state.snapshot?.gameOver) {
+          this.renderPostGameDashboard(this.state.snapshot, true);
+        }
+      });
+      this.postEconChart?.addEventListener('mousemove', (event) => this.handlePostChartHover(event));
+      this.postEconChart?.addEventListener('mouseenter', (event) => this.handlePostChartHover(event));
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -329,8 +423,17 @@ export class GameClient {
       else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change room size.';
     });
 
-    this.socket.on('room_restarted', () => {
-      if (this.isController) return;
+    this.socket.on('room_restarted', (payload = {}) => {
+      if (this.isController) {
+        const immediate = Boolean(payload?.immediateRematch);
+        const waitingForPlayers = Boolean(payload?.waitingForPlayers);
+        if (immediate) this.controllerMsg.textContent = 'Rematch started. Get ready.';
+        else if (waitingForPlayers) this.controllerMsg.textContent = 'Rematch accepted. Waiting for missing players to rejoin.';
+        else this.controllerMsg.textContent = 'Match restarted.';
+        this.resetControllerRematchState();
+        this.renderControllerRematchUi();
+        return;
+      }
       if (this.hostAuthoritative && this.localRoom) {
         this.localRoom.restartMatch();
         if (typeof this.localRoom.setDebugConfig === 'function') {
@@ -354,16 +457,23 @@ export class GameClient {
       this.state.side = side;
       this.state.slot = Number.isFinite(slot) ? slot : 0;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.resetControllerRematchState();
       const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
       this.controllerMsg.textContent = `Connected as ${sideLabel(side)}${laneText}. Room needs ${requiredPlayers || 2} controllers.`;
       this.pullPad.setSide(side);
       this.setControllerMode(true);
+      this.renderControllerRematchUi();
       this.socket.emit('control_pull', { roomId, x: this.pullPad.pull.x, y: this.pullPad.pull.y });
     });
 
     this.socket.on('join_error', ({ message }) => {
       if (this.isController) this.controllerMsg.textContent = message;
       else if (this.menuMsg) this.menuMsg.textContent = message;
+    });
+
+    this.socket.on('controller_rematch_error', ({ message }) => {
+      if (!this.isController) return;
+      this.controllerMsg.textContent = message || 'Unable to update rematch request.';
     });
 
     this.socket.on('player_left', () => {
@@ -660,6 +770,14 @@ export class GameClient {
     this.socket.emit('restart_room', { roomId: this.state.roomId });
   }
 
+  requestControllerRematch(wantsRematch = true) {
+    if (!this.isController || !this.state.roomId) return;
+    this.socket.emit('controller_rematch', {
+      roomId: this.state.roomId,
+      wantsRematch: Boolean(wantsRematch),
+    });
+  }
+
   syncModeToggleButtons(twoBtn, fourBtn, normalizedMode) {
     const twoPlayers = normalizedMode === '1v1';
     if (twoBtn) {
@@ -820,6 +938,530 @@ export class GameClient {
     for (const entry of this.lobbyPhoneSlots) {
       this.renderLobbyPhoneSlot(entry, source, archersPerSide);
     }
+  }
+
+  formatPostTime(sec = 0) {
+    const whole = Math.max(0, Math.round(Number(sec) || 0));
+    const mins = Math.floor(whole / 60);
+    const rem = whole % 60;
+    return `${mins}:${String(rem).padStart(2, '0')}`;
+  }
+
+  luckPercent(luck = {}) {
+    const attempts = Math.max(0, Number(luck?.attempts) || 0);
+    const expected = Math.max(0, Number(luck?.expectedSuccess) || 0);
+    const actual = Math.max(0, Number(luck?.actualSuccess) || 0);
+    if (attempts <= 0) return null;
+    if (expected <= 1e-6) return 100;
+    return Math.max(0, (actual / expected) * 100);
+  }
+
+  numberCompact(value, digits = 0) {
+    const n = Number(value) || 0;
+    if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return n.toFixed(digits);
+  }
+
+  postCanvasContext(canvas) {
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(320, Math.round(rect.width || canvas.width || 320));
+    const height = Math.max(160, Math.round(rect.height || canvas.height || 180));
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const targetW = Math.max(1, Math.round(width * dpr));
+    const targetH = Math.max(1, Math.round(height * dpr));
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
+    return { ctx, width, height };
+  }
+
+  drawPostChartGrid(ctx, left, top, width, height, ySteps = 4, xSteps = 6) {
+    ctx.save();
+    const bg = ctx.createLinearGradient(0, top, 0, top + height);
+    bg.addColorStop(0, 'rgba(18, 36, 60, 0.66)');
+    bg.addColorStop(1, 'rgba(8, 16, 30, 0.86)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(left, top, width, height);
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(150, 180, 220, 0.16)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= ySteps; i += 1) {
+      const y = top + (i / ySteps) * height;
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(left + width, y);
+      ctx.stroke();
+    }
+    for (let i = 0; i <= xSteps; i += 1) {
+      const x = left + (i / xSteps) * width;
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, top + height);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(190, 214, 245, 0.24)';
+    ctx.strokeRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1));
+    ctx.restore();
+  }
+
+  drawSeriesLines(ctx, points, chartRect, series, maxY, xMax, options = {}) {
+    if (!Array.isArray(points) || !points.length || !Array.isArray(series) || !series.length) return;
+    const {
+      areaFill = false,
+      glow = true,
+      lineWidth = 2.4,
+      showLastDot = false,
+    } = options;
+    const maxSafe = Math.max(1e-6, Number(maxY) || 1);
+    const maxX = Math.max(1e-6, Number(xMax) || 1);
+    for (const line of series) {
+      const coords = points.map((point) => {
+        const xVal = Math.max(0, Number(point.t) || 0);
+        const yVal = Math.max(0, Number(point[line.key]) || 0);
+        return {
+          px: chartRect.x + (xVal / maxX) * chartRect.w,
+          py: chartRect.y + chartRect.h - (yVal / maxSafe) * chartRect.h,
+        };
+      });
+      if (coords.length < 2) continue;
+
+      if (areaFill) {
+        ctx.save();
+        const grad = ctx.createLinearGradient(0, chartRect.y, 0, chartRect.y + chartRect.h);
+        grad.addColorStop(0, colorWithAlpha(line.color, 0.22));
+        grad.addColorStop(1, colorWithAlpha(line.color, 0.02));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(coords[0].px, chartRect.y + chartRect.h);
+        ctx.lineTo(coords[0].px, coords[0].py);
+        for (let i = 1; i < coords.length; i += 1) {
+          const prev = coords[i - 1];
+          const cur = coords[i];
+          const cx = (prev.px + cur.px) * 0.5;
+          ctx.quadraticCurveTo(prev.px, prev.py, cx, (prev.py + cur.py) * 0.5);
+        }
+        const last = coords[coords.length - 1];
+        ctx.lineTo(last.px, chartRect.y + chartRect.h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.strokeStyle = line.color;
+      ctx.lineWidth = lineWidth;
+      if (glow) {
+        ctx.shadowColor = colorWithAlpha(line.color, 0.28);
+        ctx.shadowBlur = 9;
+      }
+      ctx.beginPath();
+      ctx.moveTo(coords[0].px, coords[0].py);
+      for (let i = 1; i < coords.length; i += 1) {
+        const prev = coords[i - 1];
+        const cur = coords[i];
+        const cx = (prev.px + cur.px) * 0.5;
+        ctx.quadraticCurveTo(prev.px, prev.py, cx, (prev.py + cur.py) * 0.5);
+      }
+      const last = coords[coords.length - 1];
+      ctx.lineTo(last.px, last.py);
+      ctx.stroke();
+      ctx.restore();
+
+      if (showLastDot) {
+        const last = coords[coords.length - 1];
+        ctx.save();
+        ctx.fillStyle = line.color;
+        ctx.beginPath();
+        ctx.arc(last.px, last.py, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  getPostGameReport(snapshot) {
+    if (snapshot?.postGameReport && typeof snapshot.postGameReport === 'object') return snapshot.postGameReport;
+    const durationSec = Math.max(0, Number(snapshot?.t) || 0);
+    const leftTower = Math.max(0, Number(snapshot?.left?.towerHp) || 0);
+    const rightTower = Math.max(0, Number(snapshot?.right?.towerHp) || 0);
+    return {
+      durationSec,
+      timeline: [
+        {
+          t: 0,
+          leftGold: 0,
+          rightGold: 0,
+          leftGoldEarned: 0,
+          rightGoldEarned: 0,
+          leftTowerHp: 6000,
+          rightTowerHp: 6000,
+          leftUpgradeScore: 0,
+          rightUpgradeScore: 0,
+          leftArrowHits: 0,
+          rightArrowHits: 0,
+          leftArrowsFired: 0,
+          rightArrowsFired: 0,
+        },
+        {
+          t: durationSec,
+          leftGold: Number(snapshot?.left?.gold) || 0,
+          rightGold: Number(snapshot?.right?.gold) || 0,
+          leftGoldEarned: Number(snapshot?.left?.goldEarnedTotal) || Number(snapshot?.left?.gold) || 0,
+          rightGoldEarned: Number(snapshot?.right?.goldEarnedTotal) || Number(snapshot?.right?.gold) || 0,
+          leftTowerHp: leftTower,
+          rightTowerHp: rightTower,
+          leftUpgradeScore: 0,
+          rightUpgradeScore: 0,
+          leftArrowHits: Number(snapshot?.left?.arrowHits) || 0,
+          rightArrowHits: Number(snapshot?.right?.arrowHits) || 0,
+          leftArrowsFired: Number(snapshot?.left?.arrowsFired) || 0,
+          rightArrowsFired: Number(snapshot?.right?.arrowsFired) || 0,
+        },
+      ],
+      upgrades: [],
+      totals: {
+        left: {
+          arrowDamage: 0,
+          unitDamage: 0,
+          towerDamageDealt: Math.max(0, 6000 - rightTower),
+          towerDamageTaken: Math.max(0, 6000 - leftTower),
+          minionKills: 0,
+        },
+        right: {
+          arrowDamage: 0,
+          unitDamage: 0,
+          towerDamageDealt: Math.max(0, 6000 - leftTower),
+          towerDamageTaken: Math.max(0, 6000 - rightTower),
+          minionKills: 0,
+        },
+      },
+      luck: {
+        left: { attempts: 0, expectedSuccess: 0, actualSuccess: 0, variance: 0, zScore: 0, events: [] },
+        right: { attempts: 0, expectedSuccess: 0, actualSuccess: 0, variance: 0, zScore: 0, events: [] },
+      },
+    };
+  }
+
+  renderPostSummary(snapshot, report) {
+    if (!this.postSummaryGrid) return;
+    const leftAcc = arrowAccuracy(snapshot.left);
+    const rightAcc = arrowAccuracy(snapshot.right);
+    const leftTotals = report?.totals?.left || {};
+    const rightTotals = report?.totals?.right || {};
+    const leftLuck = report?.luck?.left || {};
+    const rightLuck = report?.luck?.right || {};
+    const leftLuckPct = this.luckPercent(leftLuck);
+    const rightLuckPct = this.luckPercent(rightLuck);
+    const leftLuckText = Number.isFinite(leftLuckPct) ? `${leftLuckPct.toFixed(0)}%` : 'N/A';
+    const rightLuckText = Number.isFinite(rightLuckPct) ? `${rightLuckPct.toFixed(0)}%` : 'N/A';
+    const leftLuckValue = Number.isFinite(leftLuckPct) ? leftLuckPct : 100;
+    const rightLuckValue = Number.isFinite(rightLuckPct) ? rightLuckPct : 100;
+    const luckTotal = Math.max(1e-6, leftLuckValue + rightLuckValue);
+    const luckLeftFill = Math.max(0, Math.min(100, (leftLuckValue / luckTotal) * 100));
+    const luckRightFill = Math.max(0, Math.min(100, (rightLuckValue / luckTotal) * 100));
+    const leftLuckOnTop = luckLeftFill >= luckRightFill;
+    const leftTotalDamage = (Number(leftTotals.arrowDamage) || 0) + (Number(leftTotals.unitDamage) || 0) + (Number(leftTotals.towerDamageDealt) || 0);
+    const rightTotalDamage = (Number(rightTotals.arrowDamage) || 0) + (Number(rightTotals.unitDamage) || 0) + (Number(rightTotals.towerDamageDealt) || 0);
+    const winner = snapshot?.winner === 'right' ? 'East' : 'West';
+    const cards = [
+      { title: 'Duration', value: this.formatPostTime(report?.durationSec || snapshot?.t || 0) },
+      { title: 'Winner', value: `${winner} Kingdom` },
+      { title: 'Accuracy', value: `<span class="team-west">${leftAcc.rate}%</span> <span class="team-sep">vs</span> <span class="team-east">${rightAcc.rate}%</span>` },
+      { title: 'Tower Damage', value: `<span class="team-west">${this.numberCompact(leftTotals.towerDamageDealt, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.towerDamageDealt, 0)}</span>` },
+      { title: 'Total Damage', value: `<span class="team-west">${this.numberCompact(leftTotalDamage, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotalDamage, 0)}</span>` },
+      { title: 'Minion Kills', value: `<span class="team-west">${this.numberCompact(leftTotals.minionKills, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.minionKills, 0)}</span>` },
+      {
+        title: 'Luck % (Higher Better)',
+        value: `<span class="team-west">${leftLuckText}</span> <span class="team-sep">vs</span> <span class="team-east">${rightLuckText}</span>`,
+        bar: `
+          <div class="post-stat-mini-track" role="img" aria-label="Luck percent comparison">
+            <div class="post-stat-mini-mid"></div>
+            <span class="post-stat-mini-west" style="width:${luckLeftFill}%; z-index:${leftLuckOnTop ? 2 : 1}"></span>
+            <span class="post-stat-mini-east" style="width:${luckRightFill}%; z-index:${leftLuckOnTop ? 1 : 2}"></span>
+          </div>
+        `,
+      },
+    ];
+    this.postSummaryGrid.innerHTML = cards.map((card) => `
+      <article class="post-stat-card">
+        <p class="post-stat-title">${card.title}</p>
+        <p class="post-stat-value">${card.value}</p>
+        ${card.bar ? `<div class="post-stat-bar-wrap">${card.bar}</div>` : ''}
+      </article>
+    `).join('');
+    this.renderPostCompareRows(snapshot, report);
+  }
+
+  renderPostCompareRows(snapshot, report) {
+    if (!this.postCompareRows) return;
+    const leftTotals = report?.totals?.left || {};
+    const rightTotals = report?.totals?.right || {};
+    const leftAcc = arrowAccuracy(snapshot.left);
+    const rightAcc = arrowAccuracy(snapshot.right);
+    const rows = [
+      {
+        title: 'Arrow Damage',
+        leftLabel: 'West',
+        rightLabel: 'East',
+        leftValue: Math.max(0, Number(leftTotals.arrowDamage) || 0),
+        rightValue: Math.max(0, Number(rightTotals.arrowDamage) || 0),
+        format: (v) => this.numberCompact(v, 0),
+      },
+      {
+        title: 'Unit Damage',
+        leftLabel: 'West',
+        rightLabel: 'East',
+        leftValue: Math.max(0, Number(leftTotals.unitDamage) || 0),
+        rightValue: Math.max(0, Number(rightTotals.unitDamage) || 0),
+        format: (v) => this.numberCompact(v, 0),
+      },
+      {
+        title: 'Accuracy',
+        leftLabel: 'West',
+        rightLabel: 'East',
+        leftValue: Math.max(0, Number(leftAcc.rate) || 0),
+        rightValue: Math.max(0, Number(rightAcc.rate) || 0),
+        format: (v) => `${Math.round(v)}%`,
+      },
+    ];
+    this.postCompareRows.innerHTML = rows.map((row) => {
+      const total = Math.max(1e-6, row.leftValue + row.rightValue);
+      const leftPct = Math.max(0, Math.min(100, (row.leftValue / total) * 100));
+      const rightPct = Math.max(0, Math.min(100, (row.rightValue / total) * 100));
+      const leftOnTop = leftPct >= rightPct;
+      return `
+        <article class="post-compare-row">
+          <div class="post-compare-top">
+            <p class="post-compare-title">${row.title}</p>
+            <p class="post-compare-values">
+              <span class="post-compare-west">${row.leftLabel} ${row.format(row.leftValue)}</span>
+              <span class="post-compare-east">${row.rightLabel} ${row.format(row.rightValue)}</span>
+            </p>
+          </div>
+          <div class="post-tug-track" role="img" aria-label="${row.title} comparison">
+            <div class="post-tug-mid"></div>
+            <span class="post-tug-west" style="width:${leftPct}%; z-index:${leftOnTop ? 2 : 1}"></span>
+            <span class="post-tug-east" style="width:${rightPct}%; z-index:${leftOnTop ? 1 : 2}"></span>
+          </div>
+        </article>
+      `;
+    }).join('');
+  }
+
+  renderPostUpgradeFeed(report) {
+    if (!this.postUpgradeTimeline) return;
+    const upgrades = Array.isArray(report?.upgrades) ? report.upgrades.slice(-80) : [];
+    if (!upgrades.length) {
+      this.postUpgradeFeedEvents = [];
+      this.postUpgradeTimeline.innerHTML = '<p class="sub">No upgrade activations captured.</p>';
+      return;
+    }
+    this.postUpgradeTimeline.innerHTML = upgrades.map((event) => {
+      const code = POST_UPGRADE_CODES[event.type] || 'UP';
+      const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
+      const label = UPGRADE_LABELS[event.type] || event.type;
+      const side = event.side === 'right' ? 'East' : 'West';
+      const sideColor = event.side === 'right' ? '#ffb4b4' : '#a9d7ff';
+      const sideClass = event.side === 'right' ? 'side-east' : 'side-west';
+      const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
+      return `
+        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}">
+          <span class="post-upgrade-icon" style="color:${sideColor}">${icon}</span>
+          <span class="post-upgrade-label"><span class="post-upgrade-side">${side}</span> ${label} (Lv ${Math.max(0, Number(event.level) || 0)})</span>
+          <span class="post-upgrade-time">${code} ${this.formatPostTime(event.t || 0)}</span>
+        </article>
+      `;
+    }).join('');
+    this.postUpgradeFeedEvents = Array.from(this.postUpgradeTimeline.querySelectorAll('.post-upgrade-item')).map((el) => ({
+      t: Math.max(0, Number(el.dataset.eventTime) || 0),
+      el,
+    }));
+  }
+
+  handlePostChartHover(event) {
+    if (this.isController || !this.postEconChart) return;
+    if (!this.postUpgradeTimeline || !this.postUpgradeFeedEvents.length) return;
+    const rect = this.postEconChart.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const ratio = clamp01((event.clientX - rect.left) / rect.width);
+    this.postUpgradeScrubRatio = ratio;
+    if (this.postUpgradeScrubRaf) return;
+    this.postUpgradeScrubRaf = requestAnimationFrame(() => {
+      this.postUpgradeScrubRaf = 0;
+      this.scrubUpgradeFeedToRatio(this.postUpgradeScrubRatio);
+    });
+  }
+
+  scrubUpgradeFeedToRatio(ratio = 0) {
+    if (!this.postUpgradeTimeline || !this.postUpgradeFeedEvents.length) return;
+    const timeline = Array.isArray(this.postGameReportData?.timeline) ? this.postGameReportData.timeline : [];
+    const maxT = Math.max(
+      1,
+      Number(this.postGameReportData?.durationSec) || 0,
+      Number(timeline.length ? timeline[timeline.length - 1]?.t : 0) || 0
+    );
+    const targetT = clamp01(ratio) * maxT;
+    let nearest = this.postUpgradeFeedEvents[0];
+    for (let i = 1; i < this.postUpgradeFeedEvents.length; i += 1) {
+      const event = this.postUpgradeFeedEvents[i];
+      if (Math.abs(event.t - targetT) < Math.abs(nearest.t - targetT)) nearest = event;
+    }
+    const container = this.postUpgradeTimeline;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const targetTop = Math.max(
+      0,
+      Math.min(
+        maxScroll,
+        nearest.el.offsetTop - (container.clientHeight - nearest.el.offsetHeight) * 0.42
+      )
+    );
+    container.scrollTop += (targetTop - container.scrollTop) * 0.4;
+  }
+
+  drawPostEconChart(report) {
+    const canvasInfo = this.postCanvasContext(this.postEconChart);
+    if (!canvasInfo) return;
+    const { ctx, width, height } = canvasInfo;
+    const points = Array.isArray(report?.timeline) ? report.timeline : [];
+    if (!points.length) {
+      ctx.fillStyle = '#b7c9e8';
+      ctx.font = '14px sans-serif';
+      ctx.fillText('No timeline data captured.', 12, 22);
+      return;
+    }
+    const pad = { l: 46, r: 14, t: 12, b: 28 };
+    const chart = { x: pad.l, y: pad.t, w: width - pad.l - pad.r, h: height - pad.t - pad.b };
+    const maxT = Math.max(1, Number(points[points.length - 1]?.t) || 1);
+    const hasCumulative = points.some((point) => Number(point?.leftGoldEarned) > 0 || Number(point?.rightGoldEarned) > 0);
+    const leftGoldKey = hasCumulative ? 'leftGoldEarned' : 'leftGold';
+    const rightGoldKey = hasCumulative ? 'rightGoldEarned' : 'rightGold';
+    const maxGold = Math.max(
+      1,
+      ...points.map((point) => Math.max(0, Number(point[leftGoldKey]) || 0, Number(point[rightGoldKey]) || 0))
+    );
+    this.drawPostChartGrid(ctx, chart.x, chart.y, chart.w, chart.h, 4, 6);
+    this.drawSeriesLines(
+      ctx,
+      points,
+      chart,
+      [
+        { key: leftGoldKey, color: '#72c9ff' },
+        { key: rightGoldKey, color: '#ff9196' },
+      ],
+      maxGold,
+      maxT,
+      { areaFill: true, glow: true, lineWidth: 2.6, showLastDot: true }
+    );
+
+    const upgrades = Array.isArray(report?.upgrades) ? report.upgrades : [];
+    for (let i = 0; i < upgrades.length; i += 1) {
+      const event = upgrades[i];
+      const px = chart.x + (Math.max(0, Number(event.t) || 0) / maxT) * chart.w;
+      const matchingPoint = points.find((point) => Math.abs((Number(point?.t) || 0) - (Number(event.t) || 0)) <= 0.55);
+      const yVal = event.side === 'right'
+        ? Number(matchingPoint?.[rightGoldKey]) || 0
+        : Number(matchingPoint?.[leftGoldKey]) || 0;
+      const pyBase = chart.y + chart.h - (Math.max(0, yVal) / maxGold) * chart.h;
+      const py = Math.max(chart.y + 14, Math.min(chart.y + chart.h - 10, pyBase - 12 - (i % 2) * 10));
+      const color = event.side === 'right' ? '#ff9ba2' : '#8dd0ff';
+      const code = POST_UPGRADE_CODES[event.type] || 'UP';
+      const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
+      ctx.strokeStyle = colorWithAlpha(color, 0.95);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, 8.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#07101d';
+      ctx.font = '11px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(icon, px, py + 3.5);
+      ctx.fillStyle = colorWithAlpha(color, 0.88);
+      ctx.font = '9px monospace';
+      ctx.fillText(code, px, py - 10);
+    }
+
+    ctx.save();
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(191, 210, 240, 0.86)';
+    ctx.font = '10px sans-serif';
+    for (let i = 0; i <= 4; i += 1) {
+      const y = chart.y + (i / 4) * chart.h;
+      const value = Math.round(maxGold * (1 - i / 4));
+      ctx.fillText(this.numberCompact(value, 0), chart.x - 6, y + 3);
+    }
+    ctx.restore();
+
+    ctx.save();
+    const legend = [
+      { label: hasCumulative ? 'West Cumulative Gold' : 'West Gold', color: '#72c9ff' },
+      { label: hasCumulative ? 'East Cumulative Gold' : 'East Gold', color: '#ff9196' },
+    ];
+    let lx = chart.x + 8;
+    const ly = chart.y + 8;
+    ctx.font = '10px sans-serif';
+    for (const item of legend) {
+      ctx.fillStyle = item.color;
+      ctx.fillRect(lx, ly, 10, 10);
+      ctx.fillStyle = 'rgba(225, 237, 255, 0.9)';
+      ctx.fillText(item.label, lx + 14, ly + 9);
+      lx += ctx.measureText(item.label).width + 30;
+    }
+    ctx.restore();
+
+    ctx.fillStyle = '#bcd2f2';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(hasCumulative ? 'Cumulative Gold Earned' : 'Gold', chart.x, chart.y - 2);
+    ctx.textAlign = 'right';
+    ctx.fillText(`Max ${Math.round(maxGold)}`, chart.x + chart.w, chart.y - 2);
+    ctx.textAlign = 'left';
+    ctx.fillText('0:00', chart.x, chart.y + chart.h + 16);
+    ctx.textAlign = 'right';
+    ctx.fillText(this.formatPostTime(maxT), chart.x + chart.w, chart.y + chart.h + 16);
+  }
+
+  renderPostGameCharts(report) {
+    this.drawPostEconChart(report);
+  }
+
+  renderPostGameDashboard(snapshot, force = false) {
+    if (!snapshot) return;
+    const report = this.getPostGameReport(snapshot);
+    const reportKey = [
+      snapshot?.winner || 'none',
+      Math.round((Number(report?.durationSec) || 0) * 10),
+      Array.isArray(report?.timeline) ? report.timeline.length : 0,
+      Array.isArray(report?.upgrades) ? report.upgrades.length : 0,
+    ].join('|');
+    if (!force && this.postGameRenderedKey === reportKey) return;
+    this.postGameRenderedKey = reportKey;
+    this.postGameReportData = report;
+
+    const winnerLabel = sideName(snapshot.winner);
+    if (this.postGameTitle) this.postGameTitle.textContent = `${winnerLabel} Kingdom Victory Report`;
+    if (this.postGameStats) {
+      const leftAcc = arrowAccuracy(snapshot.left);
+      const rightAcc = arrowAccuracy(snapshot.right);
+      this.postGameStats.innerHTML = `<span class="team-west">West Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows)</span> <span class="team-sep">|</span> <span class="team-east">East Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows)</span>`;
+    }
+    if (this.postGameExplain) this.postGameExplain.textContent = 'Top stats include color-coded luck % (100% is expected luck). Chart below shows economy with upgrade spikes.';
+
+    this.renderPostSummary(snapshot, report);
+    this.renderPostUpgradeFeed(report);
+    this.renderPostGameCharts(report);
   }
 
   defaultTestSettings() {
@@ -1301,8 +1943,72 @@ export class GameClient {
     }
   }
 
+  resetControllerRematchState() {
+    this.controllerRematch = {
+      gameOver: false,
+      requested: false,
+      votes: 0,
+      totalConnected: 0,
+      requiredPlayers: Number(this.state.mode === '2v2' ? 4 : 2),
+      missingPlayers: 0,
+      immediateRematchReady: false,
+    };
+  }
+
+  updateControllerRematchFromPayload(payload = {}) {
+    const rematch = payload?.rematch || {};
+    const requiredPlayers = Math.max(
+      2,
+      Number(rematch.requiredPlayers)
+      || Number(payload.requiredPlayers)
+      || Number(this.state.mode === '2v2' ? 4 : 2)
+    );
+    const connected = Math.max(0, Number(rematch.totalConnected) || Number(payload.playerCount) || 0);
+    this.controllerRematch = {
+      gameOver: Boolean(payload?.gameOver),
+      requested: Boolean(rematch.requested),
+      votes: Math.max(0, Number(rematch.votes) || 0),
+      totalConnected: connected,
+      requiredPlayers,
+      missingPlayers: Math.max(0, Number(rematch.missingPlayers) || (requiredPlayers - connected)),
+      immediateRematchReady: Boolean(rematch.immediateRematchReady),
+    };
+  }
+
+  renderControllerRematchUi() {
+    if (!this.isController || !this.controllerRematchPanel) return;
+    const showPanel = Boolean(this.state.roomId && this.controllerRematch?.gameOver);
+    this.controllerRematchPanel.classList.toggle('hidden', !showPanel);
+    if (!showPanel) return;
+    const requested = Boolean(this.controllerRematch?.requested);
+    const votes = Math.max(0, Number(this.controllerRematch?.votes) || 0);
+    const connected = Math.max(0, Number(this.controllerRematch?.totalConnected) || 0);
+    const missingPlayers = Math.max(0, Number(this.controllerRematch?.missingPlayers) || 0);
+    const immediateReady = Boolean(this.controllerRematch?.immediateRematchReady);
+
+    if (this.controllerRematchBtn) {
+      this.controllerRematchBtn.disabled = !this.state.roomId;
+      this.controllerRematchBtn.classList.toggle('active', requested);
+      this.controllerRematchBtn.textContent = requested ? 'Cancel Rematch Request' : 'Request Rematch';
+    }
+    if (this.controllerRematchStatus) {
+      let statusText = `Rematch votes: ${votes}/${connected} connected controllers.`;
+      if (missingPlayers > 0) {
+        const noun = missingPlayers === 1 ? 'player' : 'players';
+        statusText += ` ${missingPlayers} more ${noun} needed before next round starts.`;
+      } else if (immediateReady) {
+        statusText += ' Full lobby is present, so rematch can start immediately.';
+      } else {
+        statusText += ' Waiting for all currently connected controllers to vote.';
+      }
+      if (requested) statusText += ' You voted yes.';
+      this.controllerRematchStatus.textContent = statusText;
+    }
+  }
+
   handleControllerState(snapshot) {
     if (!this.state.side) return;
+    this.updateControllerRematchFromPayload(snapshot);
 
     const me = snapshot[this.state.side];
     const laneText = snapshot.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
@@ -1313,9 +2019,10 @@ export class GameClient {
       const enemySide = this.state.side === 'left' ? 'right' : 'left';
       const enemyAcc = arrowAccuracy(snapshot[enemySide]);
       const outcome = snapshot.winner === this.state.side ? 'Victory' : 'Defeat';
-      this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Waiting for host restart`;
+      this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Vote for rematch below`;
     }
     this.setControllerMode(true);
+    this.renderControllerRematchUi();
     this.pullPad.draw();
   }
 
@@ -1331,10 +2038,12 @@ export class GameClient {
     const enemy = payload.enemy || {};
     const requiredPlayers = Number(payload.requiredPlayers) || (this.state.mode === '2v2' ? 4 : 2);
     const playerCount = Number(payload.playerCount) || 0;
+    this.updateControllerRematchFromPayload(payload);
 
     if (!payload.started && !payload.gameOver) {
       this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
       this.setControllerMode(true);
+      this.renderControllerRematchUi();
       this.pullPad.draw();
       return;
     }
@@ -1345,40 +2054,70 @@ export class GameClient {
       const myAcc = arrowAccuracy(me);
       const enemyAcc = arrowAccuracy(enemy);
       const outcome = payload.winner === this.state.side ? 'Victory' : 'Defeat';
-      this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Waiting for host restart`;
+      this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Vote for rematch below`;
     }
 
     this.setControllerMode(true);
+    this.renderControllerRematchUi();
     this.pullPad.draw();
   }
 
   setPostGamePanel(visible, snapshot = null) {
     if (!this.postGamePanel || this.isController) return;
-    this.postGamePanel.classList.toggle('hidden', !visible);
-    if (!visible || !snapshot) {
+    const canShow = Boolean(
+      visible
+      && snapshot?.gameOver
+      && this.displayMode === 'game'
+      && (snapshot?.started || this.gameOverLatched)
+    );
+    const wasHidden = this.postGamePanel.classList.contains('hidden');
+    this.postGamePanel.classList.toggle('hidden', !canShow);
+    if (!canShow || !snapshot) {
+      this.postGameReportData = null;
+      this.postGameRenderedKey = null;
+      this.postGamePreviewDataUrl = '';
+      if (this.postGamePreview) this.postGamePreview.removeAttribute('src');
       if (this.restartMsg) this.restartMsg.textContent = '';
       return;
     }
-    const winnerLabel = sideName(snapshot.winner);
-    const leftSummary = arrowAccuracySummary('West', snapshot.left);
-    const rightSummary = arrowAccuracySummary('East', snapshot.right);
-    if (this.postGameTitle) this.postGameTitle.textContent = `${winnerLabel} Kingdom Wins`;
-    if (this.postGameStats) this.postGameStats.textContent = `${leftSummary} | ${rightSummary}`;
-    if (this.postGameExplain) this.postGameExplain.textContent = 'Arrow Accuracy = hits / arrows fired';
+    if (wasHidden || !this.postGamePreviewDataUrl) this.capturePostGamePreview();
+    this.renderPostGameDashboard(snapshot, wasHidden);
+  }
+
+  capturePostGamePreview() {
+    if (!this.postGamePreview || !this.canvas) return;
+    try {
+      const imageData = this.canvas.toDataURL('image/jpeg', 0.74);
+      if (typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+        this.postGamePreviewDataUrl = imageData;
+        this.postGamePreview.src = imageData;
+        return;
+      }
+    } catch {
+      // Ignore preview capture failures; panel still works without thumbnail.
+    }
+    this.postGamePreviewDataUrl = '';
+    this.postGamePreview.removeAttribute('src');
   }
 
   resetGameOverPresentation() {
     this.gameOverLatched = false;
+    this.gameOverLatchedAtMs = 0;
     this.gameOverRevealAtMs = 0;
     this.nextGameOverBoomAtMs = 0;
+    this.postGameReportData = null;
+    this.postGameRenderedKey = null;
+    this.postGamePreviewDataUrl = '';
+    if (this.postGamePreview) this.postGamePreview.removeAttribute('src');
   }
 
   handleDisplayState(snapshot) {
     const mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
     this.state.mode = mode;
+    const postGameActive = Boolean(snapshot.gameOver && (snapshot.started || this.gameOverLatched));
     if (this.state.createMode !== mode) this.setCreateMode(mode);
     this.updateHud(snapshot);
-    if (snapshot.started) this.setDisplayMode('game');
+    if (snapshot.started || postGameActive) this.setDisplayMode('game');
     else if (this.state.roomId) {
       this.setDisplayMode('lobby');
       this.setPostGamePanel(false);
@@ -1392,25 +2131,27 @@ export class GameClient {
       this.renderLobbyPhonePreviews();
     }
 
-    if (snapshot.gameOver) {
+    if (postGameActive) {
       const now = performance.now();
       if (!this.gameOverLatched) {
         this.gameOverLatched = true;
+        this.gameOverLatchedAtMs = now;
         this.gameOverRevealAtMs = now + GAME_OVER_CINEMATIC_MS;
         this.nextGameOverBoomAtMs = now;
       }
+      const revealReady = this.gameOverLatchedAtMs > 0 && (now - this.gameOverLatchedAtMs) >= GAME_OVER_CINEMATIC_MS;
 
-      if (!this.isController && this.sound && now < this.gameOverRevealAtMs && now >= this.nextGameOverBoomAtMs) {
+      if (!this.isController && this.sound && !revealReady && now >= this.nextGameOverBoomAtMs) {
         this.sound.play('explosion');
         this.sound.play('dragonfire');
         this.nextGameOverBoomAtMs = now + 420 + Math.random() * 170;
       }
 
-      if (!this.isController && this.centerHud && now < this.gameOverRevealAtMs) {
+      if (!this.isController && this.centerHud && !revealReady) {
         this.centerHud.textContent = 'Tower collapsing...';
       }
 
-      this.setPostGamePanel(now >= this.gameOverRevealAtMs, snapshot);
+      this.setPostGamePanel(revealReady, snapshot);
       this.updateDisplayCursorIdle(now);
       return;
     }
@@ -1497,6 +2238,8 @@ export class GameClient {
     this.controllerPanel.classList.toggle('active-room', joined);
     this.controllerJoin.classList.toggle('hidden', joined);
     this.controls.classList.toggle('hidden', !joined);
+    if (!joined) this.resetControllerRematchState();
+    this.renderControllerRematchUi();
     if (this.isController) this.setKeepAwake(joined);
   }
 

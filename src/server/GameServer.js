@@ -40,6 +40,7 @@ class ServerRoom {
     this.lastControllerFrame = null;
     this.nextControllerStateEmitAtMs = null;
     this.hostAuthoritative = true;
+    this.rematchVotes = new Set();
   }
 
   requiredPlayers() {
@@ -52,6 +53,51 @@ class ServerRoom {
 
   isReadyToStart() {
     return this.players.left.length >= this.archersPerSide && this.players.right.length >= this.archersPerSide;
+  }
+
+  clearRematchVotes() {
+    this.rematchVotes.clear();
+  }
+
+  activePlayerSocketIds() {
+    const ids = [];
+    for (const p of this.players.left) if (p?.id) ids.push(p.id);
+    for (const p of this.players.right) if (p?.id) ids.push(p.id);
+    return ids;
+  }
+
+  sanitizeRematchVotes() {
+    if (!this.rematchVotes.size) return;
+    const activeIds = new Set(this.activePlayerSocketIds());
+    for (const id of Array.from(this.rematchVotes)) {
+      if (!activeIds.has(id)) this.rematchVotes.delete(id);
+    }
+  }
+
+  setRematchVote(socketId, wantsRematch) {
+    const found = this.playerBySocket(socketId);
+    if (!found) return { ok: false, message: 'Only connected controllers can vote for rematch.' };
+    if (wantsRematch) this.rematchVotes.add(socketId);
+    else this.rematchVotes.delete(socketId);
+    this.sanitizeRematchVotes();
+    return { ok: true };
+  }
+
+  rematchStatus(socketId = null) {
+    this.sanitizeRematchVotes();
+    const totalConnected = this.totalPlayers();
+    const votes = this.rematchVotes.size;
+    const requiredPlayers = this.requiredPlayers();
+    const missingPlayers = Math.max(0, requiredPlayers - totalConnected);
+    return {
+      votes,
+      totalConnected,
+      requiredPlayers,
+      missingPlayers,
+      requested: socketId ? this.rematchVotes.has(socketId) : false,
+      allConnectedReady: totalConnected > 0 && votes >= totalConnected,
+      immediateRematchReady: this.isReadyToStart(),
+    };
   }
 
   attachDisplay(socketId, name) {
@@ -114,6 +160,7 @@ class ServerRoom {
     this.mode = nextMode;
     this.archersPerSide = nextArchersPerSide;
     this.started = this.isReadyToStart();
+    this.clearRematchVotes();
     return { ok: true, changed: true };
   }
 
@@ -123,6 +170,7 @@ class ServerRoom {
       this.display = null;
       changed = true;
     }
+    this.rematchVotes.delete(socketId);
     const leftBefore = this.players.left.length;
     this.players.left = this.players.left.filter((p) => p.id !== socketId);
     if (this.players.left.length !== leftBefore) {
@@ -279,19 +327,35 @@ class GameServer {
           socket.emit('room_restart_error', { message: 'Only the host display can restart the match.' });
           return;
         }
-        const gameOver = Boolean(room.lastHostState?.gameOver || room.lastControllerFrame?.gameOver);
-        if (!gameOver) {
+        const result = this.restartAfterGameOver(room, { trigger: 'host' });
+        if (!result?.ok) {
           socket.emit('room_restart_error', { message: 'Match has not ended yet.' });
           return;
         }
-        room.gameOver = false;
-        room.winner = null;
-        room.lastHostState = null;
-        room.lastControllerFrame = null;
-        this.io.to(room.id).emit('room_restarted', {
-          mode: room.mode,
-          requiredPlayers: room.requiredPlayers(),
-        });
+      });
+
+      socket.on('controller_rematch', ({ roomId, wantsRematch }) => {
+        const room = this.rooms.get((roomId || '').toUpperCase());
+        if (!room) {
+          socket.emit('controller_rematch_error', { message: 'Room not found.' });
+          return;
+        }
+        const player = room.playerBySocket(socket.id);
+        if (!player) {
+          socket.emit('controller_rematch_error', { message: 'Only connected controllers can request rematch.' });
+          return;
+        }
+        if (!Boolean(room.lastHostState?.gameOver || room.lastControllerFrame?.gameOver || room.gameOver)) {
+          socket.emit('controller_rematch_error', { message: 'Rematch is only available after match end.' });
+          return;
+        }
+        const voteResult = room.setRematchVote(socket.id, wantsRematch !== false);
+        if (!voteResult?.ok) {
+          socket.emit('controller_rematch_error', { message: voteResult?.message || 'Unable to record rematch vote.' });
+          return;
+        }
+        const autoResult = this.autoResolveControllerRematch(room);
+        if (autoResult?.ok) return;
         this.broadcastRoom(room, { forceController: true });
       });
 
@@ -316,6 +380,7 @@ class GameServer {
         if (!room || !room.hostAuthoritative) return;
         if (!room.display || room.display.id !== socket.id) return;
         const nowMs = Date.now();
+        const wasGameOver = Boolean(room.gameOver);
         if (controllerFrame) {
           room.lastControllerFrame = controllerFrame;
           room.gameOver = Boolean(controllerFrame.gameOver);
@@ -329,6 +394,8 @@ class GameServer {
         } else {
           room.lastHostState = null;
         }
+        if (wasGameOver && !room.gameOver) room.clearRematchVotes();
+        if (!room.gameOver && room.rematchVotes.size) room.clearRematchVotes();
         this.emitControllerStates(room, room.lastControllerFrame || snapshot, false, nowMs);
         if (Array.isArray(sfxEvents) && sfxEvents.length) this.emitEventToDisplays(room, 'hit_sfx', sfxEvents, { excludeDisplay: true });
         if (Array.isArray(damageEvents) && damageEvents.length) this.emitEventToDisplays(room, 'damage_text', damageEvents, { excludeDisplay: true });
@@ -344,7 +411,8 @@ class GameServer {
             this.rooms.delete(roomId);
           } else {
             this.io.to(room.id).emit('player_left');
-            this.broadcastRoom(room, { forceController: true });
+            const autoResult = this.autoResolveControllerRematch(room);
+            if (!autoResult?.ok) this.broadcastRoom(room, { forceController: true });
           }
         }
       });
@@ -356,6 +424,38 @@ class GameServer {
     for (const p of room.players.left) if (p?.id) ids.push(p.id);
     for (const p of room.players.right) if (p?.id) ids.push(p.id);
     return ids;
+  }
+
+  restartAfterGameOver(room, options = {}) {
+    const trigger = options?.trigger === 'controllers' ? 'controllers' : 'host';
+    const gameOver = Boolean(room.lastHostState?.gameOver || room.lastControllerFrame?.gameOver || room.gameOver);
+    if (!gameOver) return { ok: false, message: 'Match has not ended yet.' };
+    const immediateRematch = room.isReadyToStart();
+    const waitingForPlayers = !immediateRematch;
+    room.gameOver = false;
+    room.winner = null;
+    room.lastHostState = null;
+    room.lastControllerFrame = null;
+    room.started = room.isReadyToStart();
+    room.clearRematchVotes();
+    this.io.to(room.id).emit('room_restarted', {
+      mode: room.mode,
+      requiredPlayers: room.requiredPlayers(),
+      trigger,
+      immediateRematch,
+      waitingForPlayers,
+    });
+    this.broadcastRoom(room, { forceController: true });
+    return { ok: true, immediateRematch, waitingForPlayers };
+  }
+
+  autoResolveControllerRematch(room) {
+    if (!Boolean(room.gameOver || room.lastHostState?.gameOver || room.lastControllerFrame?.gameOver)) {
+      return { ok: false, message: 'Match is not over.' };
+    }
+    const status = room.rematchStatus();
+    if (!status.allConnectedReady) return { ok: false, status };
+    return this.restartAfterGameOver(room, { trigger: 'controllers' });
   }
 
   emitStateToDisplays(room, snapshot, options = {}) {
@@ -389,7 +489,7 @@ class GameServer {
     };
   }
 
-  buildControllerState(room, snapshot, side, slot) {
+  buildControllerState(room, snapshot, side, slot, socketId = null) {
     const defaultSide = {
       towerHp: 0,
       shotCd: 0,
@@ -423,6 +523,7 @@ class GameServer {
       playerCount: Number(source.playerCount) || room.totalPlayers(),
       me: this.compactControllerSide(source[sideName] || defaultSide),
       enemy: this.compactControllerSide(source[enemySide] || defaultSide),
+      rematch: room.rematchStatus(socketId),
     };
   }
 
@@ -436,11 +537,11 @@ class GameServer {
     room.nextControllerStateEmitAtMs = nowMs + CONTROLLER_STATE_EMIT_MS;
     for (const p of room.players.left) {
       if (!p?.id) continue;
-      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'left', p.slot));
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'left', p.slot, p.id));
     }
     for (const p of room.players.right) {
       if (!p?.id) continue;
-      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'right', p.slot));
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'right', p.slot, p.id));
     }
   }
 
@@ -465,6 +566,7 @@ class GameServer {
       requiredPlayers: room.requiredPlayers(),
       playerCount: room.totalPlayers(),
       started: room.started,
+      rematch: room.rematchStatus(),
       spectatorDisplays: this.roomSpectatorDisplayCount(room),
       players: {
         left: room.players.left.map((p) => ({ id: p.id, name: p.name, slot: p.slot })),

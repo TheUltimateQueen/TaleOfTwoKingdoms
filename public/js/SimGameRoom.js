@@ -258,6 +258,10 @@ const DEBUG_FORCE_SPECIAL_TYPES = new Set([
   'president',
   'super',
 ]);
+const MATCH_SAMPLE_INTERVAL_SEC = 1;
+const MATCH_MAX_TIMELINE_POINTS = 2400;
+const MATCH_MAX_UPGRADE_EVENTS = 600;
+const MATCH_MAX_LUCK_EVENTS = 900;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -377,6 +381,7 @@ function serializeSideState(side) {
   return {
     towerHp: roundTo(state.towerHp, 1),
     gold: roundTo(state.gold, 1),
+    goldEarnedTotal: roundTo(state.goldEarnedTotal, 1),
     economyLevel: Math.max(0, Math.round(Number(state.economyLevel) || 0)),
     nextEcoCost: Math.max(0, Math.round(Number(state.nextEcoCost) || 0)),
     unitLevel: Math.max(0, Math.round(Number(state.unitLevel) || 0)),
@@ -466,6 +471,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
   return {
     towerHp: TOWER_MAX_HP,
     gold: 0,
+    goldEarnedTotal: 0,
     economyLevel: 0,
     nextEcoCost: 120,
     unitLevel: 1,
@@ -594,12 +600,237 @@ class GameRoom {
     this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
 
     this.seedUpgradeCards();
+    this.resetMatchReport();
   }
 
   setDebugConfig(rawConfig = null) {
     this.debugConfig = normalizeDebugConfig(rawConfig || null);
     this.applyDebugConfigToRoom(true);
     return this.debugConfig;
+  }
+
+  resetMatchReport() {
+    this.matchReport = {
+      nextSampleAt: 0,
+      timeline: [],
+      upgrades: [],
+      totals: {
+        left: {
+          arrowDamage: 0,
+          unitDamage: 0,
+          towerDamageDealt: 0,
+          towerDamageTaken: 0,
+          minionKills: 0,
+        },
+        right: {
+          arrowDamage: 0,
+          unitDamage: 0,
+          towerDamageDealt: 0,
+          towerDamageTaken: 0,
+          minionKills: 0,
+        },
+      },
+      luck: {
+        left: {
+          attempts: 0,
+          expectedSuccess: 0,
+          actualSuccess: 0,
+          variance: 0,
+          events: [],
+        },
+        right: {
+          attempts: 0,
+          expectedSuccess: 0,
+          actualSuccess: 0,
+          variance: 0,
+          events: [],
+        },
+      },
+    };
+    this.postGameReportCache = null;
+    this.recordMatchTimelineSample(true);
+  }
+
+  sideNameFromStateRef(sideRef) {
+    if (sideRef === this.left) return 'left';
+    if (sideRef === this.right) return 'right';
+    return null;
+  }
+
+  sideUpgradeScore(sideRef) {
+    if (!sideRef) return 0;
+    let score = 0;
+    for (const type of UPGRADE_TYPES) {
+      const rule = UPGRADE_COST_RULES[type] || { start: 0 };
+      const level = Math.max(0, Number(sideRef[type]) || 0);
+      score += Math.max(0, level - Math.max(0, Number(rule.start) || 0));
+    }
+    return score;
+  }
+
+  recordMatchTimelineSample(force = false) {
+    if (!this.matchReport) return;
+    if (!force && this.t < this.matchReport.nextSampleAt) return;
+    const point = {
+      t: roundTo(this.t, 2),
+      leftGold: roundTo(this.left?.gold, 1),
+      rightGold: roundTo(this.right?.gold, 1),
+      leftGoldEarned: roundTo(this.left?.goldEarnedTotal, 1),
+      rightGoldEarned: roundTo(this.right?.goldEarnedTotal, 1),
+      leftTowerHp: roundTo(this.left?.towerHp, 1),
+      rightTowerHp: roundTo(this.right?.towerHp, 1),
+      leftUpgradeScore: this.sideUpgradeScore(this.left),
+      rightUpgradeScore: this.sideUpgradeScore(this.right),
+      leftArrowHits: Math.max(0, Math.round(Number(this.left?.arrowHits) || 0)),
+      rightArrowHits: Math.max(0, Math.round(Number(this.right?.arrowHits) || 0)),
+      leftArrowsFired: Math.max(0, Math.round(Number(this.left?.arrowsFired) || 0)),
+      rightArrowsFired: Math.max(0, Math.round(Number(this.right?.arrowsFired) || 0)),
+    };
+    const timeline = this.matchReport.timeline;
+    const last = timeline.length ? timeline[timeline.length - 1] : null;
+    const sameMoment = last && Math.abs((Number(last.t) || 0) - point.t) <= 0.001;
+    if (sameMoment) timeline[timeline.length - 1] = point;
+    else timeline.push(point);
+    if (this.matchReport.timeline.length > MATCH_MAX_TIMELINE_POINTS) {
+      this.matchReport.timeline.splice(0, this.matchReport.timeline.length - MATCH_MAX_TIMELINE_POINTS);
+    }
+    const nextBase = force ? this.t : (this.matchReport.nextSampleAt + MATCH_SAMPLE_INTERVAL_SEC);
+    this.matchReport.nextSampleAt = Math.max(this.t + 0.001, nextBase);
+    this.postGameReportCache = null;
+  }
+
+  recordDamage(sourceSide, sourceType, amount) {
+    const sideName = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
+    if (!sideName || !this.matchReport) return;
+    const value = Math.max(0, Number(amount) || 0);
+    if (value <= 0) return;
+    const type = sourceType === 'arrow' ? 'arrow' : 'unit';
+    const totals = this.matchReport.totals?.[sideName];
+    if (totals) {
+      if (type === 'arrow') totals.arrowDamage += value;
+      else totals.unitDamage += value;
+    }
+    this.postGameReportCache = null;
+  }
+
+  recordTowerDamage(victimSide, amount, sourceSide = null) {
+    if (!this.matchReport) return;
+    const victim = victimSide === 'right' ? 'right' : (victimSide === 'left' ? 'left' : null);
+    if (!victim) return;
+    const dmg = Math.max(0, Number(amount) || 0);
+    if (dmg <= 0) return;
+    const attacker = sourceSide === 'right' || sourceSide === 'left'
+      ? sourceSide
+      : (victim === 'left' ? 'right' : 'left');
+    const victimTotals = this.matchReport.totals?.[victim];
+    const attackerTotals = this.matchReport.totals?.[attacker];
+    if (victimTotals) victimTotals.towerDamageTaken += dmg;
+    if (attackerTotals) attackerTotals.towerDamageDealt += dmg;
+    this.postGameReportCache = null;
+  }
+
+  recordMinionKill(killerSide) {
+    const sideName = killerSide === 'right' ? 'right' : (killerSide === 'left' ? 'left' : null);
+    if (!sideName || !this.matchReport) return;
+    const totals = this.matchReport.totals?.[sideName];
+    if (totals) totals.minionKills += 1;
+    this.postGameReportCache = null;
+  }
+
+  recordUpgradeEvent(sideName, type, gain, level) {
+    if (!this.matchReport) return;
+    this.matchReport.upgrades.push({
+      t: roundTo(this.t, 2),
+      side: sideName === 'right' ? 'right' : 'left',
+      type,
+      gain: Math.max(0, Number(gain) || 0),
+      level: Math.max(0, Math.round(Number(level) || 0)),
+    });
+    if (this.matchReport.upgrades.length > MATCH_MAX_UPGRADE_EVENTS) {
+      this.matchReport.upgrades.splice(0, this.matchReport.upgrades.length - MATCH_MAX_UPGRADE_EVENTS);
+    }
+    this.postGameReportCache = null;
+  }
+
+  recordSpecialRoll(sideName, type, success, chance, roll) {
+    if (!this.matchReport) return;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const luck = this.matchReport.luck?.[side];
+    if (!luck) return;
+    const p = clamp(Number(chance) || 0, 0, 1);
+    luck.attempts += 1;
+    luck.expectedSuccess += p;
+    luck.actualSuccess += success ? 1 : 0;
+    luck.variance += p * (1 - p);
+    const event = {
+      t: roundTo(this.t, 2),
+      side,
+      type,
+      success: Boolean(success),
+      chance: roundTo(p, 4),
+      roll: roundTo(Number(roll) || 0, 4),
+    };
+    luck.events.push(event);
+    if (luck.events.length > MATCH_MAX_LUCK_EVENTS) {
+      luck.events.splice(0, luck.events.length - MATCH_MAX_LUCK_EVENTS);
+    }
+    this.postGameReportCache = null;
+  }
+
+  buildPostGameReport() {
+    if (!this.matchReport) return null;
+    if (this.gameOver && this.postGameReportCache) return this.postGameReportCache;
+    const timeline = Array.isArray(this.matchReport.timeline) ? this.matchReport.timeline : [];
+    const lastSample = timeline.length ? timeline[timeline.length - 1] : null;
+    if (!lastSample || Math.abs((Number(lastSample.t) || 0) - this.t) > 0.001) {
+      this.recordMatchTimelineSample(true);
+    }
+    const packLuck = (sideName) => {
+      const raw = this.matchReport.luck?.[sideName] || {};
+      const attempts = Math.max(0, Math.round(Number(raw.attempts) || 0));
+      const expectedSuccess = Math.max(0, Number(raw.expectedSuccess) || 0);
+      const actualSuccess = Math.max(0, Number(raw.actualSuccess) || 0);
+      const variance = Math.max(0, Number(raw.variance) || 0);
+      const sigma = Math.sqrt(variance || 0);
+      const zScore = sigma > 1e-6 ? (actualSuccess - expectedSuccess) / sigma : 0;
+      return {
+        attempts,
+        expectedSuccess: roundTo(expectedSuccess, 3),
+        actualSuccess: roundTo(actualSuccess, 3),
+        variance: roundTo(variance, 3),
+        zScore: roundTo(zScore, 3),
+        events: Array.isArray(raw.events) ? raw.events.slice(-180) : [],
+      };
+    };
+
+    const totals = this.matchReport.totals || { left: {}, right: {} };
+    const report = {
+      durationSec: roundTo(this.t, 2),
+      timeline: Array.isArray(this.matchReport.timeline) ? this.matchReport.timeline.slice() : [],
+      upgrades: Array.isArray(this.matchReport.upgrades) ? this.matchReport.upgrades.slice() : [],
+      totals: {
+        left: {
+          arrowDamage: roundTo(totals.left?.arrowDamage, 2),
+          unitDamage: roundTo(totals.left?.unitDamage, 2),
+          towerDamageDealt: roundTo(totals.left?.towerDamageDealt, 2),
+          towerDamageTaken: roundTo(totals.left?.towerDamageTaken, 2),
+          minionKills: Math.max(0, Math.round(Number(totals.left?.minionKills) || 0)),
+        },
+        right: {
+          arrowDamage: roundTo(totals.right?.arrowDamage, 2),
+          unitDamage: roundTo(totals.right?.unitDamage, 2),
+          towerDamageDealt: roundTo(totals.right?.towerDamageDealt, 2),
+          towerDamageTaken: roundTo(totals.right?.towerDamageTaken, 2),
+          minionKills: Math.max(0, Math.round(Number(totals.right?.minionKills) || 0)),
+        },
+      },
+      luck: {
+        left: packLuck('left'),
+        right: packLuck('right'),
+      },
+    };
+    if (this.gameOver) this.postGameReportCache = report;
+    return report;
   }
 
   debugTargetSides() {
@@ -940,6 +1171,7 @@ class GameRoom {
         left: leftPrimary,
         right: rightPrimary,
       },
+      postGameReport: this.gameOver ? this.buildPostGameReport() : null,
       hasDisplay: Boolean(this.display),
     };
   }
@@ -1095,6 +1327,7 @@ class GameRoom {
     this.nextResourceAt = this.t + 5 / resourceMul;
     this.nextShotPowerAt = this.t + 7 / powerMul;
     this.seedUpgradeCards();
+    this.resetMatchReport();
     this.started = this.isReadyToStart();
 
     return { ok: true };
@@ -1344,9 +1577,13 @@ class GameRoom {
     this.processEconomy(this.left);
     this.processEconomy(this.right);
 
+    this.recordMatchTimelineSample(false);
+
     if (this.left.towerHp <= 0 || this.right.towerHp <= 0) {
+      this.postGameReportCache = null;
       this.gameOver = true;
       this.winner = this.left.towerHp > this.right.towerHp ? 'left' : 'right';
+      this.recordMatchTimelineSample(true);
     }
   }
 
@@ -1752,9 +1989,10 @@ class GameRoom {
     return n;
   }
 
-  igniteMinion(minion, duration = 1.6) {
+  igniteMinion(minion, duration = 1.6, sourceSide = null) {
     if (!minion) return;
     minion.candleBurnTtl = Math.max(Number(minion.candleBurnTtl) || 0, duration);
+    if (sourceSide === 'left' || sourceSide === 'right') minion.candleBurnSourceSide = sourceSide;
     const tick = Number(minion.candleBurnTick);
     if (!Number.isFinite(tick) || tick > 0.1) minion.candleBurnTick = 0.1;
   }
@@ -1771,7 +2009,8 @@ class GameRoom {
 
     minion.candleBurnTick = 0.28;
     const burnDamage = Math.max(4, 6 + (Number(minion.maxHp) || 0) * 0.0085);
-    this.dealDamageToMinion(minion, burnDamage);
+    const sourceSide = minion.candleBurnSourceSide === 'right' ? 'right' : (minion.candleBurnSourceSide === 'left' ? 'left' : null);
+    this.dealDamageToMinion(minion, burnDamage, sourceSide, 'unit');
     this.queueHitSfx('dragonfire', minion.x, minion.y - Math.max(7, (minion.r || 12) * 0.24), minion.side);
   }
 
@@ -2011,7 +2250,7 @@ class GameRoom {
     const mouthY = candle.y - 28;
 
     this.dealMinionDamage(pseudoAttacker, target, base, 'dragonfire');
-    this.igniteMinion(target, 1.05);
+    this.igniteMinion(target, 1.05, sideName);
     this.queueHitSfx('dragonfire', mouthX, mouthY, sideName);
     this.queueHitSfx('dragonfire', target.x, target.y - Math.max(6, (target.r || 12) * 0.22), sideName);
 
@@ -2025,7 +2264,7 @@ class GameRoom {
       (other) => {
         if (!other || other.id === target.id || (Number(other.hp) || 0) <= 0) return;
         this.dealMinionDamage(pseudoAttacker, other, splash, 'dragonfire');
-        this.igniteMinion(other, 0.7);
+        this.igniteMinion(other, 0.7, sideName);
       }
     );
 
@@ -2108,7 +2347,7 @@ class GameRoom {
     for (const m of holders) {
       m.candleCarrier = false;
       m.candleCarrierSide = null;
-      this.igniteMinion(m, 2.4);
+      this.igniteMinion(m, 2.4, hitSide);
     }
 
     this.candleScorches.push({
@@ -2232,15 +2471,16 @@ class GameRoom {
       const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
       const allyDps = Number.isFinite(scorch.allyDps) ? Math.max(0, scorch.allyDps) : CANDLE_SCORCH_DPS_ALLY;
       const enemyDps = Number.isFinite(scorch.enemyDps) ? Math.max(0, scorch.enemyDps) : CANDLE_SCORCH_DPS_ENEMY;
+      const scorchSide = scorch.side === 'right' ? 'right' : (scorch.side === 'left' ? 'left' : null);
       this.forEachMinionInRadius(scorch.x, scorch.y, scorch.r, minionBuckets, MINION_TARGET_BUCKET_W, (minion) => {
         const dps = minion.side === candleSide ? allyDps : enemyDps;
-        if (dps > 0) this.dealDamageToMinion(minion, dps * dt);
+        if (dps > 0) this.dealDamageToMinion(minion, dps * dt, scorchSide, 'unit');
       });
       if (scorch.towerSide === 'left' || scorch.towerSide === 'right') {
         scorch.towerBurnTick = (Number(scorch.towerBurnTick) || 0) - dt;
         if (scorch.towerBurnTick <= 0) {
           const dps = Math.max(0, Number(scorch.towerBurnDps) || 0);
-          if (dps > 0) this.dealDamageToTower(scorch.towerSide, dps * 0.25, scorch.x, TOWER_Y - 24);
+          if (dps > 0) this.dealDamageToTower(scorch.towerSide, dps * 0.25, scorch.x, TOWER_Y - 24, null, scorchSide);
           scorch.towerBurnTick = 0.25;
         }
       }
@@ -2507,7 +2747,7 @@ class GameRoom {
             continue;
           }
 
-          this.dealDamageToMinion(minion, damage);
+          this.dealDamageToMinion(minion, damage, a.side, 'arrow');
           minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
           if (shieldHeadshot && minion.hp > 0) {
             const retreatDir = minion.side === 'left' ? -1 : 1;
@@ -2529,11 +2769,11 @@ class GameRoom {
           this.markArrowHit(a);
           if (a.side === 'left') {
             const gain = this.goldFromResource(this.left, res.value);
-            this.left.gold += gain;
+            this.grantGold('left', gain, true);
             this.addUpgradeCharge(this.left, gain);
           } else {
             const gain = this.goldFromResource(this.right, res.value);
-            this.right.gold += gain;
+            this.grantGold('right', gain, true);
             this.addUpgradeCharge(this.right, gain);
           }
           this.queueHitSfx('resource', res.x, res.y, a.side);
@@ -2816,7 +3056,7 @@ class GameRoom {
 
     const side = minion.side === 'right' ? this.right : this.left;
     const gain = this.goldFromResource(side, Number(res.value) || 0);
-    side.gold += gain;
+    this.grantGold(minion.side, gain, true);
     this.addUpgradeCharge(side, gain);
     this.queueHitSfx('resource', res.x, res.y, minion.side);
     this.queueHitSfx('powerup', minion.x, minion.y - Math.max(6, minion.r * 0.3), minion.side);
@@ -3428,7 +3668,7 @@ class GameRoom {
 
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
-      this.dealDamageToMinion(victim, splash);
+      this.dealDamageToMinion(victim, splash, arrow.side, 'arrow');
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75 });
     }
@@ -3438,7 +3678,7 @@ class GameRoom {
     if (!arrow || arrow.powerType !== 'flameShot' || !target) return;
 
     const burnDamage = Math.max(1, baseDamage * (Number(arrow.flameBurn) || 0.18));
-    this.dealDamageToMinion(target, burnDamage);
+    this.dealDamageToMinion(target, burnDamage, arrow.side, 'arrow');
     target.hitFlashTtl = Math.max(Number(target.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
 
     const splashDamage = Math.max(1, baseDamage * (Number(arrow.flameSplash) || 0.24));
@@ -3462,13 +3702,13 @@ class GameRoom {
 
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
-      this.dealDamageToMinion(victim, splashDamage);
+      this.dealDamageToMinion(victim, splashDamage, arrow.side, 'arrow');
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8 });
     }
   }
 
-  dealDamageToMinion(minion, amount) {
+  dealDamageToMinion(minion, amount, sourceSide = null, sourceType = null) {
     if (!minion) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
     if (dmg <= 0) return 0;
@@ -3522,7 +3762,10 @@ class GameRoom {
     }
     if (remaining > 0) minion.hp -= remaining;
     this.queueDamageNumber(dmg, minion.x, minion.y - Math.max(8, minion.r * 0.25));
-    return dmg;
+    const effective = Math.max(0, remaining);
+    const side = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
+    if (side && effective > 0) this.recordDamage(side, sourceType === 'arrow' ? 'arrow' : 'unit', effective);
+    return effective;
   }
 
   minionDamageMultiplier(attacker, target, source = 'melee') {
@@ -3562,7 +3805,9 @@ class GameRoom {
     if (base <= 0) return 0;
     const buffed = base * this.presidentAuraMultiplier(attacker);
     const scaled = buffed * this.minionDamageMultiplier(attacker, target, source);
-    return this.dealDamageToMinion(target, scaled);
+    const sourceSide = attacker?.side === 'right' ? 'right' : (attacker?.side === 'left' ? 'left' : null);
+    const sourceType = source === 'arrow' ? 'arrow' : 'unit';
+    return this.dealDamageToMinion(target, scaled, sourceSide, sourceType);
   }
 
   presidentAuraMultiplier(attacker) {
@@ -3590,10 +3835,11 @@ class GameRoom {
   }
 
   applyMinionTowerDamage(attacker, sideName, amount, x = null, y = null) {
-    return this.dealDamageToTower(sideName, this.minionOutgoingDamage(attacker, amount), x, y, 'unit');
+    const sourceSide = attacker?.side === 'right' ? 'right' : (attacker?.side === 'left' ? 'left' : null);
+    return this.dealDamageToTower(sideName, this.minionOutgoingDamage(attacker, amount), x, y, 'unit', sourceSide);
   }
 
-  dealDamageToTower(sideName, amount, x = null, y = null, hitFx = null) {
+  dealDamageToTower(sideName, amount, x = null, y = null, hitFx = null, sourceSide = null) {
     const side = this[sideName];
     if (!side) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
@@ -3604,6 +3850,10 @@ class GameRoom {
     const tx = Number.isFinite(x) ? x : (sideName === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT);
     const ty = Number.isFinite(y) ? y : (TOWER_Y - 100);
     this.queueDamageNumber(dmg, tx, ty);
+    const source = sourceSide === 'left' || sourceSide === 'right'
+      ? sourceSide
+      : (sideName === 'left' ? 'right' : 'left');
+    this.recordTowerDamage(sideName, dmg, source);
     if (hitFx === 'unit') this.queueHitSfx('towerhit', tx, ty, sideName);
     if (firstDamage) this.triggerTowerHeroRescue(sideName, tx, ty);
     if (
@@ -4127,7 +4377,7 @@ class GameRoom {
         'gunshot'
       );
       const damage = baseDamage * styleMul * GUNNER_SKY_CANNON_MINION_DAMAGE_MULT * (0.66 + t * 0.44);
-      this.dealDamageToMinion(victim, damage);
+      this.dealDamageToMinion(victim, damage, sideName, 'unit');
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, sideName, { goldScalar: 0.88 });
     }
@@ -4145,7 +4395,8 @@ class GameRoom {
         baseDamage * GUNNER_SKY_CANNON_TOWER_DAMAGE_MULT,
         enemyTowerX,
         TOWER_Y - 24,
-        'unit'
+        'unit',
+        sideName
       );
     }
   }
@@ -4526,8 +4777,8 @@ class GameRoom {
   }
 
   awardMinionKillGold(killerSide, scalar = 1) {
-    if (killerSide === 'left') this.left.gold += this.goldFromMinionKill(this.left, scalar);
-    else if (killerSide === 'right') this.right.gold += this.goldFromMinionKill(this.right, scalar);
+    if (killerSide === 'left') this.grantGold('left', this.goldFromMinionKill(this.left, scalar), true);
+    else if (killerSide === 'right') this.grantGold('right', this.goldFromMinionKill(this.right, scalar), true);
   }
 
   queueMinionDeathGhost(minion, killerSide = null) {
@@ -4602,6 +4853,7 @@ class GameRoom {
     }
 
     this.awardMinionKillGold(killerSide, goldScalar);
+    this.recordMinionKill(killerSide);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
     this.queueMinionDeathGhost(minion, killerSide);
     minion.removed = true;
@@ -5170,6 +5422,7 @@ class GameRoom {
       side.specialRollValue = roll;
       side.specialRollTtl = SPECIAL_ROLL_TTL;
       side.specialRollByType[queuedType] = { success, chance, roll };
+      this.recordSpecialRoll(sideName, queuedType, success, chance, roll);
       if (success) {
         spawnType = queuedType;
         side.specialFailType = null;
@@ -5473,6 +5726,16 @@ class GameRoom {
     return Math.floor(value * bonus);
   }
 
+  grantGold(sideName, amount, countAsEarned = true) {
+    const side = sideName === 'right' ? this.right : this.left;
+    if (!side) return 0;
+    const gain = Math.max(0, Number(amount) || 0);
+    if (gain <= 0) return 0;
+    side.gold += gain;
+    if (countAsEarned) side.goldEarnedTotal = Math.max(0, (Number(side.goldEarnedTotal) || 0) + gain);
+    return gain;
+  }
+
   addUpgradeCharge(side, amount) {
     side.upgradeCharge = Math.min(99999, side.upgradeCharge + amount);
   }
@@ -5634,11 +5897,14 @@ class GameRoom {
     const cap = this.upgradeLevelCap(type);
     const gain = Math.max(0, Number(value) || 0);
     const current = Math.max(0, Number(side?.[type]) || 0);
+    const sideName = this.sideNameFromStateRef(side) || 'left';
     if (Number.isFinite(cap)) {
       side[type] = Math.min(cap, current + gain);
+      this.recordUpgradeEvent(sideName, type, gain, side[type]);
       return;
     }
     side[type] = current + gain;
+    this.recordUpgradeEvent(sideName, type, gain, side[type]);
   }
 
   triggerUpgradeActivation(sideName, type, value, x, y) {

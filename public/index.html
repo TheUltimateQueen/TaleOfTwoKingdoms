@@ -222,6 +222,10 @@
         <section id="controls" class="controls hidden">
           <p class="sub">Drag in the aiming cone (auto shoots on cooldown)</p>
           <canvas id="pullPad" width="520" height="520"></canvas>
+          <section id="controllerRematchPanel" class="controller-rematch hidden" aria-live="polite">
+            <button id="controllerRematchBtn" type="button">Request Rematch</button>
+            <p id="controllerRematchStatus" class="sub">Vote for rematch after match end.</p>
+          </section>
         </section>
       </section>
 
@@ -232,13 +236,42 @@
       </section>
 
       <section id="postGamePanel" class="card hidden">
-        <h2 id="postGameTitle">Match Over</h2>
-        <p id="postGameStats" class="sub"></p>
-        <p id="postGameExplain" class="sub">Arrow Accuracy = hits / arrows fired</p>
-        <div class="row">
-          <button id="restartMatchBtn" type="button">Restart Match</button>
-        </div>
-        <p id="restartMsg" class="msg"></p>
+        <div class="post-game-overlay"></div>
+        <header class="post-head">
+          <div>
+            <h2 id="postGameTitle">Match Over</h2>
+            <p id="postGameStats" class="sub"></p>
+            <p id="postGameExplain" class="sub">Detailed battle analytics</p>
+          </div>
+          <div class="post-head-actions">
+            <figure class="post-preview-card">
+              <img id="postGamePreview" alt="Final battlefield snapshot" />
+              <figcaption>Final Battlefield</figcaption>
+            </figure>
+            <button id="restartMatchBtn" type="button">Restart Match</button>
+            <p id="restartMsg" class="msg"></p>
+          </div>
+        </header>
+        <section id="postSummaryGrid" class="post-summary-grid" aria-label="Match summary metrics"></section>
+        <section id="postCompareRows" class="post-compare-rows" aria-label="Side-by-side matchup comparisons"></section>
+        <section class="post-body-grid">
+          <div class="post-chart-stack">
+            <article class="post-chart-card post-chart-card-main">
+              <h3>Gold + Upgrade Timeline</h3>
+              <p class="sub post-chart-help">Blue is West, red is East. This tracks cumulative gold earned. Upgrade icons mark power spikes.</p>
+              <div class="post-chart-scroll" aria-label="Scrollable economy chart area">
+                <canvas id="postEconChart" class="post-chart-canvas" width="1100" height="280" aria-label="Gold and upgrade timeline chart"></canvas>
+              </div>
+            </article>
+          </div>
+          <aside class="post-side-panel">
+            <section class="post-side-block">
+              <h3>Upgrade Feed</h3>
+              <p class="sub">Hover the gold chart to scrub upgrades by time.</p>
+              <div id="postUpgradeTimeline" class="post-upgrade-timeline" aria-label="Upgrade timeline"></div>
+            </section>
+          </aside>
+        </section>
       </section>
 
       <canvas id="game" class="hidden" width="1600" height="900"></canvas>
