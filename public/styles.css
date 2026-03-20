@@ -81,6 +81,205 @@ body.display-mode {
   z-index: 1;
 }
 
+.lobby-phone-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.lobby-phone-side {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: clamp(170px, 18vw, 232px);
+  max-height: calc(100dvh - 28px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lobby-phone-side.west {
+  left: 12px;
+}
+
+.lobby-phone-side.east {
+  right: 12px;
+}
+
+.lobby-phone-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  opacity: 0.88;
+}
+
+.lobby-phone-side.west .lobby-phone-title {
+  color: #9fd6ff;
+}
+
+.lobby-phone-side.east .lobby-phone-title {
+  color: #ffb2b2;
+  text-align: right;
+}
+
+.lobby-phone-slot {
+  min-height: 164px;
+}
+
+.phone-shell {
+  position: relative;
+  border-radius: 24px;
+  padding: 8px;
+  background:
+    radial-gradient(circle at 20% 0%, #ffffff40 0%, transparent 34%),
+    linear-gradient(155deg, #5f6f8f 0%, #303a55 40%, #1a2235 100%);
+  box-shadow:
+    inset 0 1px 1px #ffffff25,
+    inset 0 -6px 10px #050a1535,
+    0 8px 24px #050b1845;
+}
+
+.phone-notch {
+  position: absolute;
+  width: 48px;
+  height: 11px;
+  left: 50%;
+  top: 7px;
+  transform: translateX(-50%);
+  border-radius: 0 0 8px 8px;
+  background: #121a2a;
+  box-shadow: inset 0 1px 0 #5f6d8a55;
+}
+
+.phone-screen {
+  min-height: 148px;
+  border-radius: 18px;
+  padding: 16px 12px 10px;
+  border: 1px solid #4d618f;
+  background:
+    linear-gradient(160deg, #13233f 0%, #102039 60%, #101e35 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lobby-phone-slot.waiting .phone-screen {
+  border-color: #3d4b6b;
+  filter: saturate(0.68);
+}
+
+.phone-chip {
+  margin: 0;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #4f648f;
+  background: #1f3353;
+  color: #c6ddff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lobby-phone-slot.connected .phone-chip {
+  border-color: #4c8f6a;
+  background: #1f4f38;
+  color: #b9f5d2;
+}
+
+.phone-player {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e7f0ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phone-aim-zone {
+  position: relative;
+  height: 76px;
+  border-radius: 12px;
+  border: 1px solid #3c4f74;
+  background:
+    radial-gradient(circle at center 130%, #4775bc59 0%, transparent 64%),
+    linear-gradient(180deg, #09142a 0%, #0a1222 100%);
+  overflow: hidden;
+}
+
+.phone-aim-zone::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 14px, #93b8ff14 14px 15px),
+    repeating-linear-gradient(90deg, transparent 0 14px, #93b8ff12 14px 15px);
+}
+
+.phone-aim-anchor,
+.phone-aim-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.phone-aim-anchor {
+  width: 11px;
+  height: 11px;
+  background: #f6d381;
+  box-shadow: 0 0 10px #f4be5f77;
+}
+
+.phone-aim-line {
+  position: absolute;
+  height: 3px;
+  border-radius: 999px;
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, #ffd572 0%, #ff8c73 100%);
+  box-shadow: 0 0 10px #fda68066;
+  z-index: 1;
+}
+
+.phone-aim-dot {
+  background: #f4f7ff;
+  box-shadow: 0 0 12px #e0e9ff99;
+}
+
+.phone-power-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: #0a1220;
+  border: 1px solid #344565;
+  overflow: hidden;
+}
+
+.phone-power-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #7ec4ff 0%, #f8c164 100%);
+}
+
+.phone-meta {
+  margin: 0;
+  font-size: 11px;
+  color: #bdd3f8;
+  min-height: 15px;
+}
+
+.lobby-phone-slot.waiting .phone-meta {
+  color: #9ab0d4;
+}
+
 #controllerJoin {
   display: flex;
   flex-direction: column;
@@ -509,6 +708,35 @@ body.display-mode.display-game-mode #postGamePanel {
 }
 
 @media (max-width: 780px) {
+  .lobby-phone-preview {
+    position: static;
+    margin: 12px 0 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .lobby-phone-side {
+    position: static;
+    top: auto;
+    transform: none;
+    width: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .lobby-phone-side.east .lobby-phone-title {
+    text-align: left;
+  }
+
+  .lobby-phone-slot {
+    min-height: 174px;
+  }
+
+  .phone-screen {
+    min-height: 160px;
+  }
+
   #lobby::before {
     width: 82vw;
     height: 82vw;

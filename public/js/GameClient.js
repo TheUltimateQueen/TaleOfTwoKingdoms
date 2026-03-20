@@ -75,6 +75,10 @@ function clampNumber(value, min, max, fallback = min) {
   return Math.max(min, Math.min(max, n));
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
 function sideName(side) {
   return side === 'left' ? 'West' : 'East';
 }
@@ -167,6 +171,7 @@ export class GameClient {
     this.setupAudio();
     this.setupWakeLock();
     this.startRenderLoop();
+    this.renderLobbyPhonePreviews();
   }
 
   bindDom() {
@@ -196,6 +201,22 @@ export class GameClient {
     this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
+    this.lobbyPhonePreview = document.getElementById('lobbyPhonePreview');
+    this.lobbyLeftPhonesTitle = document.getElementById('lobbyLeftPhonesTitle');
+    this.lobbyRightPhonesTitle = document.getElementById('lobbyRightPhonesTitle');
+    this.lobbyPhoneSlots = Array.from(document.querySelectorAll('.lobby-phone-slot')).map((slotEl) => ({
+      el: slotEl,
+      side: slotEl.dataset.side === 'right' ? 'right' : 'left',
+      slot: Math.max(0, Number(slotEl.dataset.slot) || 0),
+      chip: slotEl.querySelector('.phone-chip'),
+      player: slotEl.querySelector('.phone-player'),
+      aimZone: slotEl.querySelector('.phone-aim-zone'),
+      aimAnchor: slotEl.querySelector('.phone-aim-anchor'),
+      aimLine: slotEl.querySelector('.phone-aim-line'),
+      aimDot: slotEl.querySelector('.phone-aim-dot'),
+      powerFill: slotEl.querySelector('.phone-power-fill'),
+      meta: slotEl.querySelector('.phone-meta'),
+    }));
     this.testSettingsPanel = document.getElementById('testSettingsPanel');
     this.testSettingsSummary = document.getElementById('testSettingsSummary');
     this.testApplyToInput = document.getElementById('testApplyToInput');
@@ -250,6 +271,7 @@ export class GameClient {
       window.addEventListener('pointermove', () => this.handleDisplayPointerActivity());
       window.addEventListener('mousemove', () => this.handleDisplayPointerActivity());
       window.addEventListener('mousedown', () => this.handleDisplayPointerActivity());
+      window.addEventListener('resize', () => this.renderLobbyPhonePreviews());
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -284,6 +306,7 @@ export class GameClient {
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
       if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
+      this.renderLobbyPhonePreviews();
       if (!this.isController) this.setDisplayMode('lobby');
     });
 
@@ -297,6 +320,7 @@ export class GameClient {
         this.lobbyModeMsg.textContent = `Room size updated: ${label}.`;
       }
       if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
+      this.renderLobbyPhonePreviews();
     });
 
     this.socket.on('room_mode_error', ({ message }) => {
@@ -317,6 +341,7 @@ export class GameClient {
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
+      this.renderLobbyPhonePreviews();
     });
 
     this.socket.on('room_restart_error', ({ message }) => {
@@ -344,6 +369,7 @@ export class GameClient {
     this.socket.on('player_left', () => {
       if (this.isController) this.controllerMsg.textContent = 'Other player disconnected. Waiting for reconnection...';
       else this.centerHud.textContent = 'Controller disconnected. Waiting for players...';
+      this.renderLobbyPhonePreviews();
     });
 
     this.socket.on('controller_state', (payload) => {
@@ -368,6 +394,7 @@ export class GameClient {
       control.pullY = pull.y;
       control.archerAimY = (this.localRoom.left.archerAimY || (900 / 2 - 56)) - lane * 78;
       this.localRoom.syncSidePrimaryPull(sideName);
+      this.renderLobbyPhonePreviews();
     });
 
     this.socket.on('state', (snapshot) => {
@@ -412,6 +439,7 @@ export class GameClient {
     this.startHostAuthorityLoop();
     this.pushHostState(true);
     this.updateTestQuickSummary();
+    this.renderLobbyPhonePreviews();
   }
 
   applyHostRoster(payload = {}) {
@@ -435,6 +463,7 @@ export class GameClient {
     this.localRoom.started = Boolean(payload.started);
     this.localRoom.gameOver = this.localRoom.gameOver && this.localRoom.started;
     this.pushHostState(true);
+    this.renderLobbyPhonePreviews();
   }
 
   startHostAuthorityLoop() {
@@ -648,6 +677,149 @@ export class GameClient {
     this.state.createMode = normalized;
     this.syncModeToggleButtons(this.mode2PlayersBtn, this.mode4PlayersBtn, normalized);
     this.syncModeToggleButtons(this.lobbyMode2PlayersBtn, this.lobbyMode4PlayersBtn, normalized);
+    this.renderLobbyPhonePreviews();
+  }
+
+  defaultLobbyPull(side = 'left') {
+    return {
+      pullX: side === 'right' ? 0.8 : -0.8,
+      pullY: 0,
+    };
+  }
+
+  normalizeLobbyPull(side = 'left', pull = null) {
+    const fallback = this.defaultLobbyPull(side);
+    let x = Number(pull?.pullX);
+    let y = Number(pull?.pullY);
+    if (!Number.isFinite(x)) x = fallback.pullX;
+    if (!Number.isFinite(y)) y = fallback.pullY;
+    if (side === 'left') x = Math.min(0, x);
+    else x = Math.max(0, x);
+    y = Math.min(0, y);
+
+    const mag = Math.hypot(x, y);
+    if (mag > 1) {
+      x /= mag;
+      y /= mag;
+    }
+    return { pullX: x, pullY: y };
+  }
+
+  findLobbyPlayer(players, slot = 0) {
+    if (!Array.isArray(players) || slot < 0) return null;
+    const bySlot = players.find((p) => Number(p?.slot) === slot);
+    if (bySlot) return bySlot;
+    return players[slot] || null;
+  }
+
+  getLobbyPreviewSource() {
+    const room = this.localRoom;
+    const snapshot = this.state.snapshot;
+    const leftSide = room?.left || snapshot?.left || null;
+    const rightSide = room?.right || snapshot?.right || null;
+    return {
+      players: {
+        left: Array.isArray(room?.players?.left)
+          ? room.players.left
+          : (Array.isArray(snapshot?.players?.left) ? snapshot.players.left : []),
+        right: Array.isArray(room?.players?.right)
+          ? room.players.right
+          : (Array.isArray(snapshot?.players?.right) ? snapshot.players.right : []),
+      },
+      sideState: {
+        left: leftSide,
+        right: rightSide,
+      },
+      pulls: {
+        left: Array.isArray(leftSide?.archerPulls) ? leftSide.archerPulls : [],
+        right: Array.isArray(rightSide?.archerPulls) ? rightSide.archerPulls : [],
+      },
+    };
+  }
+
+  computeLobbyShotPreview(side = 'left', pull = null) {
+    const normalized = this.normalizeLobbyPull(side, pull);
+    const forward = clamp01(Math.abs(normalized.pullX));
+    const lift = clamp01(Math.max(0, -normalized.pullY));
+    const power = clamp01(Math.hypot(forward, lift));
+    const arcDeg = Math.round((Math.atan2(lift, Math.max(0.001, forward)) * 180) / Math.PI);
+    return { forward, lift, power, arcDeg };
+  }
+
+  paintLobbyShotPreview(entry, side, shot, connected) {
+    if (!entry?.aimZone || !entry.aimAnchor || !entry.aimLine || !entry.aimDot) return;
+
+    const w = Math.max(1, entry.aimZone.clientWidth);
+    const h = Math.max(1, entry.aimZone.clientHeight);
+    const anchorX = side === 'left' ? w * 0.16 : w * 0.84;
+    const anchorY = h * 0.86;
+    const dx = (side === 'left' ? 1 : -1) * shot.forward * (w * 0.62);
+    const dy = -shot.lift * (h * 0.58);
+    const dotX = anchorX + dx;
+    const dotY = anchorY + dy;
+    const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const lineLength = Math.max(1, Math.hypot(dx, dy));
+
+    entry.aimAnchor.style.left = `${anchorX}px`;
+    entry.aimAnchor.style.top = `${anchorY}px`;
+    entry.aimLine.style.left = `${anchorX}px`;
+    entry.aimLine.style.top = `${anchorY}px`;
+    entry.aimLine.style.width = `${lineLength}px`;
+    entry.aimLine.style.transform = `translateY(-50%) rotate(${angleDeg}deg)`;
+    entry.aimDot.style.left = `${dotX}px`;
+    entry.aimDot.style.top = `${dotY}px`;
+    entry.aimLine.style.opacity = connected ? '0.95' : '0.35';
+    entry.aimDot.style.opacity = connected ? '1' : '0.45';
+  }
+
+  renderLobbyPhoneSlot(entry, source, archersPerSide) {
+    if (!entry?.el) return;
+    const inMode = entry.slot < archersPerSide;
+    entry.el.classList.toggle('hidden', !inMode);
+    if (!inMode) return;
+
+    const sidePlayers = source?.players?.[entry.side] || [];
+    const sidePulls = source?.pulls?.[entry.side] || [];
+    const sideState = source?.sideState?.[entry.side] || null;
+    const player = this.findLobbyPlayer(sidePlayers, entry.slot);
+    const connected = Boolean(player);
+    const baseName = `${sideName(entry.side)} Archer ${entry.slot + 1}`;
+    const playerName = connected && player?.name ? String(player.name) : baseName;
+    const pull = connected ? sidePulls[entry.slot] : null;
+    const shot = this.computeLobbyShotPreview(entry.side, pull || this.defaultLobbyPull(entry.side));
+    const pendingPower = sideState?.pendingShotPower
+      ? (SHOT_POWER_LABELS[sideState.pendingShotPower] || sideState.pendingShotPower)
+      : null;
+
+    entry.el.classList.toggle('waiting', !connected);
+    entry.el.classList.toggle('connected', connected);
+    if (entry.chip) entry.chip.textContent = connected ? (this.localKeyboardTestActive ? 'Keyboard' : 'Connected') : 'Waiting';
+    if (entry.player) entry.player.textContent = playerName;
+    if (entry.meta) {
+      entry.meta.textContent = connected
+        ? `Power ${Math.round(shot.power * 100)}% | Arc ${shot.arcDeg}deg${pendingPower ? ` | ${pendingPower}` : ''}`
+        : 'No controller connected';
+    }
+    if (entry.powerFill) {
+      entry.powerFill.style.width = `${Math.round((connected ? shot.power : 0) * 100)}%`;
+    }
+    this.paintLobbyShotPreview(entry, entry.side, shot, connected);
+  }
+
+  renderLobbyPhonePreviews() {
+    if (this.isController || !Array.isArray(this.lobbyPhoneSlots) || !this.lobbyPhoneSlots.length) return;
+    const mode = this.state.mode === '2v2' ? '2v2' : '1v1';
+    const archersPerSide = mode === '2v2' ? 2 : 1;
+    const source = this.getLobbyPreviewSource();
+    const leftCount = Array.isArray(source?.players?.left) ? source.players.left.length : 0;
+    const rightCount = Array.isArray(source?.players?.right) ? source.players.right.length : 0;
+
+    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `West Controllers ${leftCount}/${archersPerSide}`;
+    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `East Controllers ${rightCount}/${archersPerSide}`;
+
+    for (const entry of this.lobbyPhoneSlots) {
+      this.renderLobbyPhoneSlot(entry, source, archersPerSide);
+    }
   }
 
   defaultTestSettings() {
@@ -1217,6 +1389,7 @@ export class GameClient {
       if (this.lobbyMsg) {
         this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | West ${leftCount}/${required / 2} | East ${rightCount}/${required / 2}`;
       }
+      this.renderLobbyPhonePreviews();
     }
 
     if (snapshot.gameOver) {
@@ -1276,6 +1449,7 @@ export class GameClient {
         this.stopVoiceType('president');
       }
     }
+    if (!this.isController && mode === 'lobby') this.renderLobbyPhonePreviews();
     this.updateDisplayCursorIdle(performance.now());
   }
 
