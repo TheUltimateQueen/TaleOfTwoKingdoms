@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Tale of Two Kingdoms icon">
+  <defs>
+    <linearGradient id="bg" x1="22" y1="22" x2="234" y2="234" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#223f73"/>
+      <stop offset="1" stop-color="#4a1f33"/>
+    </linearGradient>
+    <linearGradient id="split" x1="76" y1="82" x2="180" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#79c8ff"/>
+      <stop offset="1" stop-color="#ff8f8f"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="128" y1="54" x2="128" y2="204" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffe9a0"/>
+      <stop offset="1" stop-color="#e3a938"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#081222" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect x="12" y="12" width="232" height="232" rx="50" fill="url(#bg)"/>
+  <rect x="12" y="12" width="232" height="232" rx="50" fill="none" stroke="#8fb6ff" stroke-opacity="0.25" stroke-width="3"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M128 58 L188 88 V142 C188 177 158 201 128 213 C98 201 68 177 68 142 V88 Z" fill="#0e1a2e" stroke="#9ec5ff" stroke-opacity="0.35" stroke-width="3"/>
+    <path d="M128 67 L178 93 V141 C178 170 154 191 128 202 Z" fill="#ff7f84"/>
+    <path d="M128 67 L78 93 V141 C78 170 102 191 128 202 Z" fill="#62b8ff"/>
+    <path d="M128 67 L178 93 V141 C178 170 154 191 128 202 L128 67 Z" fill="url(#split)" opacity="0.3"/>
+    <rect x="123" y="67" width="10" height="138" rx="5" fill="url(#gold)"/>
+  </g>
+
+  <path d="M76 62 L86 45 L96 60 L106 45 L116 62 V72 H76 Z" fill="url(#gold)" stroke="#fbe8af" stroke-width="1.5"/>
+  <circle cx="86" cy="42" r="3" fill="#fbe8af"/>
+  <circle cx="106" cy="42" r="3" fill="#fbe8af"/>
+  <path d="M140 62 L150 45 L160 60 L170 45 L180 62 V72 H140 Z" fill="url(#gold)" stroke="#fbe8af" stroke-width="1.5"/>
+  <circle cx="150" cy="42" r="3" fill="#fbe8af"/>
+  <circle cx="170" cy="42" r="3" fill="#fbe8af"/>
+
+  <path d="M92 228 C106 216 120 211 128 210 C136 211 150 216 164 228" fill="none" stroke="url(#gold)" stroke-width="4" stroke-linecap="round"/>
+</svg>

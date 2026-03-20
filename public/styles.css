@@ -80,6 +80,22 @@ h1, h2 {
   margin: 0;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.brand-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 13px;
+  border: 1px solid #3e5d8f;
+  box-shadow: 0 5px 16px #07132570;
+  flex: 0 0 auto;
+}
+
 .sub {
   margin: 6px 0 12px;
   opacity: 0.9;
@@ -467,6 +483,12 @@ body.display-mode.display-game-mode #postGamePanel {
 }
 
 @media (max-width: 780px) {
+  .brand-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 11px;
+  }
+
   body.controller-mode #app {
     width: 100vw;
     height: 100dvh;
