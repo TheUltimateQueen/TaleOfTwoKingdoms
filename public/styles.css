@@ -55,6 +55,32 @@ body.display-mode {
   padding: 14px;
 }
 
+#lobby {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+#lobby::before {
+  content: "";
+  position: absolute;
+  width: clamp(340px, 62vw, 560px);
+  height: clamp(340px, 62vw, 560px);
+  right: -80px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-14deg);
+  background: url("/icons/tale-icon.svg") center / contain no-repeat;
+  filter: blur(7px) saturate(1.05);
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#lobby > * {
+  position: relative;
+  z-index: 1;
+}
+
 #controllerJoin {
   display: flex;
   flex-direction: column;
@@ -483,6 +509,14 @@ body.display-mode.display-game-mode #postGamePanel {
 }
 
 @media (max-width: 780px) {
+  #lobby::before {
+    width: 82vw;
+    height: 82vw;
+    right: -28vw;
+    opacity: 0.13;
+    filter: blur(8px);
+  }
+
   .brand-icon {
     width: 48px;
     height: 48px;
