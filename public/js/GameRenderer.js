@@ -1495,6 +1495,47 @@ export class GameRenderer {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  drawHealthBarNotches(x, y, w, h, maxHp) {
+    const max = Math.max(0, Number(maxHp) || 0);
+    if (max < 25 || w <= 1 || h <= 1) return;
+
+    const { ctx } = this;
+    const minorStep = 25;
+    const majorStep = 100;
+    const minorSpacingPx = (w * minorStep) / Math.max(1, max);
+    const densityFactor = Math.max(0.12, Math.min(1, minorSpacingPx / 3));
+    const sizeFactor = Math.max(0, Math.min(1, (w - 20) / 90));
+    const minorAlpha = (0.22 + sizeFactor * 0.18) * densityFactor;
+    const majorAlpha = (0.38 + sizeFactor * 0.22) * Math.max(0.22, densityFactor);
+    const minorTopH = Math.max(1, Math.round(h * 0.45));
+    const majorW = h >= 5 ? 2 : 1;
+    const notchByPixel = new Map();
+    const leftBound = Math.floor(x);
+    const rightBound = Math.ceil(x + w);
+
+    for (let value = minorStep; value < max; value += minorStep) {
+      const px = Math.round(x + (value / max) * w);
+      if (px <= leftBound || px >= rightBound) continue;
+      const major = value % majorStep === 0;
+      if (major) notchByPixel.set(px, 'major');
+      else if (!notchByPixel.has(px)) notchByPixel.set(px, 'minor');
+    }
+
+    if (!notchByPixel.size) return;
+
+    ctx.save();
+    for (const [px, type] of notchByPixel.entries()) {
+      if (type === 'major') {
+        ctx.fillStyle = this.withAlpha('#59616d', majorAlpha);
+        ctx.fillRect(px - Math.floor(majorW / 2), y, majorW, h);
+      } else {
+        ctx.fillStyle = this.withAlpha('#c2c9d3', minorAlpha);
+        ctx.fillRect(px, y, 1, minorTopH);
+      }
+    }
+    ctx.restore();
+  }
+
   drawUpgradeGlyph(type, x, y, size = 7, color = '#1f2230') {
     const { ctx } = this;
     const s = Math.max(4, Number(size) || 7);
@@ -2516,10 +2557,13 @@ export class GameRenderer {
 
     const hpW = 92;
     const pct = Math.max(0, hp / 6000);
+    const hpX = x - hpW / 2;
+    const hpY = y - wallH / 2 - 34;
     ctx.fillStyle = '#141414';
-    ctx.fillRect(x - hpW / 2, y - wallH / 2 - 34, hpW, 10);
+    ctx.fillRect(hpX, hpY, hpW, 10);
     ctx.fillStyle = '#6bff95';
-    ctx.fillRect(x - hpW / 2, y - wallH / 2 - 34, hpW * pct, 10);
+    ctx.fillRect(hpX, hpY, hpW * pct, 10);
+    this.drawHealthBarNotches(hpX, hpY, hpW, 10, 6000);
 
     this.drawTowerUpgradeBadges(side, x, y, sideState);
   }
@@ -3399,6 +3443,7 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+    this.drawHealthBarNotches(hpX, hpY, hpW, 5, minion.maxHp);
 
     const reviveShieldMax = Math.max(0, Number(minion.reviveShieldMax) || 0);
     const reviveShieldHp = Math.max(0, Number(minion.reviveShieldHp) || 0);
@@ -5047,6 +5092,7 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW, 5);
     ctx.fillStyle = '#6bff95';
     ctx.fillRect(hpX, hpY, hpW * hpPct, 5);
+    this.drawHealthBarNotches(hpX, hpY, hpW, 5, minion.maxHp);
   }
 
   drawNecroRevivedOverlay(minion) {
@@ -5497,6 +5543,7 @@ export class GameRenderer {
           ctx.fillRect(hpX, hpY, hpW, 4);
           ctx.fillStyle = '#6bff95';
           ctx.fillRect(hpX, hpY, hpW * hpPct, 4);
+          this.drawHealthBarNotches(hpX, hpY, hpW, 4, minion.maxHp);
         }
         return;
       }
@@ -5617,6 +5664,7 @@ export class GameRenderer {
       ctx.fillRect(hpX, hpY, hpW, 4);
       ctx.fillStyle = '#6bff95';
       ctx.fillRect(hpX, hpY, hpW * hpPct, 4);
+      this.drawHealthBarNotches(hpX, hpY, hpW, 4, minion.maxHp);
     }
   }
 
@@ -5702,6 +5750,7 @@ export class GameRenderer {
       ctx.fillRect(hpX, hpY, hpW, 6);
       ctx.fillStyle = '#6bff95';
       ctx.fillRect(hpX, hpY, hpW * hpPct, 6);
+      this.drawHealthBarNotches(hpX, hpY, hpW, 6, minion.maxHp);
     };
 
     if (!cacheRender) {
