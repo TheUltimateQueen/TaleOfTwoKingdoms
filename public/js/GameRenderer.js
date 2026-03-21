@@ -1332,21 +1332,33 @@ export class GameRenderer {
         ctx.lineTo(-4 * scale, -10.8 * scale);
         ctx.closePath();
         ctx.fill();
-        const swordA = dir * (0.34 + heroWave * 0.42);
-        const swordLen = 13.2 * scale;
-        const swordStartX = 6.2 * dir * scale;
-        const swordStartY = (-2.2 + heroWave * 0.75) * scale;
-        const swordEndX = swordStartX + Math.cos(swordA) * swordLen;
+        const swordA = -0.78 + heroWave * 0.38;
+        const swordLen = 14.6 * scale;
+        const swordStartX = 5.8 * dir * scale;
+        const swordStartY = (-4.1 + heroWave * 0.9) * scale;
+        const swordEndX = swordStartX + dir * Math.cos(swordA) * swordLen;
         const swordEndY = swordStartY + Math.sin(swordA) * swordLen;
-        const shieldWave = heroWave * 1.2 * scale;
+        const shieldWave = heroWave * 1.8 * scale;
+        ctx.strokeStyle = '#f0d4b7';
+        ctx.lineWidth = 2.6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(2.1 * dir * scale, -2.1 * scale + heroWave * 0.35 * scale);
+        ctx.lineTo(swordStartX - dir * 0.5 * scale, swordStartY + 0.2 * scale);
+        ctx.stroke();
+        ctx.lineWidth = 2.1;
+        ctx.beginPath();
+        ctx.moveTo(-2.4 * dir * scale, -0.8 * scale - heroWave * 0.2 * scale);
+        ctx.lineTo(-8.4 * dir * scale, 0.6 * scale + shieldWave * 0.2);
+        ctx.stroke();
         ctx.strokeStyle = '#dbeaf8';
-        ctx.lineWidth = 2.4;
+        ctx.lineWidth = 2.8;
         ctx.beginPath();
         ctx.moveTo(swordStartX, swordStartY);
         ctx.lineTo(swordEndX, swordEndY);
         ctx.stroke();
         ctx.strokeStyle = '#8db7d9';
-        ctx.lineWidth = 1.2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(swordEndX - dir * (2.1 * scale), swordEndY - 0.8 * scale);
         ctx.lineTo(swordEndX + dir * (2.8 * scale), swordEndY + 0.6 * scale);
@@ -1929,15 +1941,27 @@ export class GameRenderer {
       ctx.lineTo(-2.4 * scale, -15.4 * scale);
       ctx.closePath();
       ctx.fill();
-      const swordA = dir * (0.32 + heroWave * 0.4);
-      const swordLen = 12.8 * scale;
-      const swordStartX = 6 * dir * scale;
-      const swordStartY = (-2 + heroWave * 0.72) * scale;
-      const swordEndX = swordStartX + Math.cos(swordA) * swordLen;
+      const swordA = -0.76 + heroWave * 0.4;
+      const swordLen = 14.2 * scale;
+      const swordStartX = 5.7 * dir * scale;
+      const swordStartY = (-4 + heroWave * 0.88) * scale;
+      const swordEndX = swordStartX + dir * Math.cos(swordA) * swordLen;
       const swordEndY = swordStartY + Math.sin(swordA) * swordLen;
-      const sashWave = heroWave * 1.3 * scale;
-      ctx.strokeStyle = '#f8dbe3';
+      const sashWave = heroWave * 1.95 * scale;
+      ctx.strokeStyle = '#f0ddc2';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(2 * dir * scale, -2 * scale + heroWave * 0.3 * scale);
+      ctx.lineTo(swordStartX - dir * 0.4 * scale, swordStartY + 0.2 * scale);
+      ctx.stroke();
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-2.2 * dir * scale, -0.7 * scale - heroWave * 0.2 * scale);
+      ctx.lineTo(-8 * dir * scale, 0.4 * scale + sashWave * 0.2);
+      ctx.stroke();
+      ctx.strokeStyle = '#f8dbe3';
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
       ctx.moveTo(swordStartX, swordStartY);
       ctx.lineTo(swordEndX, swordEndY);
@@ -2801,7 +2825,8 @@ export class GameRenderer {
       } else if (specialType === 'hero') {
         const flutter = Math.sin(animNow * 12 + animSeed) * (3.4 * scale);
         if (european) {
-          const slashA = fastPhase * 0.8;
+          const slashA = fastPhase * 0.92;
+          const slashSweep = Math.PI * (0.95 + Math.abs(heroWave) * 0.2);
           ctx.globalAlpha = (0.44 + pulse * 0.3) * alphaMul;
           ctx.fillStyle = '#b63b2d';
           ctx.beginPath();
@@ -2811,9 +2836,9 @@ export class GameRenderer {
           ctx.closePath();
           ctx.fill();
           ctx.strokeStyle = fxA;
-          ctx.lineWidth = 1.9 * scale;
+          ctx.lineWidth = 2.3 * scale;
           ctx.beginPath();
-          ctx.arc(drawX + dir * 9.2 * scale, drawY - 3.6 * scale, 7.4 * scale, slashA, slashA + Math.PI * 0.8);
+          ctx.arc(drawX + dir * 9.6 * scale, drawY - 3.8 * scale, 8.8 * scale, slashA, slashA + slashSweep);
           ctx.stroke();
         } else {
           ctx.globalAlpha = (0.42 + pulse * 0.3) * alphaMul;
@@ -2825,10 +2850,12 @@ export class GameRenderer {
           ctx.closePath();
           ctx.fill();
           ctx.strokeStyle = '#f4d1da';
-          ctx.lineWidth = 1.6 * scale;
+          ctx.lineWidth = 2.05 * scale;
           ctx.beginPath();
-          ctx.moveTo(drawX + dir * 7.4 * scale, drawY - 5.8 * scale);
-          ctx.quadraticCurveTo(drawX + dir * 14.8 * scale, drawY - 8.4 * scale + Math.sin(phase) * 1.5 * scale, drawX + dir * 18.8 * scale, drawY - 3.2 * scale);
+          ctx.moveTo(drawX + dir * 6.4 * scale, drawY - 6.4 * scale);
+          ctx.quadraticCurveTo(drawX + dir * 15.8 * scale, drawY - 10.4 * scale + Math.sin(phase) * 2.2 * scale, drawX + dir * 21.6 * scale, drawY - 2.4 * scale);
+          ctx.moveTo(drawX + dir * 7.2 * scale, drawY - 4.2 * scale);
+          ctx.quadraticCurveTo(drawX + dir * 14.8 * scale, drawY - 8.3 * scale + Math.sin(phase + 0.8) * 1.8 * scale, drawX + dir * 19.8 * scale, drawY - 1.8 * scale);
           ctx.stroke();
         }
       } else if (specialType === 'digger') {
@@ -3084,13 +3111,13 @@ export class GameRenderer {
         }
         ctx.stroke();
       } else if (specialType === 'hero') {
-        const slash = microPhase * 0.8;
+        const slash = microPhase * 0.95;
         ctx.beginPath();
         if (european) {
-          ctx.arc(drawX + dir * 8.8 * scale, drawY - 3 * scale, 5.6 * scale, slash, slash + Math.PI * 0.38);
+          ctx.arc(drawX + dir * 9.2 * scale, drawY - 3.2 * scale, 7.2 * scale, slash, slash + Math.PI * 0.55);
         } else {
-          ctx.moveTo(drawX + dir * 6.7 * scale, drawY - 3.4 * scale);
-          ctx.quadraticCurveTo(drawX + dir * 13.2 * scale, drawY - 7.1 * scale + Math.sin(microPhase) * 1.1 * scale, drawX + dir * 17 * scale, drawY - 3.6 * scale);
+          ctx.moveTo(drawX + dir * 6.5 * scale, drawY - 4.8 * scale);
+          ctx.quadraticCurveTo(drawX + dir * 14.6 * scale, drawY - 9 * scale + Math.sin(microPhase) * 1.6 * scale, drawX + dir * 19 * scale, drawY - 2.9 * scale);
         }
         ctx.stroke();
       } else if (specialType === 'digger') {
@@ -5685,6 +5712,8 @@ export class GameRenderer {
       ctx.fillStyle = '#c7d4e9';
       const active = Math.max(0, Number(row.activeCount) || 0);
       ctx.fillText(`L${row.level} A${active}`, colMetaX, ry + 1);
+      const specialUnitRow = row.type !== 'militia' && row.type !== 'candle';
+      const activeSpecialColor = specialUnitRow && active > 0 ? '#86ff9c' : null;
 
       const barY = ry + barYOff;
       ctx.fillStyle = '#1f2940';
@@ -5702,17 +5731,17 @@ export class GameRenderer {
           ctx.fillText(`x${active} roll ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
         }
       } else if (!row.unlocked) {
-        ctx.fillStyle = '#9da8ba';
+        ctx.fillStyle = activeSpecialColor || '#9da8ba';
         ctx.fillText(`x${active} ${row.unlockHint || 'locked'}`, px + panelW - 10, ry + 1);
       } else if (row.every <= 1) {
-        ctx.fillStyle = '#8affcf';
+        ctx.fillStyle = activeSpecialColor || '#8affcf';
         ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
         const tag = row.inSpawns === 1
           ? `x${active} next ${eta}s`
           : `x${active} ${row.inSpawns}sp ${eta}s`;
-        ctx.fillStyle = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
+        ctx.fillStyle = activeSpecialColor || (row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2');
         ctx.fillText(tag, px + panelW - 10, ry + 1);
       }
     }
@@ -7545,10 +7574,10 @@ export class GameRenderer {
     const scale = (minion.super ? 1.26 : 1.08) * 1.5;
     const bodyR = 14 * scale;
     const swingInput = Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0;
-    const swing = Math.sin(swingInput * 1.4);
+    const swing = Math.sin(swingInput * 1.7);
     if (!cacheRender) {
       const swingBucket = Math.max(0, Math.min(8, Math.round((swing + 1) * 4)));
-      const quantSwing = (Math.asin(swingBucket / 4 - 1) || 0) / 1.4;
+      const quantSwing = (Math.asin(swingBucket / 4 - 1) || 0) / 1.7;
       const cacheKey = `hero:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
       const cacheWidth = Math.ceil(bodyR * 6 + 56);
       const cacheHeight = Math.ceil(bodyR * 5.4 + 56);
@@ -7651,14 +7680,26 @@ export class GameRenderer {
     ctx.stroke();
 
     // Sword slash stance.
-    const swordLen = bodyR * 1.65;
-    const swordAng = dir * (0.44 + swing * 0.34);
-    const sx1 = Math.cos(swordAng) * bodyR * 0.18;
+    const swordLen = bodyR * 1.85;
+    const swordAng = -0.8 + swing * 0.42;
+    const sx1 = dir * Math.cos(swordAng) * bodyR * 0.2;
     const sy1 = Math.sin(swordAng) * bodyR * 0.18;
-    const sx2 = Math.cos(swordAng) * swordLen;
+    const sx2 = dir * Math.cos(swordAng) * swordLen;
     const sy2 = Math.sin(swordAng) * swordLen;
+    ctx.strokeStyle = '#f0d2b7';
+    ctx.lineWidth = minion.super ? 2.8 : 2.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(dir * (bodyR * 0.18), -bodyR * 0.34 + swing * bodyR * 0.07);
+    ctx.lineTo(sx1 - dir * 1.2, sy1 + 0.6);
+    ctx.stroke();
+    ctx.lineWidth = minion.super ? 2.4 : 2;
+    ctx.beginPath();
+    ctx.moveTo(-dir * (bodyR * 0.14), -bodyR * 0.18 - swing * bodyR * 0.05);
+    ctx.lineTo(-dir * (bodyR * 0.68), bodyR * (0.02 + swing * 0.08));
+    ctx.stroke();
     ctx.strokeStyle = '#e8f3ff';
-    ctx.lineWidth = 3.2;
+    ctx.lineWidth = 3.6;
     ctx.beginPath();
     ctx.moveTo(sx1, sy1);
     ctx.lineTo(sx2, sy2);
