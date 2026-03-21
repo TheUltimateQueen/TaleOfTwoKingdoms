@@ -1,8 +1,20 @@
 import { GameRenderer } from './GameRenderer.js';
 import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
-import { SHOT_POWER_LABELS, UPGRADE_LABELS } from './constants.js';
+import { SHOT_POWER_LABELS, TEAM_COLORS, UPGRADE_LABELS } from './constants.js';
 import { GameRoom as SimGameRoom } from './SimGameRoom.js';
+import {
+  DEFAULT_THEME_MODE,
+  THEME_MODE_THEMED,
+  THEME_MODE_UNTHEMED,
+  defaultArcherName,
+  defaultKeyboardName,
+  normalizeThemeMode,
+  sideControllerLabel,
+  sideDisplayName,
+  sideShortName,
+  sideVictoryLabel,
+} from './themeConfig.js';
 
 const VOICE_GAP_MIN_MS = 2000;
 const VOICE_GAP_MAX_MS = 10000;
@@ -33,7 +45,12 @@ const LOCAL_KEYBOARD_CODES = new Set([
   'ArrowLeft',
   'ArrowRight',
 ]);
+const THEME_STORAGE_KEY = 'enf_theme_mode_v1';
 const TEST_SETTINGS_STORAGE_KEY = 'totk_test_settings_v4';
+const BASE_TEAM_COLORS = {
+  left: { ...TEAM_COLORS.left },
+  right: { ...TEAM_COLORS.right },
+};
 const TEST_SPECIAL_UPGRADE_KEYS = [
   'dragonSuperBreathLevel',
   'shieldDarkMetalLevel',
@@ -136,12 +153,8 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-function sideName(side) {
-  return side === 'left' ? 'West' : 'East';
-}
-
-function sideLabel(side) {
-  return side === 'left' ? 'Blue (West)' : 'Red (East)';
+function sideLabel(side, themeMode = DEFAULT_THEME_MODE) {
+  return sideControllerLabel(side, themeMode);
 }
 
 function powerStatus(power, shots) {
@@ -200,6 +213,7 @@ export class GameClient {
       slot: 0,
       mode: '1v1',
       createMode: '1v1',
+      themeMode: this.loadThemeModeFromStorage(),
       world: null,
       snapshot: null,
     };
@@ -240,6 +254,7 @@ export class GameClient {
     };
 
     this.bindDom();
+    this.applyThemeMode(this.state.themeMode, { persist: false, requestServer: false, updateRoom: false });
     this.bindEvents();
     this.setupAudio();
     this.setupWakeLock();
@@ -254,6 +269,9 @@ export class GameClient {
     this.controllerPanel = document.getElementById('controllerPanel');
     this.controllerJoin = document.getElementById('controllerJoin');
     this.controllerMsg = document.getElementById('controllerMsg');
+    this.controllerSideBadge = document.getElementById('controllerSideBadge');
+    this.controllerSidePill = document.getElementById('controllerSidePill');
+    this.controllerSideFlavor = document.getElementById('controllerSideFlavor');
     this.controllerRematchPanel = document.getElementById('controllerRematchPanel');
     this.controllerRematchBtn = document.getElementById('controllerRematchBtn');
     this.controllerRematchStatus = document.getElementById('controllerRematchStatus');
@@ -265,6 +283,9 @@ export class GameClient {
     this.joinBtn = document.getElementById('joinBtn');
     this.mode2PlayersBtn = document.getElementById('mode2PlayersBtn');
     this.mode4PlayersBtn = document.getElementById('mode4PlayersBtn');
+    this.themeThemedBtn = document.getElementById('themeThemedBtn');
+    this.themeUnthemedBtn = document.getElementById('themeUnthemedBtn');
+    this.themeModeHint = document.getElementById('themeModeHint');
     this.createRoomBtn = document.getElementById('createRoomBtn');
     this.menuMsg = document.getElementById('menuMsg');
 
@@ -273,6 +294,9 @@ export class GameClient {
     this.joinLink = document.getElementById('joinLink');
     this.lobbyMode2PlayersBtn = document.getElementById('lobbyMode2PlayersBtn');
     this.lobbyMode4PlayersBtn = document.getElementById('lobbyMode4PlayersBtn');
+    this.lobbyThemeThemedBtn = document.getElementById('lobbyThemeThemedBtn');
+    this.lobbyThemeUnthemedBtn = document.getElementById('lobbyThemeUnthemedBtn');
+    this.lobbyThemeModeHint = document.getElementById('lobbyThemeModeHint');
     this.localKeyboardTestBtn = document.getElementById('localKeyboardTestBtn');
     this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
@@ -312,6 +336,7 @@ export class GameClient {
     this.postGameTitle = document.getElementById('postGameTitle');
     this.postGameStats = document.getElementById('postGameStats');
     this.postGameExplain = document.getElementById('postGameExplain');
+    this.postChartHelp = document.getElementById('postChartHelp');
     this.postGamePreview = document.getElementById('postGamePreview');
     this.postSummaryGrid = document.getElementById('postSummaryGrid');
     this.postCompareRows = document.getElementById('postCompareRows');
@@ -337,6 +362,8 @@ export class GameClient {
     if (!this.isController) {
       this.mode2PlayersBtn?.addEventListener('click', () => this.setCreateMode('1v1'));
       this.mode4PlayersBtn?.addEventListener('click', () => this.setCreateMode('2v2'));
+      this.themeThemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_THEMED));
+      this.themeUnthemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_UNTHEMED));
       this.lobbyMode2PlayersBtn?.addEventListener('click', () => {
         this.setCreateMode('1v1');
         if (this.state.roomId) this.requestRoomModeChange('1v1');
@@ -345,6 +372,8 @@ export class GameClient {
         this.setCreateMode('2v2');
         if (this.state.roomId) this.requestRoomModeChange('2v2');
       });
+      this.lobbyThemeThemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_THEMED));
+      this.lobbyThemeUnthemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_UNTHEMED));
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
       this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest());
@@ -379,11 +408,17 @@ export class GameClient {
       });
     });
 
-    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative }) => {
+    this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative, themeMode }) => {
       this.localKeyboardTestActive = false;
       this.localPressedKeys.clear();
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.applyThemeMode(themeMode || this.state.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: false,
+        rerenderHud: false,
+      });
       this.hostAuthoritative = Boolean(hostAuthoritative) && !this.isController;
       this.setCreateMode(this.state.mode);
       if (this.hostAuthoritative) this.initLocalHostRoom();
@@ -394,7 +429,7 @@ export class GameClient {
       }
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
-      if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Keyboard mode: West aims with W/A/S/D and East aims with Arrow keys. Pick keyboard or phones per match.';
+      if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardMatchHintText();
       if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Play On This Computer (Keyboard)';
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
@@ -404,9 +439,17 @@ export class GameClient {
       if (!this.isController) this.setDisplayMode('lobby');
     });
 
-    this.socket.on('room_mode_updated', ({ mode, requiredPlayers }) => {
+    this.socket.on('room_mode_updated', ({ mode, requiredPlayers, themeMode }) => {
       if (this.isController) return;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      if (themeMode) {
+        this.applyThemeMode(themeMode, {
+          persist: true,
+          requestServer: false,
+          updateRoom: true,
+          rerenderHud: false,
+        });
+      }
       this.setCreateMode(this.state.mode);
       if (this.hostAuthoritative && this.localRoom) this.localRoom.setMode(this.state.mode);
       if (this.lobbyModeMsg) {
@@ -423,7 +466,30 @@ export class GameClient {
       else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change room size.';
     });
 
+    this.socket.on('room_theme_updated', ({ themeMode }) => {
+      this.applyThemeMode(themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: !this.isController,
+      });
+      if (!this.isController && this.lobbyThemeModeHint) this.lobbyThemeModeHint.textContent = this.themedModeHintText();
+    });
+
+    this.socket.on('room_theme_error', ({ message }) => {
+      if (this.isController) return;
+      if (this.lobbyThemeModeHint && this.state.roomId) this.lobbyThemeModeHint.textContent = message || 'Unable to change theme.';
+      else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change theme.';
+    });
+
     this.socket.on('room_restarted', (payload = {}) => {
+      if (payload?.themeMode) {
+        this.applyThemeMode(payload.themeMode, {
+          persist: true,
+          requestServer: false,
+          updateRoom: !this.isController,
+          rerenderHud: false,
+        });
+      }
       if (this.isController) {
         const immediate = Boolean(payload?.immediateRematch);
         const waitingForPlayers = Boolean(payload?.waitingForPlayers);
@@ -452,14 +518,20 @@ export class GameClient {
       if (this.restartMsg) this.restartMsg.textContent = message || 'Unable to restart match.';
     });
 
-    this.socket.on('joined_room', ({ roomId, side, slot, mode, requiredPlayers }) => {
+    this.socket.on('joined_room', ({ roomId, side, slot, mode, requiredPlayers, themeMode }) => {
       this.state.roomId = roomId;
       this.state.side = side;
       this.state.slot = Number.isFinite(slot) ? slot : 0;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.applyThemeMode(themeMode || this.state.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: false,
+        rerenderHud: false,
+      });
       this.resetControllerRematchState();
       const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
-      this.controllerMsg.textContent = `Connected as ${sideLabel(side)}${laneText}. Room needs ${requiredPlayers || 2} controllers.`;
+      this.controllerMsg.textContent = `Connected as ${sideLabel(side, this.state.themeMode)}${laneText}. Room needs ${requiredPlayers || 2} controllers.`;
       this.pullPad.setSide(side);
       this.setControllerMode(true);
       this.renderControllerRematchUi();
@@ -543,6 +615,7 @@ export class GameClient {
     if (this.isController || !this.state.roomId) return;
     this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, {
       mode: this.state.mode,
+      themeMode: this.state.themeMode,
       debugConfig: this.readSettingsFromTestDom(),
     });
     this.nextHostStateEmitAt = 0;
@@ -556,6 +629,14 @@ export class GameClient {
     if (!this.localRoom) return;
     if (this.localKeyboardTestActive) return;
     if (payload.roomId && payload.roomId !== this.state.roomId) return;
+    if (payload.themeMode) {
+      this.applyThemeMode(payload.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: true,
+        rerenderHud: false,
+      });
+    }
     const mode = payload.mode === '2v2' ? '2v2' : '1v1';
     if (this.localRoom.mode !== mode) this.localRoom.setMode(mode);
     this.state.mode = mode;
@@ -606,11 +687,12 @@ export class GameClient {
 
     this.localRoom = new SimGameRoom(this.state.roomId, window.location.origin + window.location.pathname, {
       mode: '1v1',
+      themeMode: this.state.themeMode,
       debugConfig: this.readSettingsFromTestDom(),
     });
     this.localRoom.players = {
-      left: [{ id: '__LOCAL_WEST__', name: 'West Keyboard', slot: 0 }],
-      right: [{ id: '__LOCAL_EAST__', name: 'East Keyboard', slot: 0 }],
+      left: [{ id: '__LOCAL_WEST__', name: defaultKeyboardName('left', this.state.themeMode), slot: 0 }],
+      right: [{ id: '__LOCAL_EAST__', name: defaultKeyboardName('right', this.state.themeMode), slot: 0 }],
     };
     this.localRoom.started = true;
     this.localRoom.gameOver = false;
@@ -631,10 +713,10 @@ export class GameClient {
 
     this.localPressedKeys.clear();
     this.localKeyboardTestActive = true;
-    if (this.localKeyboardHint) this.localKeyboardHint.textContent = 'Keyboard mode active. Hold keys to smoothly move each side aim cursor. Phone controllers are disabled in this match.';
+    if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardActiveHintText();
     if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Restart Keyboard Match';
 
-    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Keyboard match started. West: W/A/S/D | East: Arrow keys. Use phones in a separate match.';
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = this.keyboardStartMessageText();
     if (this.lobbyMsg) this.lobbyMsg.textContent = 'Keyboard mode active on this computer (1v1).';
 
     this.resetGameOverPresentation();
@@ -708,6 +790,7 @@ export class GameClient {
 
     const controllerFrame = {
       mode: snapshot.mode === '2v2' ? '2v2' : '1v1',
+      themeMode: snapshot.themeMode || this.state.themeMode,
       started: Boolean(snapshot.started),
       gameOver: Boolean(snapshot.gameOver),
       winner: snapshot.winner || null,
@@ -750,9 +833,10 @@ export class GameClient {
     if (this.menuMsg) this.menuMsg.textContent = `Creating ${label} room...`;
     if (this.lobbyMsg) this.lobbyMsg.textContent = `Creating ${label} room...`;
     this.socket.emit('create_room', {
-      name: 'War Screen',
+      name: 'Fuel Screen',
       origin: window.location.origin + window.location.pathname,
       mode: normalized,
+      themeMode: this.state.themeMode,
     });
   }
 
@@ -762,6 +846,17 @@ export class GameClient {
     const label = normalized === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
     if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = `Switching room size to ${label}...`;
     this.socket.emit('set_room_mode', { roomId: this.state.roomId, mode: normalized });
+  }
+
+  requestRoomThemeChange(themeMode = DEFAULT_THEME_MODE) {
+    if (!this.state.roomId) return;
+    const normalized = normalizeThemeMode(themeMode);
+    if (this.lobbyThemeModeHint) {
+      this.lobbyThemeModeHint.textContent = normalized === THEME_MODE_THEMED
+        ? 'Switching to Bread vs Rice theme...'
+        : 'Switching to classic West vs East theme...';
+    }
+    this.socket.emit('set_room_theme', { roomId: this.state.roomId, themeMode: normalized });
   }
 
   requestRoomRestart() {
@@ -796,6 +891,171 @@ export class GameClient {
     this.syncModeToggleButtons(this.mode2PlayersBtn, this.mode4PlayersBtn, normalized);
     this.syncModeToggleButtons(this.lobbyMode2PlayersBtn, this.lobbyMode4PlayersBtn, normalized);
     this.renderLobbyPhonePreviews();
+  }
+
+  loadThemeModeFromStorage() {
+    try {
+      const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+      return normalizeThemeMode(raw || DEFAULT_THEME_MODE);
+    } catch {
+      return DEFAULT_THEME_MODE;
+    }
+  }
+
+  saveThemeModeToStorage(themeMode = DEFAULT_THEME_MODE) {
+    const normalized = normalizeThemeMode(themeMode);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch {
+      // Ignore storage errors and continue with in-memory preference.
+    }
+  }
+
+  applyTeamColors(themeMode = DEFAULT_THEME_MODE) {
+    // Keep team readability consistent in both modes: West stays blue, East stays red.
+    TEAM_COLORS.left = { ...BASE_TEAM_COLORS.left };
+    TEAM_COLORS.right = { ...BASE_TEAM_COLORS.right };
+  }
+
+  syncThemeToggleButtons(themedBtn, unthemedBtn, themeMode) {
+    const themed = normalizeThemeMode(themeMode) === THEME_MODE_THEMED;
+    if (themedBtn) {
+      themedBtn.classList.toggle('active', themed);
+      themedBtn.setAttribute('aria-pressed', String(themed));
+    }
+    if (unthemedBtn) {
+      unthemedBtn.classList.toggle('active', !themed);
+      unthemedBtn.setAttribute('aria-pressed', String(!themed));
+    }
+  }
+
+  keyboardMatchHintText() {
+    return `Keyboard mode: ${sideDisplayName('left', this.state.themeMode)} aims with W/A/S/D and ${sideDisplayName('right', this.state.themeMode)} aims with Arrow keys. Pick keyboard or phones per match.`;
+  }
+
+  keyboardActiveHintText() {
+    return 'Keyboard mode active. Hold keys to smoothly move each side aim cursor. Phone controllers are disabled in this match.';
+  }
+
+  keyboardStartMessageText() {
+    return `Keyboard match started. ${sideShortName('left', this.state.themeMode)}: W/A/S/D | ${sideShortName('right', this.state.themeMode)}: Arrow keys. Use phones in a separate match.`;
+  }
+
+  keyboardControlsLegendText() {
+    return `Controls: ${sideShortName('left', this.state.themeMode)} W/A/S/D / ${sideShortName('right', this.state.themeMode)} Arrows`;
+  }
+
+  themedModeHintText() {
+    if (this.state.themeMode === THEME_MODE_THEMED) return 'Theme ON: Bread Empire vs Rice Empire.';
+    return 'Theme OFF: classic West vs East labels.';
+  }
+
+  controllerSideIdentity(side = this.state.side, themeMode = this.state.themeMode) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const mode = normalizeThemeMode(themeMode);
+    if (mode === THEME_MODE_THEMED) {
+      if (sideName === 'left') {
+        return {
+          pill: 'WEST • BREAD',
+          flavor: 'European style Bread Empire controller',
+        };
+      }
+      return {
+        pill: 'EAST • RICE',
+        flavor: 'Asian style Rice Empire controller',
+      };
+    }
+    if (sideName === 'left') {
+      return {
+        pill: 'WEST',
+        flavor: 'Classic West Kingdom controller',
+      };
+    }
+    return {
+      pill: 'EAST',
+      flavor: 'Classic East Kingdom controller',
+    };
+  }
+
+  refreshControllerSideBadge() {
+    if (!this.isController) return;
+    const side = this.state.side === 'right' ? 'right' : (this.state.side === 'left' ? 'left' : null);
+    const joined = Boolean(this.state.roomId && side);
+    if (this.controllerPanel) {
+      this.controllerPanel.classList.toggle('controller-side-left', joined && side === 'left');
+      this.controllerPanel.classList.toggle('controller-side-right', joined && side === 'right');
+      this.controllerPanel.classList.toggle('controller-side-themed', this.state.themeMode === THEME_MODE_THEMED);
+      this.controllerPanel.classList.toggle('controller-side-unthemed', this.state.themeMode === THEME_MODE_UNTHEMED);
+    }
+    if (!this.controllerSideBadge) return;
+    this.controllerSideBadge.classList.toggle('hidden', !joined);
+    if (!joined) return;
+    const identity = this.controllerSideIdentity(side, this.state.themeMode);
+    if (this.controllerSidePill) this.controllerSidePill.textContent = identity.pill;
+    if (this.controllerSideFlavor) this.controllerSideFlavor.textContent = identity.flavor;
+  }
+
+  postChartHelpText() {
+    return `Blue is ${sideDisplayName('left', this.state.themeMode)}, red is ${sideDisplayName('right', this.state.themeMode)}. This tracks cumulative gold earned. Upgrade icons mark power spikes.`;
+  }
+
+  refreshThemeCopy() {
+    document.title = 'EmpiresNeedFuel';
+    if (this.themeModeHint) this.themeModeHint.textContent = this.themedModeHintText();
+    if (this.lobbyThemeModeHint) this.lobbyThemeModeHint.textContent = this.themedModeHintText();
+    if (this.postChartHelp) this.postChartHelp.textContent = this.postChartHelpText();
+    if (this.localKeyboardHint && !this.localKeyboardTestActive) this.localKeyboardHint.textContent = this.keyboardMatchHintText();
+  }
+
+  applyThemeMode(themeMode, options = {}) {
+    const normalized = normalizeThemeMode(themeMode);
+    const {
+      persist = true,
+      requestServer = false,
+      updateRoom = true,
+      rerenderHud = true,
+    } = options;
+    this.state.themeMode = normalized;
+    if (persist) this.saveThemeModeToStorage(normalized);
+    this.applyTeamColors(normalized);
+    this.renderer?.setThemeMode(normalized);
+    if (document.documentElement) {
+      document.documentElement.classList.toggle('theme-themed', normalized === THEME_MODE_THEMED);
+      document.documentElement.classList.toggle('theme-unthemed', normalized === THEME_MODE_UNTHEMED);
+    }
+    if (document.body) {
+      document.body.classList.toggle('theme-themed', normalized === THEME_MODE_THEMED);
+      document.body.classList.toggle('theme-unthemed', normalized === THEME_MODE_UNTHEMED);
+    }
+    this.syncThemeToggleButtons(this.themeThemedBtn, this.themeUnthemedBtn, normalized);
+    this.syncThemeToggleButtons(this.lobbyThemeThemedBtn, this.lobbyThemeUnthemedBtn, normalized);
+    this.refreshThemeCopy();
+    if (updateRoom && this.localRoom && typeof this.localRoom.setThemeMode === 'function') {
+      this.localRoom.setThemeMode(normalized);
+    }
+    if (requestServer && !this.isController && this.state.roomId) {
+      this.requestRoomThemeChange(normalized);
+    }
+    if (rerenderHud && this.state.snapshot && !this.isController) this.updateHud(this.state.snapshot);
+    if (rerenderHud && this.state.snapshot?.gameOver && !this.postGamePanel?.classList.contains('hidden')) {
+      this.renderPostGameDashboard(this.state.snapshot, true);
+    }
+    this.renderLobbyPhonePreviews();
+    this.refreshControllerSideBadge();
+  }
+
+  handleThemeSelection(themeMode) {
+    const normalized = normalizeThemeMode(themeMode);
+    if (normalized === this.state.themeMode) return;
+    this.applyThemeMode(normalized, {
+      persist: true,
+      requestServer: Boolean(this.state.roomId),
+      updateRoom: true,
+      rerenderHud: true,
+    });
+    if (!this.state.roomId && this.menuMsg) {
+      this.menuMsg.textContent = `Theme set to ${normalized === THEME_MODE_THEMED ? 'Bread vs Rice' : 'classic West vs East'}.`;
+    }
   }
 
   defaultLobbyPull(side = 'left') {
@@ -901,7 +1161,7 @@ export class GameClient {
     const sideState = source?.sideState?.[entry.side] || null;
     const player = this.findLobbyPlayer(sidePlayers, entry.slot);
     const connected = Boolean(player);
-    const baseName = `${sideName(entry.side)} Archer ${entry.slot + 1}`;
+    const baseName = defaultArcherName(entry.side, entry.slot, this.state.themeMode);
     const playerName = connected && player?.name ? String(player.name) : baseName;
     const pull = connected ? sidePulls[entry.slot] : null;
     const shot = this.computeLobbyShotPreview(entry.side, pull || this.defaultLobbyPull(entry.side));
@@ -932,8 +1192,8 @@ export class GameClient {
     const leftCount = Array.isArray(source?.players?.left) ? source.players.left.length : 0;
     const rightCount = Array.isArray(source?.players?.right) ? source.players.right.length : 0;
 
-    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `West Controllers ${leftCount}/${archersPerSide}`;
-    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `East Controllers ${rightCount}/${archersPerSide}`;
+    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `${sideShortName('left', this.state.themeMode)} Controllers ${leftCount}/${archersPerSide}`;
+    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `${sideShortName('right', this.state.themeMode)} Controllers ${rightCount}/${archersPerSide}`;
 
     for (const entry of this.lobbyPhoneSlots) {
       this.renderLobbyPhoneSlot(entry, source, archersPerSide);
@@ -1171,10 +1431,10 @@ export class GameClient {
     const leftLuckOnTop = luckLeftFill >= luckRightFill;
     const leftTotalDamage = (Number(leftTotals.arrowDamage) || 0) + (Number(leftTotals.unitDamage) || 0) + (Number(leftTotals.towerDamageDealt) || 0);
     const rightTotalDamage = (Number(rightTotals.arrowDamage) || 0) + (Number(rightTotals.unitDamage) || 0) + (Number(rightTotals.towerDamageDealt) || 0);
-    const winner = snapshot?.winner === 'right' ? 'East' : 'West';
+    const winner = sideVictoryLabel(snapshot?.winner, this.state.themeMode);
     const cards = [
       { title: 'Duration', value: this.formatPostTime(report?.durationSec || snapshot?.t || 0) },
-      { title: 'Winner', value: `${winner} Kingdom` },
+      { title: 'Winner', value: winner },
       { title: 'Accuracy', value: `<span class="team-west">${leftAcc.rate}%</span> <span class="team-sep">vs</span> <span class="team-east">${rightAcc.rate}%</span>` },
       { title: 'Tower Damage', value: `<span class="team-west">${this.numberCompact(leftTotals.towerDamageDealt, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.towerDamageDealt, 0)}</span>` },
       { title: 'Total Damage', value: `<span class="team-west">${this.numberCompact(leftTotalDamage, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotalDamage, 0)}</span>` },
@@ -1210,24 +1470,24 @@ export class GameClient {
     const rows = [
       {
         title: 'Arrow Damage',
-        leftLabel: 'West',
-        rightLabel: 'East',
+        leftLabel: sideShortName('left', this.state.themeMode),
+        rightLabel: sideShortName('right', this.state.themeMode),
         leftValue: Math.max(0, Number(leftTotals.arrowDamage) || 0),
         rightValue: Math.max(0, Number(rightTotals.arrowDamage) || 0),
         format: (v) => this.numberCompact(v, 0),
       },
       {
         title: 'Unit Damage',
-        leftLabel: 'West',
-        rightLabel: 'East',
+        leftLabel: sideShortName('left', this.state.themeMode),
+        rightLabel: sideShortName('right', this.state.themeMode),
         leftValue: Math.max(0, Number(leftTotals.unitDamage) || 0),
         rightValue: Math.max(0, Number(rightTotals.unitDamage) || 0),
         format: (v) => this.numberCompact(v, 0),
       },
       {
         title: 'Accuracy',
-        leftLabel: 'West',
-        rightLabel: 'East',
+        leftLabel: sideShortName('left', this.state.themeMode),
+        rightLabel: sideShortName('right', this.state.themeMode),
         leftValue: Math.max(0, Number(leftAcc.rate) || 0),
         rightValue: Math.max(0, Number(rightAcc.rate) || 0),
         format: (v) => `${Math.round(v)}%`,
@@ -1269,7 +1529,7 @@ export class GameClient {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const label = UPGRADE_LABELS[event.type] || event.type;
-      const side = event.side === 'right' ? 'East' : 'West';
+      const side = sideDisplayName(event.side, this.state.themeMode);
       const sideColor = event.side === 'right' ? '#ffb4b4' : '#a9d7ff';
       const sideClass = event.side === 'right' ? 'side-east' : 'side-west';
       const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
@@ -1406,8 +1666,18 @@ export class GameClient {
 
     ctx.save();
     const legend = [
-      { label: hasCumulative ? 'West Cumulative Gold' : 'West Gold', color: '#72c9ff' },
-      { label: hasCumulative ? 'East Cumulative Gold' : 'East Gold', color: '#ff9196' },
+      {
+        label: hasCumulative
+          ? `${sideShortName('left', this.state.themeMode)} Cumulative Gold`
+          : `${sideShortName('left', this.state.themeMode)} Gold`,
+        color: '#72c9ff',
+      },
+      {
+        label: hasCumulative
+          ? `${sideShortName('right', this.state.themeMode)} Cumulative Gold`
+          : `${sideShortName('right', this.state.themeMode)} Gold`,
+        color: '#ff9196',
+      },
     ];
     let lx = chart.x + 8;
     const ly = chart.y + 8;
@@ -1450,12 +1720,12 @@ export class GameClient {
     this.postGameRenderedKey = reportKey;
     this.postGameReportData = report;
 
-    const winnerLabel = sideName(snapshot.winner);
-    if (this.postGameTitle) this.postGameTitle.textContent = `${winnerLabel} Kingdom Victory Report`;
+    const winnerLabel = sideVictoryLabel(snapshot.winner, this.state.themeMode);
+    if (this.postGameTitle) this.postGameTitle.textContent = `${winnerLabel} Victory Report`;
     if (this.postGameStats) {
       const leftAcc = arrowAccuracy(snapshot.left);
       const rightAcc = arrowAccuracy(snapshot.right);
-      this.postGameStats.innerHTML = `<span class="team-west">West Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows)</span> <span class="team-sep">|</span> <span class="team-east">East Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows)</span>`;
+      this.postGameStats.innerHTML = `<span class="team-west">${sideDisplayName('left', this.state.themeMode)} Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows)</span> <span class="team-sep">|</span> <span class="team-east">${sideDisplayName('right', this.state.themeMode)} Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows)</span>`;
     }
     if (this.postGameExplain) this.postGameExplain.textContent = 'Top stats include color-coded luck % (100% is expected luck). Chart below shows economy with upgrade spikes.';
 
@@ -2008,11 +2278,19 @@ export class GameClient {
 
   handleControllerState(snapshot) {
     if (!this.state.side) return;
+    if (snapshot?.themeMode) {
+      this.applyThemeMode(snapshot.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: false,
+        rerenderHud: false,
+      });
+    }
     this.updateControllerRematchFromPayload(snapshot);
 
     const me = snapshot[this.state.side];
     const laneText = snapshot.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
-    this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
 
     if (snapshot.gameOver) {
       const myAcc = arrowAccuracy(snapshot[this.state.side]);
@@ -2027,8 +2305,26 @@ export class GameClient {
   }
 
   handleControllerCompactState(payload) {
-    if (!this.state.side) return;
     if (!payload || typeof payload !== 'object') return;
+    if (!this.state.side && payload.side !== 'left' && payload.side !== 'right') return;
+
+    if (payload.side === 'left' || payload.side === 'right') {
+      if (payload.side !== this.state.side) {
+        this.state.side = payload.side;
+        this.pullPad.setSide(payload.side);
+      }
+    }
+    if (Number.isFinite(payload.slot)) this.state.slot = Math.max(0, Number(payload.slot) || 0);
+    this.refreshControllerSideBadge();
+
+    if (payload.themeMode) {
+      this.applyThemeMode(payload.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: false,
+        rerenderHud: false,
+      });
+    }
 
     if (payload.mode === '2v2' || payload.mode === '1v1') {
       this.state.mode = payload.mode;
@@ -2041,14 +2337,14 @@ export class GameClient {
     this.updateControllerRematchFromPayload(payload);
 
     if (!payload.started && !payload.gameOver) {
-      this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
+      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
       this.setControllerMode(true);
       this.renderControllerRematchUi();
       this.pullPad.draw();
       return;
     }
 
-    this.controllerMsg.textContent = `${sideLabel(this.state.side)}${laneText} | HP ${Math.floor(Number(me.towerHp) || 0)} | Next ${(Number(me.shotCd) || 0).toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(Number(me.towerHp) || 0)} | Next ${(Number(me.shotCd) || 0).toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
 
     if (payload.gameOver) {
       const myAcc = arrowAccuracy(me);
@@ -2112,6 +2408,14 @@ export class GameClient {
   }
 
   handleDisplayState(snapshot) {
+    if (snapshot?.themeMode) {
+      this.applyThemeMode(snapshot.themeMode, {
+        persist: true,
+        requestServer: false,
+        updateRoom: false,
+        rerenderHud: false,
+      });
+    }
     const mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
     this.state.mode = mode;
     const postGameActive = Boolean(snapshot.gameOver && (snapshot.started || this.gameOverLatched));
@@ -2126,7 +2430,7 @@ export class GameClient {
       const leftCount = Array.isArray(snapshot.players?.left) ? snapshot.players.left.length : (snapshot.players?.left ? 1 : 0);
       const rightCount = Array.isArray(snapshot.players?.right) ? snapshot.players.right.length : (snapshot.players?.right ? 1 : 0);
       if (this.lobbyMsg) {
-        this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | West ${leftCount}/${required / 2} | East ${rightCount}/${required / 2}`;
+        this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | ${sideShortName('left', this.state.themeMode)} ${leftCount}/${required / 2} | ${sideShortName('right', this.state.themeMode)} ${rightCount}/${required / 2}`;
       }
       this.renderLobbyPhonePreviews();
     }
@@ -2177,7 +2481,8 @@ export class GameClient {
     this.menu.classList.toggle('hidden', mode !== 'menu');
     this.lobby.classList.toggle('hidden', mode !== 'lobby');
     this.canvas.classList.toggle('hidden', mode !== 'game');
-    this.hud.classList.toggle('hidden', mode !== 'game');
+    // Keep the top HUD strip hidden during gameplay for a cleaner screen.
+    this.hud.classList.add('hidden');
     if (this.postGamePanel && mode !== 'game') this.postGamePanel.classList.add('hidden');
     if (!this.isController) {
       const inGame = mode === 'game';
@@ -2239,11 +2544,13 @@ export class GameClient {
     this.controllerJoin.classList.toggle('hidden', joined);
     this.controls.classList.toggle('hidden', !joined);
     if (!joined) this.resetControllerRematchState();
+    this.refreshControllerSideBadge();
     this.renderControllerRematchUi();
     if (this.isController) this.setKeepAwake(joined);
   }
 
   updateHud(s) {
+    if (!this.hud || this.hud.classList.contains('hidden')) return;
     const lp = Math.round(Math.max(0, Math.min(1, s.left.upgradeCharge / Math.max(1, s.left.upgradeChargeMax))) * 100);
     const rp = Math.round(Math.max(0, Math.min(1, s.right.upgradeCharge / Math.max(1, s.right.upgradeChargeMax))) * 100);
     const leftDebt = Math.max(0, Math.ceil(s.left.upgradeChargeMax - s.left.upgradeCharge));
@@ -2252,21 +2559,21 @@ export class GameClient {
     const rightUpg = rightDebt > 0 ? `Debt ${rightDebt} (${rp}%)` : 'READY';
     const leftRoster = Array.isArray(s.players?.left)
       ? s.players.left.map((p) => p?.name).filter(Boolean).join(' + ')
-      : (s.players?.left?.name || s.primaryPlayers?.left?.name || 'West');
+      : (s.players?.left?.name || s.primaryPlayers?.left?.name || sideDisplayName('left', this.state.themeMode));
     const rightRoster = Array.isArray(s.players?.right)
       ? s.players.right.map((p) => p?.name).filter(Boolean).join(' + ')
-      : (s.players?.right?.name || s.primaryPlayers?.right?.name || 'East');
-    this.leftHud.textContent = `${leftRoster || 'West'} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
-    this.rightHud.textContent = `${rightRoster || 'East'} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
+      : (s.players?.right?.name || s.primaryPlayers?.right?.name || sideDisplayName('right', this.state.themeMode));
+    this.leftHud.textContent = `${leftRoster || sideDisplayName('left', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
+    this.rightHud.textContent = `${rightRoster || sideDisplayName('right', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
     if (s.gameOver) {
-      const leftSummary = arrowAccuracySummary('West', s.left);
-      const rightSummary = arrowAccuracySummary('East', s.right);
+      const leftSummary = arrowAccuracySummary(sideDisplayName('left', this.state.themeMode), s.left);
+      const rightSummary = arrowAccuracySummary(sideDisplayName('right', this.state.themeMode), s.right);
       const localHint = this.localKeyboardTestActive ? ' | Keyboard Mode' : '';
-      this.centerHud.textContent = `Final | Winner ${sideName(s.winner)}${localHint} | ${leftSummary} | ${rightSummary}`;
+      this.centerHud.textContent = `Final | Winner ${sideVictoryLabel(s.winner, this.state.themeMode)}${localHint} | ${leftSummary} | ${rightSummary}`;
       return;
     }
-    const localHint = this.localKeyboardTestActive ? ' | Controls: West W/A/S/D / East Arrows' : '';
-    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: West ${s.left.shotCd.toFixed(2)}s | East ${s.right.shotCd.toFixed(2)}s`;
+    const localHint = this.localKeyboardTestActive ? ` | ${this.keyboardControlsLegendText()}` : '';
+    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: ${sideShortName('left', this.state.themeMode)} ${s.left.shotCd.toFixed(2)}s | ${sideShortName('right', this.state.themeMode)} ${s.right.shotCd.toFixed(2)}s`;
   }
 
   initFromUrl() {

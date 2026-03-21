@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tale of Two Kingdoms</title>
+    <title>EmpiresNeedFuel</title>
     <link rel="icon" type="image/svg+xml" href="/icons/tale-icon.svg" />
     <link rel="shortcut icon" href="/icons/tale-icon.svg" />
     <link rel="stylesheet" href="/styles.css" />
@@ -13,13 +13,19 @@
       <section id="menu" class="card">
         <div class="brand">
           <img class="brand-icon" src="/icons/tale-icon.svg" alt="" aria-hidden="true" />
-          <h1>Tale of Two Kingdoms</h1>
+          <h1>EmpiresNeedFuel</h1>
         </div>
         <p class="sub">Choose player count, then create a room:</p>
         <div class="row mode-toggle" role="group" aria-label="Player count">
           <button id="mode2PlayersBtn" class="mode-btn active" type="button" aria-pressed="true">2 Players</button>
           <button id="mode4PlayersBtn" class="mode-btn" type="button" aria-pressed="false">4 Players</button>
         </div>
+        <p class="sub">Empire theme:</p>
+        <div class="row mode-toggle" role="group" aria-label="Empire theme">
+          <button id="themeThemedBtn" class="mode-btn active" type="button" aria-pressed="true">Bread vs Rice</button>
+          <button id="themeUnthemedBtn" class="mode-btn" type="button" aria-pressed="false">Classic West vs East</button>
+        </div>
+        <p id="themeModeHint" class="sub">Theme ON: Bread Empire vs Rice Empire.</p>
         <div class="row">
           <button id="createRoomBtn" type="button">Create Room</button>
         </div>
@@ -33,13 +39,13 @@
         <p><a id="joinLink" target="_blank" rel="noreferrer"></a></p>
         <section id="lobbyPhonePreview" class="lobby-phone-preview" aria-label="Controller phone previews">
           <div class="lobby-phone-side west">
-            <p id="lobbyLeftPhonesTitle" class="lobby-phone-title">West Controllers 0/1</p>
-            <article class="lobby-phone-slot waiting" data-side="left" data-slot="0" aria-label="West Archer 1">
+            <p id="lobbyLeftPhonesTitle" class="lobby-phone-title">Bread Controllers 0/1</p>
+            <article class="lobby-phone-slot waiting" data-side="left" data-slot="0" aria-label="Bread Slinger 1">
               <div class="phone-shell">
                 <div class="phone-notch"></div>
                 <div class="phone-screen">
                   <p class="phone-chip">Waiting</p>
-                  <p class="phone-player">West Archer 1</p>
+                  <p class="phone-player">Bread Slinger 1</p>
                   <div class="phone-aim-zone">
                     <div class="phone-aim-anchor"></div>
                     <div class="phone-aim-line"></div>
@@ -50,12 +56,12 @@
                 </div>
               </div>
             </article>
-            <article class="lobby-phone-slot waiting" data-side="left" data-slot="1" aria-label="West Archer 2">
+            <article class="lobby-phone-slot waiting" data-side="left" data-slot="1" aria-label="Bread Slinger 2">
               <div class="phone-shell">
                 <div class="phone-notch"></div>
                 <div class="phone-screen">
                   <p class="phone-chip">Waiting</p>
-                  <p class="phone-player">West Archer 2</p>
+                  <p class="phone-player">Bread Slinger 2</p>
                   <div class="phone-aim-zone">
                     <div class="phone-aim-anchor"></div>
                     <div class="phone-aim-line"></div>
@@ -68,13 +74,13 @@
             </article>
           </div>
           <div class="lobby-phone-side east">
-            <p id="lobbyRightPhonesTitle" class="lobby-phone-title">East Controllers 0/1</p>
-            <article class="lobby-phone-slot waiting" data-side="right" data-slot="0" aria-label="East Archer 1">
+            <p id="lobbyRightPhonesTitle" class="lobby-phone-title">Rice Controllers 0/1</p>
+            <article class="lobby-phone-slot waiting" data-side="right" data-slot="0" aria-label="Rice Flinger 1">
               <div class="phone-shell">
                 <div class="phone-notch"></div>
                 <div class="phone-screen">
                   <p class="phone-chip">Waiting</p>
-                  <p class="phone-player">East Archer 1</p>
+                  <p class="phone-player">Rice Flinger 1</p>
                   <div class="phone-aim-zone">
                     <div class="phone-aim-anchor"></div>
                     <div class="phone-aim-line"></div>
@@ -85,12 +91,12 @@
                 </div>
               </div>
             </article>
-            <article class="lobby-phone-slot waiting" data-side="right" data-slot="1" aria-label="East Archer 2">
+            <article class="lobby-phone-slot waiting" data-side="right" data-slot="1" aria-label="Rice Flinger 2">
               <div class="phone-shell">
                 <div class="phone-notch"></div>
                 <div class="phone-screen">
                   <p class="phone-chip">Waiting</p>
-                  <p class="phone-player">East Archer 2</p>
+                  <p class="phone-player">Rice Flinger 2</p>
                   <div class="phone-aim-zone">
                     <div class="phone-aim-anchor"></div>
                     <div class="phone-aim-line"></div>
@@ -108,16 +114,22 @@
           <button id="lobbyMode2PlayersBtn" class="mode-btn active" type="button" aria-pressed="true">2 Players</button>
           <button id="lobbyMode4PlayersBtn" class="mode-btn" type="button" aria-pressed="false">4 Players</button>
         </div>
+        <p class="sub">Empire theme (before match starts):</p>
+        <div class="row mode-toggle" role="group" aria-label="Lobby empire theme">
+          <button id="lobbyThemeThemedBtn" class="mode-btn active" type="button" aria-pressed="true">Bread vs Rice</button>
+          <button id="lobbyThemeUnthemedBtn" class="mode-btn" type="button" aria-pressed="false">Classic West vs East</button>
+        </div>
+        <p id="lobbyThemeModeHint" class="sub">Theme ON: Bread Empire vs Rice Empire.</p>
         <section class="input-guide" aria-label="Control options">
           <p class="sub guide-title">How To Play (Controls)</p>
-          <p class="guide-line"><strong>Option A - Keyboard on this computer:</strong> Starts an instant 1v1. West uses W/A/S/D and East uses Arrow keys.</p>
+          <p class="guide-line"><strong>Option A - Keyboard on this computer:</strong> Starts an instant 1v1. Left side uses W/A/S/D and right side uses Arrow keys.</p>
           <p class="guide-line"><strong>Option B - Phones as controllers:</strong> Scan the QR, open the link on each phone, join the room, then drag to aim.</p>
           <p class="guide-line"><strong>Choose one control mode per match:</strong> keyboard or phones (not both together).</p>
         </section>
         <div class="row">
           <button id="localKeyboardTestBtn" class="local-test-btn" type="button">Play On This Computer (Keyboard)</button>
         </div>
-        <p id="localKeyboardHint" class="sub">Keyboard mode: West aims with W/A/S/D and East aims with Arrow keys.</p>
+        <p id="localKeyboardHint" class="sub">Keyboard mode: Bread Empire aims with W/A/S/D and Rice Empire aims with Arrow keys.</p>
         <details id="testSettingsPanel" class="test-settings">
           <summary id="testSettingsSummary">Secret Test Settings - Testing OFF</summary>
           <div class="test-settings-inner">
@@ -127,8 +139,8 @@
               <label>Apply To
                 <select id="testApplyToInput">
                   <option value="both">Both Sides</option>
-                  <option value="left">West Only</option>
-                  <option value="right">East Only</option>
+                  <option value="left">Left Only</option>
+                  <option value="right">Right Only</option>
                 </select>
               </label>
               <label>Focus Unit
@@ -213,6 +225,10 @@
       <section id="controllerPanel" class="card hidden">
         <h2>Controller</h2>
         <p id="controllerMsg" class="sub">Join a room to control your archer.</p>
+        <div id="controllerSideBadge" class="controller-side-badge hidden" aria-live="polite">
+          <span id="controllerSidePill" class="controller-side-pill">Waiting</span>
+          <span id="controllerSideFlavor" class="controller-side-flavor">Join a room to get your side.</span>
+        </div>
         <div id="controllerJoin">
           <div class="row">
             <input id="roomInput" type="text" maxlength="4" placeholder="CODE" />
@@ -258,7 +274,7 @@
           <div class="post-chart-stack">
             <article class="post-chart-card post-chart-card-main">
               <h3>Gold + Upgrade Timeline</h3>
-              <p class="sub post-chart-help">Blue is West, red is East. This tracks cumulative gold earned. Upgrade icons mark power spikes.</p>
+              <p id="postChartHelp" class="sub post-chart-help">Blue is Bread Empire, red is Rice Empire. This tracks cumulative gold earned. Upgrade icons mark power spikes.</p>
               <div class="post-chart-scroll" aria-label="Scrollable economy chart area">
                 <canvas id="postEconChart" class="post-chart-canvas" width="1100" height="280" aria-label="Gold and upgrade timeline chart"></canvas>
               </div>

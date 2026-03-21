@@ -1,5 +1,5 @@
 {
-  "name": "tale-of-two-kingdoms",
+  "name": "empires-need-fuel",
   "version": "1.0.0",
   "description": "QR-join multiplayer tower battle",
   "main": "server.js",

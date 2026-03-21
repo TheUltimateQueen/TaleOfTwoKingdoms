@@ -8,6 +8,36 @@ const QRCode = require('qrcode');
 const { PORT } = require('./constants');
 const AUDIO_FILE_RE = /\.(m4a|mp3|wav|ogg)$/i;
 const CONTROLLER_STATE_EMIT_MS = 66;
+const THEME_MODE_THEMED = 'themed';
+const THEME_MODE_UNTHEMED = 'unthemed';
+
+function normalizeThemeMode(value) {
+  return value === THEME_MODE_UNTHEMED ? THEME_MODE_UNTHEMED : THEME_MODE_THEMED;
+}
+
+function defaultArcherName(side, slot = 0, themeMode = THEME_MODE_THEMED) {
+  const sideName = side === 'right' ? 'right' : 'left';
+  const index = Math.max(1, Math.floor(Number(slot) || 0) + 1);
+  if (normalizeThemeMode(themeMode) === THEME_MODE_UNTHEMED) {
+    return `${sideName === 'left' ? 'West Archer' : 'East Archer'} ${index}`;
+  }
+  return `${sideName === 'left' ? 'Bread Slinger' : 'Rice Flinger'} ${index}`;
+}
+
+function isDefaultPlayerName(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  return (
+    /^West Archer \d+$/i.test(value)
+    || /^East Archer \d+$/i.test(value)
+    || /^Bread Slinger \d+$/i.test(value)
+    || /^Rice Flinger \d+$/i.test(value)
+    || /^West Keyboard$/i.test(value)
+    || /^East Keyboard$/i.test(value)
+    || /^Bread Keyboard$/i.test(value)
+    || /^Rice Keyboard$/i.test(value)
+  );
+}
 
 function createRoomId() {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -30,6 +60,7 @@ class ServerRoom {
   constructor(id, options = {}) {
     this.id = id;
     this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
+    this.themeMode = normalizeThemeMode(options?.themeMode || options?.theme || THEME_MODE_THEMED);
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.display = null;
     this.players = { left: [], right: [] };
@@ -41,6 +72,21 @@ class ServerRoom {
     this.nextControllerStateEmitAtMs = null;
     this.hostAuthoritative = true;
     this.rematchVotes = new Set();
+  }
+
+  defaultPlayerNameForSide(side, slot = 0) {
+    return defaultArcherName(side, slot, this.themeMode);
+  }
+
+  renameDefaultPlayersForTheme() {
+    for (const sideName of ['left', 'right']) {
+      const sidePlayers = Array.isArray(this.players?.[sideName]) ? this.players[sideName] : [];
+      for (let i = 0; i < sidePlayers.length; i += 1) {
+        const player = sidePlayers[i];
+        if (!player || !isDefaultPlayerName(player.name)) continue;
+        player.name = this.defaultPlayerNameForSide(sideName, Number.isFinite(player.slot) ? player.slot : i);
+      }
+    }
   }
 
   requiredPlayers() {
@@ -101,7 +147,7 @@ class ServerRoom {
   }
 
   attachDisplay(socketId, name) {
-    this.display = { id: socketId, name: name || 'War Screen' };
+    this.display = { id: socketId, name: name || 'Fuel Screen' };
   }
 
   playerBySocket(socketId) {
@@ -127,7 +173,7 @@ class ServerRoom {
       if (otherSlot >= this.archersPerSide) return null;
       const player = {
         id: socketId,
-        name: name || (otherSide === 'left' ? `West Archer ${otherSlot + 1}` : `East Archer ${otherSlot + 1}`),
+        name: name || this.defaultPlayerNameForSide(otherSide, otherSlot),
         slot: otherSlot,
       };
       this.players[otherSide].push(player);
@@ -137,7 +183,7 @@ class ServerRoom {
 
     const player = {
       id: socketId,
-      name: name || (side === 'left' ? `West Archer ${slot + 1}` : `East Archer ${slot + 1}`),
+      name: name || this.defaultPlayerNameForSide(side, slot),
       slot,
     };
     this.players[side].push(player);
@@ -161,6 +207,17 @@ class ServerRoom {
     this.archersPerSide = nextArchersPerSide;
     this.started = this.isReadyToStart();
     this.clearRematchVotes();
+    return { ok: true, changed: true };
+  }
+
+  setThemeMode(themeMode) {
+    const nextTheme = normalizeThemeMode(themeMode);
+    if (this.started) {
+      return { ok: false, message: 'Cannot change theme after the match has started.' };
+    }
+    if (nextTheme === this.themeMode) return { ok: true, changed: false };
+    this.themeMode = nextTheme;
+    this.renameDefaultPlayersForTheme();
     return { ok: true, changed: true };
   }
 
@@ -241,13 +298,14 @@ class GameServer {
 
   setupSocketHandlers() {
     this.io.on('connection', (socket) => {
-      socket.on('create_room', async ({ name, origin, mode }) => {
+      socket.on('create_room', async ({ name, origin, mode, themeMode }) => {
         let id = createRoomId();
         while (this.rooms.has(id)) id = createRoomId();
 
         const roomMode = mode === '2v2' ? '2v2' : '1v1';
-        const room = new ServerRoom(id, { mode: roomMode });
-        room.attachDisplay(socket.id, name || 'War Screen');
+        const roomThemeMode = normalizeThemeMode(themeMode || THEME_MODE_THEMED);
+        const room = new ServerRoom(id, { mode: roomMode, themeMode: roomThemeMode });
+        room.attachDisplay(socket.id, name || 'Fuel Screen');
 
         this.rooms.set(id, room);
         socket.join(id);
@@ -265,6 +323,7 @@ class GameServer {
           joinUrl,
           qrDataUrl,
           mode: room.mode,
+          themeMode: room.themeMode,
           requiredPlayers: room.requiredPlayers(),
           hostAuthoritative: Boolean(room.hostAuthoritative),
         });
@@ -290,6 +349,7 @@ class GameServer {
           side: join.side,
           slot: join.slot,
           mode: room.mode,
+          themeMode: room.themeMode,
           requiredPlayers: room.requiredPlayers(),
         });
         this.broadcastRoom(room, { forceController: true });
@@ -312,8 +372,28 @@ class GameServer {
         }
         socket.emit('room_mode_updated', {
           mode: room.mode,
+          themeMode: room.themeMode,
           requiredPlayers: room.requiredPlayers(),
         });
+        this.broadcastRoom(room, { forceController: true });
+      });
+
+      socket.on('set_room_theme', ({ roomId, themeMode }) => {
+        const room = this.rooms.get((roomId || '').toUpperCase());
+        if (!room) {
+          socket.emit('room_theme_error', { message: 'Room not found.' });
+          return;
+        }
+        if (!room.display || room.display.id !== socket.id) {
+          socket.emit('room_theme_error', { message: 'Only the host display can change theme.' });
+          return;
+        }
+        const result = room.setThemeMode(themeMode);
+        if (!result?.ok) {
+          socket.emit('room_theme_error', { message: result?.message || 'Unable to change theme.' });
+          return;
+        }
+        this.io.to(room.id).emit('room_theme_updated', { themeMode: room.themeMode });
         this.broadcastRoom(room, { forceController: true });
       });
 
@@ -381,12 +461,16 @@ class GameServer {
         if (!room.display || room.display.id !== socket.id) return;
         const nowMs = Date.now();
         const wasGameOver = Boolean(room.gameOver);
+        const frameThemeMode = normalizeThemeMode(controllerFrame?.themeMode || snapshot?.themeMode || room.themeMode);
+        if (room.themeMode !== frameThemeMode) room.themeMode = frameThemeMode;
         if (controllerFrame) {
+          controllerFrame.themeMode = frameThemeMode;
           room.lastControllerFrame = controllerFrame;
           room.gameOver = Boolean(controllerFrame.gameOver);
           room.winner = controllerFrame.winner || null;
         }
         if (snapshot) {
+          snapshot.themeMode = frameThemeMode;
           room.lastHostState = snapshot;
           room.gameOver = Boolean(snapshot.gameOver);
           room.winner = snapshot.winner || null;
@@ -440,6 +524,7 @@ class GameServer {
     room.clearRematchVotes();
     this.io.to(room.id).emit('room_restarted', {
       mode: room.mode,
+      themeMode: room.themeMode,
       requiredPlayers: room.requiredPlayers(),
       trigger,
       immediateRematch,
@@ -501,6 +586,7 @@ class GameServer {
     };
     const source = snapshot || {
       mode: room.mode,
+      themeMode: room.themeMode,
       started: room.started,
       gameOver: room.gameOver,
       winner: room.winner,
@@ -516,6 +602,7 @@ class GameServer {
       side: sideName,
       slot: Number.isFinite(slot) ? slot : 0,
       mode: source.mode === '2v2' ? '2v2' : '1v1',
+      themeMode: normalizeThemeMode(source.themeMode || room.themeMode),
       started: Boolean(source.started),
       gameOver: Boolean(source.gameOver),
       winner: source.winner || null,
@@ -562,6 +649,7 @@ class GameServer {
     return {
       roomId: room.id,
       mode: room.mode,
+      themeMode: room.themeMode,
       archersPerSide: room.archersPerSide,
       requiredPlayers: room.requiredPlayers(),
       playerCount: room.totalPlayers(),
@@ -587,7 +675,7 @@ class GameServer {
 
   listen(port = PORT) {
     this.httpServer.listen(port, '0.0.0.0', () => {
-      console.log('Tale of Two Kingdoms server running');
+      console.log('EmpiresNeedFuel server running');
       console.log(`Local:   http://localhost:${port}`);
 
       const lanUrls = getLanUrls(port);

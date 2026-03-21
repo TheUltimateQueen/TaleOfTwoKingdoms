@@ -11,6 +11,19 @@ import {
   UPGRADE_TYPES,
   SHOT_POWER_TYPES,
 } from './simConstants.js';
+import {
+  DEFAULT_THEME_MODE,
+  defaultArcherName,
+  heroBattleLines,
+  heroDeathEncoreLine,
+  heroDeathLines,
+  heroSummonLine,
+  golemSummonLine,
+  isDefaultPlayerName,
+  normalizeThemeMode,
+  presidentBattleLines,
+  presidentRallyLine,
+} from './themeConfig.js';
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
@@ -124,23 +137,7 @@ const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
 const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
 const NECRO_REVIVE_SHIELD_SECONDS = 2;
-const HERO_LINES = [
-  'Justice is my cardio!',
-  'Hope you brought a villain permit!',
-  'My cape has plot armor!',
-  'Behold my dramatic entrance!',
-  'I slash, therefore I am!',
-  'Fear my perfectly timed monologue!',
-];
 const HERO_RANDOM_LINE_INTERVAL = 5;
-const HERO_DEATH_LINES = [
-  'Tell my fans... I was fabulous!',
-  'No sequel? This is a travesty!',
-  'I regret... absolutely nothing!',
-  'My agent said this was safe!',
-  'Remember me in slow motion!',
-  'This cape deserved better!',
-];
 const HERO_HP_MULT = 3;
 const HERO_HP_BOOST_MULT = 2.5;
 const HERO_SIZE_MULT = 1.5;
@@ -151,7 +148,12 @@ const SHIELD_PUSH_SCALE = 1.35;
 const SHIELD_PUSH_RANGE = 86;
 const SHIELD_PUSH_DISTANCE = 18;
 const SHIELD_HEADSHOT_DAMAGE_MULT = 3;
+const SHIELD_BODYSHOT_DAMAGE_MULT = 1.4;
 const SHIELD_HEADSHOT_RETREAT = 20;
+const SHIELD_HEAD_HIT_RADIUS_MULT = 0.44;
+const SHIELD_GUARD_POSE_RAISE_SPEED = 4.4;
+const SHIELD_GUARD_POSE_LOWER_SPEED = 6.2;
+const SHIELD_GUARD_POSE_BODY_VULN_THRESHOLD = 0.18;
 const STONE_GOLEM_HALF_HP_THRESHOLD = 0.5;
 const STONE_GOLEM_HP_MULT = 15;
 const STONE_GOLEM_DAMAGE_MULT = 0.8;
@@ -193,14 +195,6 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   dragon: 0.33,
   super: 0.3,
 };
-const PRESIDENT_LINES = [
-  'Team, we are absolutely crushing this!',
-  'Believe in yourselves and swing harder!',
-  'Great units do great things together!',
-  'No panic, just power and discipline!',
-  'We came here to win this battlefield!',
-  'Stay strong, stay sharp, stay united!',
-];
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
 const CANDLE_WAX_MAX = 96;
 const CANDLE_MAX_HOLDERS = 8;
@@ -540,6 +534,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
 class GameRoom {
   constructor(id, baseUrl, options = {}) {
     this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
+    this.themeMode = normalizeThemeMode(options?.themeMode || options?.theme || DEFAULT_THEME_MODE);
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.debugConfig = normalizeDebugConfig(options?.debugConfig || null);
     const left = makeSideState('left', this.archersPerSide);
@@ -601,6 +596,29 @@ class GameRoom {
 
     this.seedUpgradeCards();
     this.resetMatchReport();
+  }
+
+  defaultPlayerNameForSide(sideName, slot = 0) {
+    return defaultArcherName(sideName, slot, this.themeMode);
+  }
+
+  renameDefaultPlayerNamesForTheme() {
+    for (const sideName of ['left', 'right']) {
+      const sidePlayers = Array.isArray(this.players?.[sideName]) ? this.players[sideName] : [];
+      for (let i = 0; i < sidePlayers.length; i += 1) {
+        const player = sidePlayers[i];
+        if (!player || !isDefaultPlayerName(player.name)) continue;
+        player.name = this.defaultPlayerNameForSide(sideName, Number.isFinite(player.slot) ? player.slot : i);
+      }
+    }
+  }
+
+  setThemeMode(nextThemeMode, options = {}) {
+    const nextMode = normalizeThemeMode(nextThemeMode);
+    if (this.themeMode === nextMode) return { changed: false, themeMode: this.themeMode };
+    this.themeMode = nextMode;
+    if (options?.renamePlayers !== false) this.renameDefaultPlayerNamesForTheme();
+    return { changed: true, themeMode: this.themeMode };
   }
 
   setDebugConfig(rawConfig = null) {
@@ -1024,6 +1042,7 @@ class GameRoom {
       shieldBearer: Boolean(m.shieldBearer),
       shieldPushTtl: roundTo(m.shieldPushTtl, 2),
       shieldPushScale: roundTo(m.shieldPushScale, 3),
+      shieldGuardPose: roundTo(m.shieldGuardPose, 3),
       shieldDarkMetalTtl: roundTo(m.shieldDarkMetalTtl, 2),
       stoneGolem: Boolean(m.stoneGolem),
       golemSmashTtl: roundTo(m.golemSmashTtl, 2),
@@ -1138,6 +1157,7 @@ class GameRoom {
     return {
       id: this.id,
       mode: this.mode,
+      themeMode: this.themeMode,
       archersPerSide: this.archersPerSide,
       requiredPlayers: this.requiredPlayers(),
       playerCount: this.totalPlayers(),
@@ -1216,7 +1236,7 @@ class GameRoom {
   }
 
   attachDisplay(socketId, name) {
-    this.display = { id: socketId, name: name || 'War Screen' };
+    this.display = { id: socketId, name: name || 'Fuel Screen' };
   }
 
   resizeSideArcherControls(sideName) {
@@ -1398,7 +1418,7 @@ class GameRoom {
       if (otherSlot >= this.archersPerSide) return null;
       const player = {
         id: socketId,
-        name: name || (otherSide === 'left' ? `West Archer ${otherSlot + 1}` : `East Archer ${otherSlot + 1}`),
+        name: name || this.defaultPlayerNameForSide(otherSide, otherSlot),
         slot: otherSlot,
       };
       this.players[otherSide].push(player);
@@ -1408,7 +1428,7 @@ class GameRoom {
 
     const player = {
       id: socketId,
-      name: name || (side === 'left' ? `West Archer ${slot + 1}` : `East Archer ${slot + 1}`),
+      name: name || this.defaultPlayerNameForSide(side, slot),
       slot,
     };
     this.players[side].push(player);
@@ -1812,14 +1832,25 @@ class GameRoom {
     const baseR = Math.max(18, Number(minion.r) || 20);
     const pushLife = Math.max(0, Math.min(1, (Number(minion.shieldPushTtl) || 0) / SHIELD_PUSH_TTL));
     const pushScale = 1 + pushLife * (Math.max(1, Number(minion.shieldPushScale) || SHIELD_PUSH_SCALE) - 1);
+    const pose = this.shieldGuardPoseValue(minion);
     return {
       dir,
-      x: (Number(minion.x) || 0) + dir * (baseR * 0.82),
-      y: (Number(minion.y) || 0) + baseR * 0.06,
-      rx: (baseR * 0.84 + 10) * pushScale,
-      ry: (baseR * 1.18 + 10) * pushScale,
-      topOpenY: (Number(minion.y) || 0) - baseR * 0.76,
+      pose,
+      x: (Number(minion.x) || 0) + dir * (baseR * (0.82 - pose * 0.62)),
+      y: (Number(minion.y) || 0) + baseR * (0.06 - pose * 0.96),
+      rx: (baseR * (0.84 - pose * 0.22) + 10) * pushScale,
+      ry: (baseR * (1.18 + pose * 0.24) + 10) * pushScale,
+      topOpenY: (Number(minion.y) || 0) - baseR * (0.76 + pose * 0.32),
     };
+  }
+
+  shieldGuardPoseValue(minion) {
+    return clamp(Number(minion?.shieldGuardPose) || 0, 0, 1);
+  }
+
+  setShieldGuardPoseTarget(minion, target) {
+    if (!minion || !minion.shieldBearer) return;
+    minion.shieldGuardTarget = clamp(Number(target) || 0, 0, 1);
   }
 
   shieldBearerHeadCircle(minion, arrow = null) {
@@ -1827,7 +1858,7 @@ class GameRoom {
     const dir = minion.side === 'left' ? 1 : -1;
     const baseR = Math.max(18, Number(minion.r) || 20);
     // Exact match for drawShieldBearerSprite head circle in GameRenderer.
-    const headR = baseR * 0.36;
+    const headR = baseR * SHIELD_HEAD_HIT_RADIUS_MULT;
     const arrowR = Math.max(0, Number(arrow?.r) || 0);
     return {
       x: (Number(minion.x) || 0) - dir * (baseR * 0.06),
@@ -1884,6 +1915,7 @@ class GameRoom {
     if (arrow.side === minion.side) return false;
     const dir = minion.side === 'left' ? 1 : -1;
     const r = Math.max(18, Number(minion.r) || 20);
+    const pose = this.shieldGuardPoseValue(minion);
     const arrowX = Number(arrow.x) || 0;
     const arrowY = Number(arrow.y) || 0;
     const fromX = Number.isFinite(prevX) ? prevX : arrowX;
@@ -1898,6 +1930,17 @@ class GameRoom {
       if (directHit || sweptHit) {
         return 'head';
       }
+    }
+
+    if (pose >= SHIELD_GUARD_POSE_BODY_VULN_THRESHOLD) {
+      const bodyX = (Number(minion.x) || 0) + dir * (r * (0.04 - pose * 0.12));
+      const bodyY = (Number(minion.y) || 0) - r * (0.54 + pose * 0.08);
+      const bodyR = r * (0.62 + pose * 0.2) + (Number(arrow.r) || 0) * 0.76;
+      const dxBody = arrowX - bodyX;
+      const dyBody = arrowY - bodyY;
+      const directBody = dxBody * dxBody + dyBody * dyBody <= bodyR * bodyR;
+      const sweptBody = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, bodyX, bodyY, bodyR);
+      if (directBody || sweptBody) return 'body';
     }
 
     const backX = (Number(minion.x) || 0) - dir * (r * 0.56);
@@ -2709,7 +2752,12 @@ class GameRoom {
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
           const shieldHeadshot = Boolean(minion.shieldBearer && shieldVulnerableHit === 'head');
+          if (minion.shieldBearer) {
+            if (shieldVulnerableHit === 'head') this.setShieldGuardPoseTarget(minion, 1);
+            else if (shieldVulnerableHit === 'body' || shieldVulnerableHit === 'back') this.setShieldGuardPoseTarget(minion, 0);
+          }
           if (shieldHeadshot) damage *= SHIELD_HEADSHOT_DAMAGE_MULT;
+          else if (minion.shieldBearer && shieldVulnerableHit === 'body') damage *= SHIELD_BODYSHOT_DAMAGE_MULT;
           const core = this.dragonHeartCore(minion);
           if (core) {
             const coreHitR = core.r + a.r;
@@ -3136,6 +3184,21 @@ class GameRoom {
         if (!Number.isFinite(m.shieldPushTtl)) m.shieldPushTtl = 0;
         m.shieldPushTtl = Math.max(0, m.shieldPushTtl - dt);
         if (!Number.isFinite(m.shieldPushScale) || m.shieldPushScale < 1) m.shieldPushScale = SHIELD_PUSH_SCALE;
+        if (!Number.isFinite(m.shieldGuardPose)) m.shieldGuardPose = 0;
+        if (!Number.isFinite(m.shieldGuardTarget)) m.shieldGuardTarget = 0;
+        const poseCurrent = clamp(Number(m.shieldGuardPose) || 0, 0, 1);
+        const poseTarget = clamp(Number(m.shieldGuardTarget) || 0, 0, 1);
+        const poseDelta = poseTarget - poseCurrent;
+        if (Math.abs(poseDelta) <= 0.0001) {
+          m.shieldGuardTarget = poseTarget;
+          m.shieldGuardPose = poseTarget;
+        } else {
+          const poseRate = poseDelta > 0 ? SHIELD_GUARD_POSE_RAISE_SPEED : SHIELD_GUARD_POSE_LOWER_SPEED;
+          const poseStep = poseRate * dt;
+          m.shieldGuardPose = Math.abs(poseDelta) <= poseStep
+            ? poseTarget
+            : (poseCurrent + Math.sign(poseDelta) * poseStep);
+        }
         if (!Number.isFinite(m.shieldDarkMetalCd)) {
           m.shieldDarkMetalCd = SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER;
         }
@@ -4509,7 +4572,7 @@ class GameRoom {
       && (hero.heroLineCd || 0) === 0
       && ((Number(sideState?.heroLineCd) || 0) === 0)
     ) {
-      this.queueLine(randomFrom(HERO_LINES), hero.x, hero.y - hero.r - 26, hero.side);
+      this.queueLine(randomFrom(heroBattleLines(hero.side, this.themeMode)), hero.x, hero.y - hero.r - 26, hero.side);
       hero.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
       if (sideState) sideState.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
     }
@@ -4667,7 +4730,12 @@ class GameRoom {
         }
         president.presidentSpeechCd = PRESIDENT_RANDOM_LINE_INTERVAL;
         this.queueHitSfx('upgrade', president.x, president.y - 4, president.side);
-        this.queueLine('Citizens, we stand together!', president.x, president.y - president.r - 28, president.side);
+        this.queueLine(
+          presidentRallyLine(president.side, this.themeMode),
+          president.x,
+          president.y - president.r - 28,
+          president.side
+        );
       }
       return;
     }
@@ -4684,7 +4752,7 @@ class GameRoom {
 
     if (president.presidentSpeechCd === 0) {
       this.queueLine(
-        randomFrom(PRESIDENT_LINES),
+        randomFrom(presidentBattleLines(president.side, this.themeMode)),
         president.x,
         president.y - president.r - 28,
         president.side
@@ -4751,7 +4819,7 @@ class GameRoom {
     const hy = hero?.y ?? (TOWER_Y + 6);
     this.queueHitSfx('powerup', x, y, sideName);
     this.queueHitSfx('upgrade', hx, hy, sideName);
-    this.queueLine('I will save the day.', hx, hy - (hero?.r || 16) - 24, sideName);
+    this.queueLine(heroSummonLine(sideName, this.themeMode), hx, hy - (hero?.r || 16) - 24, sideName);
   }
 
   triggerTowerStoneGolem(sideName, x, y) {
@@ -4763,7 +4831,7 @@ class GameRoom {
     const gx = golem?.x ?? (sideName === 'left' ? TOWER_X_LEFT + 64 : TOWER_X_RIGHT - 64);
     const gy = golem?.y ?? (TOWER_Y + 12);
     this.queueHitSfx('explosion', gx, gy, sideName);
-    this.queueLine('Stone golem awakened!', gx, gy - (golem?.r || 24) - 24, sideName);
+    this.queueLine(golemSummonLine(sideName, this.themeMode), gx, gy - (golem?.r || 24) - 24, sideName);
 
     // Spawn with an immediate smash as requested.
     if (golem) {
@@ -4824,6 +4892,7 @@ class GameRoom {
       gunFlashTtl: 0,
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      shieldGuardPose: roundTo(minion.shieldGuardPose, 3),
       shieldDarkMetalTtl: roundTo(minion.shieldDarkMetalTtl, 2),
       golemSmashTtl: 0,
       golemShieldHp: 0,
@@ -4900,8 +4969,8 @@ class GameRoom {
     this.queueHitSfx('dragonfire', x + 10, y - 8, fxSide);
     this.queueHitSfx('powerup', x, y - 5, hero.side);
     this.queueDamageNumber(Math.max(77, (Number(hero.maxHp) || 0) * 0.24), x, y - (hero.r || 16) - 6);
-    this.queueLine(randomFrom(HERO_DEATH_LINES), x, y - (hero.r || 16) - 27, hero.side);
-    this.queueLine('Cue the tragic violin solo!', x, y - (hero.r || 16) - 45, hero.side);
+    this.queueLine(randomFrom(heroDeathLines(hero.side, this.themeMode)), x, y - (hero.r || 16) - 27, hero.side);
+    this.queueLine(heroDeathEncoreLine(hero.side, this.themeMode), x, y - (hero.r || 16) - 45, hero.side);
   }
 
   canNecroExpertRevive(minion) {
@@ -4979,6 +5048,8 @@ class GameRoom {
       executiveOrderHitsMax: PRESIDENT_EXECUTIVE_ORDER_HITS,
       executiveOrderBreakTtl: 0,
       failedSpecialType: null,
+      shieldGuardPose: 0,
+      shieldGuardTarget: 0,
     };
 
     revived.dragonSuperBreathUpgraded = revived.dragon
@@ -5138,6 +5209,8 @@ class GameRoom {
       shieldPushCd: 0,
       shieldPushTtl: 0,
       shieldPushScale: 1,
+      shieldGuardPose: 0,
+      shieldGuardTarget: 0,
       shieldDarkMetalCd: 0,
       shieldDarkMetalTtl: 0,
       stoneGolem: false,
@@ -5614,6 +5687,8 @@ class GameRoom {
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      shieldGuardPose: isShieldBearer ? 0 : 0,
+      shieldGuardTarget: isShieldBearer ? 0 : 0,
       shieldDarkMetalCd: isShieldBearer ? (SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER) : 0,
       shieldDarkMetalTtl: 0,
       stoneGolem: isStoneGolem,
