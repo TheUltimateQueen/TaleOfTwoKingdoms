@@ -675,7 +675,7 @@ class GameServer {
 
   listen(port = PORT) {
     this.httpServer.listen(port, '0.0.0.0', () => {
-      console.log('EmpiresNeedFuel server running');
+      console.log('Empires Must Eat server running');
       console.log(`Local:   http://localhost:${port}`);
 
       const lanUrls = getLanUrls(port);

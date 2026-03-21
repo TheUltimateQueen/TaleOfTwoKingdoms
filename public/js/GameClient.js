@@ -1020,7 +1020,7 @@ export class GameClient {
   }
 
   refreshThemeCopy() {
-    document.title = 'EmpiresNeedFuel';
+    document.title = 'Empires Must Eat';
     if (this.themeModeHint) this.themeModeHint.textContent = this.themedModeHintText();
     if (this.lobbyThemeModeHint) this.lobbyThemeModeHint.textContent = this.themedModeHintText();
     if (this.postChartHelp) this.postChartHelp.textContent = this.postChartHelpText();
