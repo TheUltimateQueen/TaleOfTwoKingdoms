@@ -4770,11 +4770,13 @@ export class GameRenderer {
       flying: Boolean(ghost.flying),
       flyPhase: Number.isFinite(ghost.flyPhase) ? ghost.flyPhase : 0.8,
       balloonThrowTtl: 0,
-      balloonThrowMaxTtl: 0.22,
+      balloonThrowMaxTtl: 0.6,
       balloonThrowToX: null,
       balloonThrowToY: null,
       balloonBombTtl: 0,
       balloonBombMaxTtl: 0.52,
+      balloonBombFromX: null,
+      balloonBombFromY: null,
       balloonBombToX: null,
       balloonBombToY: null,
       dragonBreathTtl: 0,
@@ -9596,6 +9598,7 @@ export class GameRenderer {
     const topScale = 0.5; // Half dimensions (about 1/4 area) per request.
     const dir = minion.side === 'right' ? -1 : 1;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const sidePalette = TEAM_COLORS[sideName] || TEAM_COLORS.left;
     const themed = this.isThemedEmpires();
     const balloonLevel = Math.max(1, Number(minion.balloonLevel) || 1);
     const upgraded = balloonLevel > 1;
@@ -9604,30 +9607,28 @@ export class GameRenderer {
     const swingA = Math.sin(t * 6.8 + (Number(minion.id) || 0) * 0.87);
     const swingB = Math.sin(t * 7.9 + (Number(minion.id) || 0) * 0.58 + 1.7);
     const bodyY = y + r * 0.98;
+    const throwFromX = x + dir * r * 0.14;
+    const throwFromY = bodyY + r * 0.08;
+    const bombFromX = x + dir * r * 0.06;
+    const bombFromY = bodyY + r * 0.22;
     const throwLife = Math.max(
       0,
-      Math.min(1, (Number(minion.balloonThrowTtl) || 0) / Math.max(0.01, Number(minion.balloonThrowMaxTtl) || 0.22))
+      Math.min(1, (Number(minion.balloonThrowTtl) || 0) / Math.max(0.01, Number(minion.balloonThrowMaxTtl) || 0.6))
     );
     const bombLife = Math.max(
       0,
       Math.min(1, (Number(minion.balloonBombTtl) || 0) / Math.max(0.01, Number(minion.balloonBombMaxTtl) || 0.52))
     );
 
-    const shellA = themed
-      ? (sideName === 'left' ? '#d8a666' : '#c8ddeb')
-      : '#d9a76f';
-    const shellB = themed
-      ? (sideName === 'left' ? '#b97243' : '#6b8ca9')
-      : '#a95f3d';
-    const shellEdge = themed
-      ? (sideName === 'left' ? '#7a4524' : '#2f4f66')
-      : '#744124';
+    const shellA = themed ? sidePalette.soft : this.withAlpha(sidePalette.soft, 0.94);
+    const shellB = sidePalette.primary;
+    const shellEdge = sidePalette.dark;
     const basketFill = themed
       ? (sideName === 'left' ? '#8c5e37' : '#607f93')
-      : '#7e6543';
+      : (sideName === 'left' ? '#5f85a3' : '#9d5f5f');
     const basketStroke = themed
       ? (sideName === 'left' ? '#f0d4ac' : '#d8edf8')
-      : '#e9d2ab';
+      : sidePalette.soft;
 
     ctx.save();
 
@@ -9646,7 +9647,7 @@ export class GameRenderer {
     ctx.stroke();
 
     // Classic hot-air stripe/segments so normal mode reads as an actual balloon.
-    ctx.strokeStyle = this.withAlpha('#f5ebd2', themed ? 0.34 : 0.58);
+    ctx.strokeStyle = this.withAlpha(sidePalette.soft, themed ? 0.32 : 0.58);
     ctx.lineWidth = 1.2;
     for (let i = -2; i <= 2; i += 1) {
       const lx = x + i * (topRx * 0.35);
@@ -9721,29 +9722,29 @@ export class GameRenderer {
       const loafPop = upgraded ? Math.max(0, Math.sin(t * 8 + (Number(minion.id) || 0) * 0.31)) : 0;
 
       // Main body.
-      ctx.fillStyle = '#e0dfdc';
+      ctx.fillStyle = '#8cc9ff';
       ctx.fillRect(bodyX, bodyYTop, bodyW, bodyH);
-      ctx.fillStyle = '#c9c8c5';
+      ctx.fillStyle = '#6eb4f4';
       ctx.fillRect(bodyX + r * 0.03, bodyYTop + r * 0.04, bodyW - r * 0.06, bodyH - r * 0.1);
-      ctx.strokeStyle = '#8f8f8d';
+      ctx.strokeStyle = '#2f6faa';
       ctx.lineWidth = 1.4;
       ctx.strokeRect(bodyX, bodyYTop, bodyW, bodyH);
 
       // Lid cap.
-      ctx.fillStyle = '#f1f0ee';
+      ctx.fillStyle = '#b8e0ff';
       ctx.beginPath();
       ctx.ellipse(x, bodyYTop + r * 0.02, r * 0.48, r * 0.085, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#aaaaa8';
+      ctx.strokeStyle = '#5a9cd2';
       ctx.stroke();
-      ctx.strokeStyle = '#9c9b98';
+      ctx.strokeStyle = '#4d90c8';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x - r * 0.28, bodyYTop + r * 0.02);
       ctx.lineTo(x + r * 0.28, bodyYTop + r * 0.02);
       ctx.stroke();
       // Carry handle on lid.
-      ctx.strokeStyle = '#8d8c89';
+      ctx.strokeStyle = '#2f6fa3';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.moveTo(x - r * 0.08, bodyYTop - r * 0.05);
@@ -9751,11 +9752,11 @@ export class GameRenderer {
       ctx.stroke();
 
       // Viewing window on top.
-      ctx.fillStyle = '#2a3038';
+      ctx.fillStyle = '#21425f';
       ctx.beginPath();
       ctx.ellipse(x, bodyYTop + r * 0.02, r * 0.2, r * 0.04, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#5a626d';
+      ctx.fillStyle = '#7fb9e6';
       ctx.beginPath();
       ctx.ellipse(x - r * 0.06, bodyYTop + r * 0.015, r * 0.055, r * 0.018, -0.2, 0, Math.PI * 2);
       ctx.fill();
@@ -9765,23 +9766,23 @@ export class GameRenderer {
       const panelY = bodyYTop + r * 0.36;
       const panelW = r * 0.44;
       const panelH = r * 0.2;
-      ctx.fillStyle = '#3a4148';
+      ctx.fillStyle = '#2e5f86';
       ctx.fillRect(panelX, panelY, panelW, panelH);
-      ctx.fillStyle = '#96c4e2';
+      ctx.fillStyle = '#d8efff';
       ctx.fillRect(panelX + r * 0.03, panelY + r * 0.03, panelW - r * 0.06, r * 0.06);
-      ctx.fillStyle = '#cfd4da';
+      ctx.fillStyle = '#9fd2fb';
       ctx.beginPath();
       ctx.arc(panelX + r * 0.09, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
       ctx.arc(panelX + r * 0.17, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
       ctx.arc(panelX + r * 0.25, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#e8e7e3';
+      ctx.fillStyle = '#e9f7ff';
       ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText('BREAD', x, panelY + r * 0.16);
 
       // Side vents + feet.
-      ctx.strokeStyle = '#a9a7a4';
+      ctx.strokeStyle = '#5f9ece';
       ctx.lineWidth = 1;
       for (let i = 0; i < 4; i += 1) {
         const vy = bodyYTop + r * (0.18 + i * 0.09);
@@ -9792,7 +9793,7 @@ export class GameRenderer {
         ctx.lineTo(bodyX + bodyW - r * 0.06, vy);
         ctx.stroke();
       }
-      ctx.fillStyle = '#868583';
+      ctx.fillStyle = '#376f9f';
       ctx.fillRect(bodyX + r * 0.08, bodyYTop + bodyH, r * 0.1, r * 0.03);
       ctx.fillRect(bodyX + bodyW - r * 0.18, bodyYTop + bodyH, r * 0.1, r * 0.03);
 
@@ -9825,37 +9826,37 @@ export class GameRenderer {
       const lidPulse = upgraded ? Math.max(0, Math.sin(t * 6.4 + (Number(minion.id) || 0) * 0.24)) * r * 0.02 : 0;
 
       // Pot body.
-      ctx.fillStyle = '#f1f2f3';
+      ctx.fillStyle = '#ffb2b2';
       ctx.beginPath();
       ctx.ellipse(cookerCx, cookerCy, cookerRx, cookerRy, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#d7dbdf';
+      ctx.fillStyle = '#ff8f8f';
       ctx.beginPath();
       ctx.ellipse(cookerCx, cookerCy + r * 0.03, cookerRx * 0.9, cookerRy * 0.72, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#9da4ab';
+      ctx.strokeStyle = '#b34c4c';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.ellipse(cookerCx, cookerCy, cookerRx, cookerRy, 0, 0, Math.PI * 2);
       ctx.stroke();
 
       // Lid and knob.
-      ctx.fillStyle = '#fafbfc';
+      ctx.fillStyle = '#ffd0d0';
       ctx.beginPath();
       ctx.ellipse(cookerCx, cookerCy - r * 0.24 - lidPulse, cookerRx * 0.82, cookerRy * 0.34, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#b6bcc3';
+      ctx.strokeStyle = '#d46666';
       ctx.stroke();
-      ctx.fillStyle = '#8d949c';
+      ctx.fillStyle = '#8f3d3d';
       ctx.beginPath();
       ctx.ellipse(cookerCx, cookerCy - r * 0.31 - lidPulse, r * 0.06, r * 0.03, 0, 0, Math.PI * 2);
       ctx.fill();
       // Lid hinge back.
-      ctx.fillStyle = '#b1b8bf';
+      ctx.fillStyle = '#c05d5d';
       ctx.fillRect(cookerCx - r * 0.08, cookerCy - r * 0.25 - lidPulse, r * 0.16, r * 0.03);
 
       // Side handles.
-      ctx.fillStyle = '#7c848d';
+      ctx.fillStyle = '#8b3f3f';
       ctx.beginPath();
       ctx.ellipse(cookerCx - cookerRx * 0.96, cookerCy - r * 0.03, r * 0.055, r * 0.09, 0, 0, Math.PI * 2);
       ctx.ellipse(cookerCx + cookerRx * 0.96, cookerCy - r * 0.03, r * 0.055, r * 0.09, 0, 0, Math.PI * 2);
@@ -9866,23 +9867,23 @@ export class GameRenderer {
       const pY = cookerCy + r * 0.02;
       const pW = r * 0.4;
       const pH = r * 0.16;
-      ctx.fillStyle = '#323840';
+      ctx.fillStyle = '#6f2f2f';
       ctx.fillRect(pX, pY, pW, pH);
-      ctx.fillStyle = '#8ec3e6';
+      ctx.fillStyle = '#ffdede';
       ctx.fillRect(pX + r * 0.03, pY + r * 0.03, pW - r * 0.06, r * 0.04);
       ctx.fillStyle = upgraded ? '#57e17f' : '#d85454';
       ctx.beginPath();
       ctx.arc(cookerCx + r * 0.11, pY + r * 0.105, r * 0.022, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#bfc5cc';
+      ctx.fillStyle = '#f7baba';
       ctx.fillRect(cookerCx - r * 0.12, pY + r * 0.08, r * 0.12, r * 0.04);
-      ctx.fillStyle = '#eef1f4';
+      ctx.fillStyle = '#fff1f1';
       ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText('RICE', cookerCx, pY + r * 0.16);
 
       // Steam vent lines.
-      ctx.strokeStyle = '#aab3bb';
+      ctx.strokeStyle = '#c66e6e';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cookerCx + r * 0.26, cookerCy - r * 0.28 - lidPulse);
@@ -9891,13 +9892,13 @@ export class GameRenderer {
       ctx.lineTo(cookerCx + r * 0.45, cookerCy - r * 0.3 - lidPulse);
       ctx.stroke();
       // Rice paddle on side so silhouette reads like a kitchen cooker.
-      ctx.strokeStyle = '#9aa3ab';
+      ctx.strokeStyle = '#b95757';
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.moveTo(cookerCx - cookerRx * 1.08, cookerCy - r * 0.06);
       ctx.lineTo(cookerCx - cookerRx * 1.2, cookerCy - r * 0.24);
       ctx.stroke();
-      ctx.fillStyle = '#cfd8df';
+      ctx.fillStyle = '#e89696';
       ctx.beginPath();
       ctx.ellipse(cookerCx - cookerRx * 1.22, cookerCy - r * 0.26, r * 0.04, r * 0.02, -0.3, 0, Math.PI * 2);
       ctx.fill();
@@ -9957,10 +9958,10 @@ export class GameRenderer {
       }
     }
 
-    // Throw FX from a crew member.
+    // Throw FX from the lower payload machine.
     if (allowEffects && throwLife > 0.001 && Number.isFinite(minion.balloonThrowToX) && Number.isFinite(minion.balloonThrowToY)) {
-      const fromX = x + dir * r * 0.25;
-      const fromY = bodyY - r * 0.06;
+      const fromX = throwFromX;
+      const fromY = throwFromY;
       const toX = Number(minion.balloonThrowToX);
       const toY = Number(minion.balloonThrowToY);
       const flight = 1 - throwLife;
@@ -9969,32 +9970,26 @@ export class GameRenderer {
       const midY = Math.min(fromY, toY) - arcLift;
       const px = (1 - flight) * (1 - flight) * fromX + 2 * (1 - flight) * flight * midX + flight * flight * toX;
       const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
-      ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#f0d2a6' : '#e1f2ff', 0.45 + throwLife * 0.4);
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.quadraticCurveTo(midX, midY, toX, toY);
-      ctx.stroke();
       if (sideName === 'left') {
         // Bread chunk.
         ctx.fillStyle = '#d89a59';
         ctx.beginPath();
-        ctx.ellipse(px, py, r * 0.08, r * 0.055, -0.15, 0, Math.PI * 2);
+        ctx.ellipse(px, py, r * 0.16, r * 0.11, -0.15, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#8a562b';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(px - r * 0.025, py - r * 0.01);
-        ctx.lineTo(px + r * 0.01, py + r * 0.015);
+        ctx.moveTo(px - r * 0.05, py - r * 0.02);
+        ctx.lineTo(px + r * 0.02, py + r * 0.03);
         ctx.stroke();
       } else {
         // Rice ball.
         ctx.fillStyle = '#edf8ff';
         ctx.beginPath();
-        ctx.arc(px, py, r * 0.06, 0, Math.PI * 2);
+        ctx.arc(px, py, r * 0.12, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#213644';
-        ctx.fillRect(px - r * 0.018, py + r * 0.016, r * 0.036, r * 0.022);
+        ctx.fillRect(px - r * 0.036, py + r * 0.032, r * 0.072, r * 0.044);
       }
     }
 
@@ -10002,41 +9997,84 @@ export class GameRenderer {
     if (allowEffects && bombLife > 0.001 && Number.isFinite(minion.balloonBombToX) && Number.isFinite(minion.balloonBombToY)) {
       const toX = Number(minion.balloonBombToX);
       const toY = Number(minion.balloonBombToY);
-      const fromX = x - dir * r * 0.08;
-      const fromY = bodyY + r * 0.18;
+      const storedFromX = Number.isFinite(minion.balloonBombFromX) ? Number(minion.balloonBombFromX) : bombFromX;
+      const storedFromY = Number.isFinite(minion.balloonBombFromY) ? Number(minion.balloonBombFromY) : bombFromY;
+      const fromX = upgraded ? toX : storedFromX;
+      const fromY = storedFromY;
       const drop = 1 - bombLife;
       const px = fromX + (toX - fromX) * drop;
       const py = fromY + (toY - fromY) * drop;
-      ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#f0c18f' : '#d8f0ff', 0.35 + bombLife * 0.35);
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(fromX, fromY);
-      ctx.lineTo(px, py);
-      ctx.stroke();
+      const bombScale = upgraded ? 6.2 : 5.2;
       if (sideName === 'left') {
-        // Bread-roll bomb.
-        ctx.fillStyle = '#bb733c';
+        // Bread loaf bomb.
+        const loafRx = r * 0.115 * bombScale;
+        const loafRy = r * 0.082 * bombScale;
+        ctx.fillStyle = '#bd7744';
         ctx.beginPath();
-        ctx.ellipse(px, py, r * 0.1, r * 0.075, 0.22, 0, Math.PI * 2);
+        ctx.ellipse(px, py, loafRx, loafRy, 0.22, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#7f4724';
-        ctx.lineWidth = 1;
+        ctx.fillStyle = '#d99b62';
         ctx.beginPath();
-        ctx.arc(px - r * 0.01, py, r * 0.032, 0, Math.PI * 2);
+        ctx.ellipse(px - loafRx * 0.08, py - loafRy * 0.18, loafRx * 0.7, loafRy * 0.5, 0.18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#7a4321';
+        ctx.lineWidth = upgraded ? 2.2 : 1;
+        ctx.beginPath();
+        ctx.ellipse(px, py, loafRx, loafRy, 0.22, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.strokeStyle = this.withAlpha('#6b3d1f', 0.72);
+        ctx.lineWidth = upgraded ? 1.8 : 0.9;
+        for (let i = -1; i <= 1; i += 1) {
+          const sx = px + i * loafRx * 0.28;
+          ctx.beginPath();
+          ctx.moveTo(sx - loafRx * 0.1, py - loafRy * 0.2);
+          ctx.lineTo(sx + loafRx * 0.14, py + loafRy * 0.18);
+          ctx.stroke();
+        }
+        // Crumb/seeds for readability at large size.
+        ctx.fillStyle = this.withAlpha('#f6d7a3', 0.72);
+        for (let i = 0; i < 6; i += 1) {
+          const sx = px + (Math.random() * 0.7 - 0.35) * loafRx;
+          const sy = py + (Math.random() * 0.52 - 0.28) * loafRy;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, loafRx * 0.045, loafRy * 0.032, Math.random(), 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else {
-        // Rice-ball bomb.
-        ctx.fillStyle = '#f5fbff';
+        // Sticky rice-ball bomb.
+        const riceR = r * 0.076 * bombScale;
+        ctx.fillStyle = '#f8fdff';
         ctx.beginPath();
-        ctx.arc(px, py, r * 0.09, 0, Math.PI * 2);
+        ctx.arc(px - riceR * 0.75, py + riceR * 0.18, riceR * 0.88, 0, Math.PI * 2);
+        ctx.arc(px + riceR * 0.76, py + riceR * 0.14, riceR * 0.88, 0, Math.PI * 2);
         ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px, py, riceR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = this.withAlpha('#d7eaf7', 0.74);
+        ctx.lineWidth = upgraded ? 2 : 1;
+        ctx.beginPath();
+        ctx.arc(px, py, riceR, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.fillStyle = '#1f3646';
-        ctx.fillRect(px - r * 0.028, py + r * 0.01, r * 0.056, r * 0.034);
+        const noriW = riceR * 1.28;
+        const noriH = riceR * 0.42;
+        ctx.fillRect(px - noriW * 0.5, py + riceR * 0.26, noriW, noriH);
+        // Rice-grain texture.
+        ctx.fillStyle = this.withAlpha('#e8f7ff', 0.82);
+        for (let i = 0; i < 9; i += 1) {
+          const gx = px + (Math.random() * 0.9 - 0.45) * riceR;
+          const gy = py + (Math.random() * 0.74 - 0.46) * riceR;
+          ctx.beginPath();
+          ctx.ellipse(gx, gy, riceR * 0.11, riceR * 0.05, (i % 3) * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.strokeStyle = this.withAlpha('#fff4c8', 0.25 + bombLife * 0.45);
-      ctx.lineWidth = 2;
+      ctx.lineWidth = upgraded ? 3.2 : 2;
       ctx.beginPath();
-      ctx.arc(toX, toY, r * 0.35 * (1 + (1 - bombLife) * 0.75), 0, Math.PI * 2);
+      const impactBase = upgraded ? 2.8 : 1.95;
+      ctx.arc(toX, toY, r * impactBase * (1 + (1 - bombLife) * 0.75), 0, Math.PI * 2);
       ctx.stroke();
     }
 
