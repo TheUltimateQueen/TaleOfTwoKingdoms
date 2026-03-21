@@ -3522,9 +3522,9 @@ export class GameRenderer {
     ctx.translate(x, y);
     ctx.scale(scale, scale);
 
-    // Slightly lifted contrast so silhouettes remain visible without stealing focus.
-    ctx.fillStyle = '#2f3b36';
-    ctx.strokeStyle = '#34413b';
+    // Lifted contrast so silhouettes stay readable at gameplay distance.
+    ctx.fillStyle = '#4a5d53';
+    ctx.strokeStyle = '#5a6f63';
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = 1.55;
@@ -3573,45 +3573,45 @@ export class GameRenderer {
     const start = side === 'left' ? 18 : Math.max(18, width * 0.56);
     const end = side === 'left' ? Math.max(start + 40, width * 0.45) : width - 18;
     const span = Math.max(20, end - start);
-    const spacing = 7.8;
+    const spacing = 9.6;
     const count = Math.max(8, Math.floor(span / spacing));
     const baseY = bottomY - 1;
 
     if (side === 'left') {
       // Bread-side crop silhouette (wheat-like stalks).
-      ctx.fillStyle = '#38463f';
-      ctx.strokeStyle = '#415047';
-      ctx.lineWidth = 1;
+      ctx.fillStyle = '#54675d';
+      ctx.strokeStyle = '#63776c';
+      ctx.lineWidth = 1.4;
       for (let i = 0; i < count; i += 1) {
         const t = count <= 1 ? 0 : (i / (count - 1));
         const x = start + t * span + Math.sin(animSec * 0.62 + i * 0.71) * 0.9;
-        const h = 4.5 + (i % 4) * 1.25 + Math.sin(animSec * 1.4 + i * 0.5) * 0.8;
-        ctx.fillRect(x - 0.7, baseY - h, 1.4, h);
+        const h = 9 + (i % 4) * 2.5 + Math.sin(animSec * 1.4 + i * 0.5) * 1.6;
+        ctx.fillRect(x - 1.4, baseY - h, 2.8, h);
         ctx.beginPath();
+        ctx.moveTo(x, baseY - h + 2.4);
+        ctx.lineTo(x - 4.2, baseY - h - 1.2);
         ctx.moveTo(x, baseY - h + 1.2);
-        ctx.lineTo(x - 2.1, baseY - h - 0.6);
-        ctx.moveTo(x, baseY - h + 0.6);
-        ctx.lineTo(x + 2, baseY - h - 0.4);
+        ctx.lineTo(x + 4, baseY - h - 0.8);
         ctx.stroke();
       }
       return;
     }
 
     // Rice-side crop silhouette (bent rice stems).
-    ctx.strokeStyle = '#42524a';
-    ctx.lineWidth = 1.05;
+    ctx.strokeStyle = '#61766a';
+    ctx.lineWidth = 1.5;
     for (let i = 0; i < count; i += 1) {
       const t = count <= 1 ? 0 : (i / (count - 1));
       const x = start + t * span + Math.sin(animSec * 0.58 + i * 0.67) * 0.85;
-      const h = 5 + (i % 5) * 1.05 + Math.sin(animSec * 1.22 + i * 0.6) * 0.75;
-      const lean = 1.4 + Math.sin(animSec * 1.1 + i * 0.33) * 0.8;
+      const h = 10 + (i % 5) * 2.1 + Math.sin(animSec * 1.22 + i * 0.6) * 1.5;
+      const lean = 2.8 + Math.sin(animSec * 1.1 + i * 0.33) * 1.6;
       ctx.beginPath();
       ctx.moveTo(x, baseY);
       ctx.quadraticCurveTo(x + lean * 0.35, baseY - h * 0.55, x + lean, baseY - h);
       ctx.stroke();
-      ctx.fillStyle = '#3a4841';
+      ctx.fillStyle = '#54695d';
       ctx.beginPath();
-      ctx.ellipse(x + lean + 0.45, baseY - h + 0.1, 1.15, 0.64, 0.22, 0, Math.PI * 2);
+      ctx.ellipse(x + lean + 0.9, baseY - h + 0.2, 2.3, 1.28, 0.22, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -3636,16 +3636,16 @@ export class GameRenderer {
     const slopeDrop = side === 'left'
       ? (1 - t) * (3.6 + lane * 0.8)
       : t * (4.2 + lane * 0.85);
-    const laneOffset = side === 'left' ? lane * 5.1 : lane * 5.5;
+    const laneOffset = side === 'left' ? lane * 6.8 : lane * 7.2;
     const bob = Math.sin(animSec * (1.2 + lane * 0.15) + seed) * (1.4 + lane * 0.25);
     const drift = Math.cos(animSec * 0.72 + seed * 0.6) * 1.6;
     const yBase = side === 'left'
-      ? bottomY - 7 - laneOffset - slopeDrop
-      : bottomY - 8 - laneOffset - slopeDrop;
+      ? bottomY - 22 - laneOffset - slopeDrop
+      : bottomY - 23 - laneOffset - slopeDrop;
     const y = yBase + bob + drift;
-    const scale = side === 'left'
+    const scale = (side === 'left'
       ? (0.88 + lane * 0.11 + t * 0.07)
-      : (0.86 + lane * 0.1 + (1 - t) * 0.07);
+      : (0.86 + lane * 0.1 + (1 - t) * 0.07)) * 2;
     const animPhase = animSec * (2.4 + lane * 0.2) + seed * 0.8;
     return { x, y, scale, animPhase };
   }
@@ -3697,14 +3697,14 @@ export class GameRenderer {
       if (xEnd > xStart + 16) ctx.fillRect(xStart, y, xEnd - xStart, 2);
     }
 
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.46;
     this.drawBottomCropSilhouettes('left', width, bottomY, anim);
     this.drawBottomCropSilhouettes('right', width, bottomY, anim);
 
     const leftWorkers = this.harvestBackdropWorkerCount(leftState);
     const rightWorkers = this.harvestBackdropWorkerCount(rightState);
 
-    ctx.globalAlpha = 0.38;
+    ctx.globalAlpha = 0.56;
     for (let i = 0; i < leftWorkers; i += 1) {
       const lane = i % 3;
       const p = this.backdropWorkerFieldPoint('left', i, lane, width, bottomY, anim);
