@@ -2780,6 +2780,7 @@ class GameRoom {
           const minion = bucket[b];
           if (!minion || minion.removed || minion.side === a.side) continue;
           let shieldVulnerableHit = null;
+          let dragonHeartshot = false;
           if (minion.shieldBearer) {
             if (this.arrowInsideShieldBearerShield(a, minion, prevX, prevY)) {
               this.markArrowMiss(a);
@@ -2790,6 +2791,13 @@ class GameRoom {
             }
             shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion, prevX, prevY);
             if (!shieldVulnerableHit) continue;
+          } else if (minion.dragon) {
+            // Dragons can only be damaged through their heart core.
+            const core = this.dragonHeartCore(minion);
+            if (!core) continue;
+            const hitR = core.r + a.r;
+            if (dist2(a, core) > hitR * hitR) continue;
+            dragonHeartshot = true;
           } else {
             const hitR = minion.r + a.r;
             if (dist2(a, minion) > hitR * hitR) continue;
@@ -2801,15 +2809,10 @@ class GameRoom {
           const shieldHeadshot = Boolean(minion.shieldBearer && shieldVulnerableHit === 'head');
           if (shieldHeadshot) damage *= SHIELD_HEADSHOT_DAMAGE_MULT;
           else if (minion.shieldBearer && shieldVulnerableHit === 'body') damage *= SHIELD_BODYSHOT_DAMAGE_MULT;
-          const core = this.dragonHeartCore(minion);
-          if (core) {
-            const coreHitR = core.r + a.r;
-            if (dist2(a, core) <= coreHitR * coreHitR) {
-              damage *= 2.85;
-              this.queueHitSfx('dragon', core.x, core.y, a.side);
-            } else {
-              this.queueHitSfx('minion', minion.x, minion.y, a.side);
-            }
+          if (dragonHeartshot) {
+            const core = this.dragonHeartCore(minion);
+            damage *= 2.2;
+            this.queueHitSfx('dragon', core?.x ?? minion.x, core?.y ?? minion.y, a.side);
           } else {
             this.queueHitSfx('minion', minion.x, minion.y, a.side);
           }
@@ -4110,11 +4113,12 @@ class GameRoom {
 
   dragonHeartCore(minion) {
     if (!minion.dragon) return null;
+    const baseR = Math.max(14, Number(minion.r) || 14);
     const dir = minion.side === 'left' ? 1 : -1;
     return {
-      x: minion.x + dir * (minion.r * 0.34),
-      y: minion.y - minion.r * 0.14,
-      r: Math.max(7, minion.r * 0.3),
+      x: minion.x + dir * (baseR * 0.22),
+      y: minion.y + baseR * 0.02,
+      r: Math.max(6.5, baseR * 0.26),
     };
   }
 

@@ -2550,6 +2550,88 @@ export class GameRenderer {
       ctx.restore();
     }
 
+    if (specialType === 'dragon' && !cacheRender) {
+      const dragonPhase = Number.isFinite(minion.flyPhase) ? minion.flyPhase : (animNow * 1.45);
+      const wingFlap = Math.sin(dragonPhase * 2.3);
+      const wingSweep = Math.cos(dragonPhase * 1.2);
+      const breathLife = Math.max(0, Math.min(1, (Number(minion.dragonBreathTtl) || 0) / 0.24));
+      const superBreathLife = Math.max(0, Math.min(1, (Number(minion.dragonSuperBreathTtl) || 0) / 1.8));
+      const attackLife = Math.max(breathLife, superBreathLife * 0.95);
+      const wingReach = baseR * (1.22 + attackLife * 0.18);
+      const wingPeak = baseR * (0.66 + wingFlap * 0.5);
+      const wingDrop = baseR * (0.42 + (1 - wingFlap) * 0.42);
+      const mouthX = drawX + dir * (baseR * 0.94);
+      const mouthY = drawY - baseR * 0.24;
+
+      ctx.save();
+      ctx.globalAlpha = 0.28 + attackLife * 0.2;
+      ctx.fillStyle = westSide ? '#9fd4ff4d' : '#f3c8d34d';
+      ctx.beginPath();
+      ctx.moveTo(drawX + dir * (baseR * 0.22), drawY - baseR * 0.18);
+      ctx.lineTo(drawX + dir * (wingReach * 1.16), drawY - wingPeak);
+      ctx.lineTo(drawX + dir * (wingReach * 1.55), drawY + wingDrop);
+      ctx.lineTo(drawX + dir * (baseR * 0.34), drawY + baseR * 0.36);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(drawX - dir * (baseR * 0.12), drawY - baseR * 0.16);
+      ctx.lineTo(drawX - dir * (wingReach * 1.04), drawY - wingPeak * 0.92);
+      ctx.lineTo(drawX - dir * (wingReach * 1.45), drawY + wingDrop * 0.88);
+      ctx.lineTo(drawX - dir * (baseR * 0.3), drawY + baseR * 0.34);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 0.46 + attackLife * 0.2;
+      ctx.strokeStyle = westSide ? '#d8f1ff' : '#f5d4dc';
+      ctx.lineWidth = 1.15 * scale;
+      ctx.beginPath();
+      ctx.moveTo(drawX + dir * (baseR * 0.18), drawY - baseR * 0.1);
+      ctx.lineTo(drawX + dir * (wingReach * 1.06), drawY - wingPeak * 0.9);
+      ctx.lineTo(drawX + dir * (wingReach * 1.32), drawY + wingDrop * 0.48 + wingSweep * baseR * 0.06);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(drawX - dir * (baseR * 0.2), drawY - baseR * 0.12);
+      ctx.lineTo(drawX - dir * (wingReach), drawY - wingPeak * 0.82);
+      ctx.lineTo(drawX - dir * (wingReach * 1.22), drawY + wingDrop * 0.46 - wingSweep * baseR * 0.06);
+      ctx.stroke();
+
+      if (attackLife > 0.001) {
+        const jawDrop = baseR * (0.18 + attackLife * 0.46);
+        ctx.globalAlpha = 0.64 + attackLife * 0.26;
+        const mouthGlow = ctx.createRadialGradient(
+          mouthX,
+          mouthY + jawDrop * 0.3,
+          1,
+          mouthX,
+          mouthY + jawDrop * 0.3,
+          baseR * 0.84
+        );
+        mouthGlow.addColorStop(0, '#fff2c9');
+        mouthGlow.addColorStop(0.45, '#ffab5b');
+        mouthGlow.addColorStop(1, '#ff5338');
+        ctx.fillStyle = mouthGlow;
+        ctx.beginPath();
+        ctx.ellipse(
+          mouthX + dir * (baseR * 0.09),
+          mouthY + jawDrop * 0.34,
+          baseR * (0.36 + attackLife * 0.2),
+          baseR * (0.22 + attackLife * 0.1),
+          -dir * 0.12,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+      ctx.restore();
+
+      const heart = this.dragonHeartCore({ side: sideName, x: drawX, y: drawY, r: baseR });
+      this.drawDragonHeartMarker(heart.x, heart.y, heart.r, {
+        attackLife,
+        side: sideName,
+        seed: Number(minion.id) || 0,
+      });
+    }
+
     if (upgraded && !cacheRender) {
       // Per-special elite animation overlays; simple trig + small primitive counts.
       const pulse = 0.5 + Math.sin(animNow * 8.1 + animSeed) * 0.5;
@@ -7086,6 +7168,48 @@ export class GameRenderer {
     const hitMid = sideName === 'right' ? '#ff8f8f' : '#72bcff';
     const hitStroke = sideName === 'right' ? '#ff6d6d' : '#4da7ff';
     const r = Math.max(10, Number(minion?.r) || 14);
+    if (minion?.dragon) {
+      const core = this.dragonHeartCore(minion);
+      const cx = Number(core?.x) || x;
+      const cy = Number(core?.y) || y;
+      const cr = Math.max(5, Number(core?.r) || (r * 0.24));
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.32 + life * 0.42;
+      const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, cr * (2.2 + life * 0.45));
+      glow.addColorStop(0, hitCore);
+      glow.addColorStop(0.5, hitMid);
+      glow.addColorStop(1, this.withAlpha(hitMid, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr * (2.2 + life * 0.45), 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.34 + life * 0.38;
+      ctx.strokeStyle = this.withAlpha(hitStroke, 0.92);
+      ctx.lineWidth = 1.5 + life * 2.2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr * (1.48 + life * 0.38), 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.28 + life * 0.24;
+      ctx.strokeStyle = this.withAlpha(sidePalette.primary, 0.94);
+      ctx.lineWidth = 1.15 + life * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx - cr * 2.2, cy);
+      ctx.lineTo(cx - cr * 1.2, cy);
+      ctx.moveTo(cx + cr * 1.2, cy);
+      ctx.lineTo(cx + cr * 2.2, cy);
+      ctx.moveTo(cx, cy - cr * 2.2);
+      ctx.lineTo(cx, cy - cr * 1.2);
+      ctx.moveTo(cx, cy + cr * 1.2);
+      ctx.lineTo(cx, cy + cr * 2.2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     const rxMul = minion.dragon
       ? 2.3
       : (minion.stoneGolem
@@ -9693,10 +9817,91 @@ export class GameRenderer {
     const baseR = Math.max(14, Number(minion?.r) || 14);
     const dir = minion.side === 'left' ? 1 : -1;
     return {
-      x: minion.x + dir * (baseR * 0.34),
-      y: minion.y - baseR * 0.14,
-      r: Math.max(7, baseR * 0.3),
+      x: minion.x + dir * (baseR * 0.22),
+      y: minion.y + baseR * 0.02,
+      r: Math.max(6.5, baseR * 0.26),
     };
+  }
+
+  drawDragonHeartMarker(x, y, r, options = {}) {
+    const { ctx } = this;
+    const sideName = options.side === 'right' ? 'right' : 'left';
+    const attackLife = Math.max(0, Math.min(1, Number(options.attackLife) || 0));
+    const seed = Number(options.seed) || 0;
+    const pulseT = performance.now() * 0.006 + seed * 0.09;
+    const pulse = 0.5 + Math.sin(pulseT) * 0.5;
+    const heartR = Math.max(4.5, r * (0.9 + pulse * 0.16 + attackLife * 0.14));
+    const cx = Number(x) || 0;
+    const cy = (Number(y) || 0) + Math.sin(pulseT * 0.8) * heartR * 0.08;
+    const glow = sideName === 'right' ? '#ff9eb4' : '#9bd8ff';
+    const fillA = sideName === 'right' ? '#ff6a87' : '#ff6a4f';
+    const fillB = sideName === 'right' ? '#ff2f5d' : '#ff3127';
+    const centerColor = sideName === 'right' ? '#ffd5e2' : '#ffe4cc';
+
+    ctx.save();
+    ctx.globalAlpha = 0.42 + attackLife * 0.3;
+    const aura = ctx.createRadialGradient(cx, cy, 1, cx, cy, heartR * 2.4);
+    aura.addColorStop(0, '#fff7ea');
+    aura.addColorStop(0.34, glow);
+    aura.addColorStop(1, this.withAlpha(glow, 0));
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(cx, cy, heartR * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const heartGrad = ctx.createLinearGradient(cx, cy - heartR * 1.1, cx, cy + heartR * 1.2);
+    heartGrad.addColorStop(0, '#ffd8c8');
+    heartGrad.addColorStop(0.42, fillA);
+    heartGrad.addColorStop(1, fillB);
+    ctx.globalAlpha = 0.86;
+    ctx.fillStyle = heartGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + heartR * 0.95);
+    ctx.bezierCurveTo(
+      cx + heartR * 1.2, cy + heartR * 0.24,
+      cx + heartR * 1.02, cy - heartR * 0.74,
+      cx, cy - heartR * 0.24
+    );
+    ctx.bezierCurveTo(
+      cx - heartR * 1.02, cy - heartR * 0.74,
+      cx - heartR * 1.2, cy + heartR * 0.24,
+      cx, cy + heartR * 0.95
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffe7cb';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    ctx.fillStyle = centerColor;
+    ctx.beginPath();
+    ctx.arc(cx, cy + heartR * 0.06, heartR * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffb9a0';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+
+    const reticleR = heartR * 1.48 + attackLife * 1.6;
+    ctx.globalAlpha = 0.72;
+    ctx.strokeStyle = '#ffeed5';
+    ctx.lineWidth = 1.1;
+    ctx.setLineDash([3.2, 2.2]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, reticleR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(cx - reticleR - 3.4, cy);
+    ctx.lineTo(cx - reticleR + 1.2, cy);
+    ctx.moveTo(cx + reticleR - 1.2, cy);
+    ctx.lineTo(cx + reticleR + 3.4, cy);
+    ctx.moveTo(cx, cy - reticleR - 3.4);
+    ctx.lineTo(cx, cy - reticleR + 1.2);
+    ctx.moveTo(cx, cy + reticleR - 1.2);
+    ctx.lineTo(cx, cy + reticleR + 3.4);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawDragonSprite(minion, options = {}) {
@@ -9706,19 +9911,23 @@ export class GameRenderer {
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
     const upgraded = Boolean(minion.dragonSuperBreathUpgraded);
-    const palette = TEAM_COLORS[minion.side];
     const dir = sideName === 'left' ? 1 : -1;
     const x = minion.x;
     const y = minion.y;
     const baseR = Math.max(14, Number(minion.r) || 14);
     const scale = minion.super ? 1.22 : 1;
-    const bodyW = baseR * 1.42 * scale;
-    const bodyH = baseR * 0.82 * scale;
-    const wingSpan = baseR * 2.4 * scale;
-    const phase = Number.isFinite(minion.flyPhase) ? minion.flyPhase : 0;
-    const wingLift = 0.35 + (Math.sin(phase * 2) + 1) * 0.27;
-    const mouthX = x + dir * (baseR * 0.95);
-    const mouthY = y - baseR * 0.24;
+    const bodyW = baseR * 1.48 * scale;
+    const bodyH = baseR * 0.86 * scale;
+    const wingSpan = baseR * 2.78 * scale;
+    const phase = Number.isFinite(minion.flyPhase) ? minion.flyPhase : (performance.now() * 0.004);
+    const wingFlap = Math.sin(phase * 2.35);
+    const wingSweep = Math.cos(phase * 1.22);
+    const breathLife = Math.max(0, Math.min(1, (Number(minion.dragonBreathTtl) || 0) / 0.24));
+    const superBreathLife = Math.max(0, Math.min(1, (Number(minion.dragonSuperBreathTtl) || 0) / 1.8));
+    const attackLife = Math.max(breathLife, superBreathLife * 0.95);
+    const mouthOpen = 0.14 + attackLife * 0.68;
+    const mouthX = x + dir * (bodyW * 0.84);
+    const mouthY = y - bodyH * 0.2;
 
     const drawDragonLabel = () => {
       if (!showHud) return;
@@ -9729,35 +9938,35 @@ export class GameRenderer {
     };
 
     const drawDragonBreath = () => {
-      if ((minion.dragonBreathTtl || 0) <= 0) return;
+      const flameLife = Math.max(breathLife, superBreathLife);
+      if (flameLife <= 0.001) return;
       const toX = Number.isFinite(minion.dragonBreathToX) ? minion.dragonBreathToX : mouthX + dir * 120;
       const toY = Number.isFinite(minion.dragonBreathToY) ? minion.dragonBreathToY : mouthY + 10;
-      const flameLife = Math.max(0, Math.min(1, minion.dragonBreathTtl / 0.24));
 
       ctx.save();
-      ctx.globalAlpha = 0.35 + flameLife * 0.55;
+      ctx.globalAlpha = 0.32 + flameLife * 0.6;
       const flameGradient = ctx.createLinearGradient(mouthX, mouthY, toX, toY);
       flameGradient.addColorStop(0, '#fff1b2');
       flameGradient.addColorStop(0.35, '#ffb648');
       flameGradient.addColorStop(0.75, '#ff7a33');
       flameGradient.addColorStop(1, '#ff4c2c');
       ctx.strokeStyle = flameGradient;
-      ctx.lineWidth = 6 + flameLife * 8;
+      ctx.lineWidth = 6 + flameLife * 11;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(mouthX, mouthY);
       ctx.quadraticCurveTo(
-        (mouthX + toX) * 0.5 + Math.sin(phase * 5) * 10,
-        (mouthY + toY) * 0.5 - 8,
+        (mouthX + toX) * 0.5 + Math.sin(phase * 5.4) * (8 + flameLife * 6),
+        (mouthY + toY) * 0.5 - (8 + flameLife * 5),
         toX,
         toY
       );
       ctx.stroke();
 
-      ctx.globalAlpha = 0.6 + flameLife * 0.35;
+      ctx.globalAlpha = 0.5 + flameLife * 0.4;
       ctx.fillStyle = '#ffe7a0';
       ctx.beginPath();
-      ctx.arc(mouthX, mouthY, 3.2 + flameLife * 2.2, 0, Math.PI * 2);
+      ctx.arc(mouthX, mouthY, 3.6 + flameLife * 3.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     };
@@ -9780,8 +9989,10 @@ export class GameRenderer {
       const wrappedPhase = ((phase % phaseCycle) + phaseCycle) % phaseCycle;
       const phaseBuckets = 12;
       const phaseBucket = Math.max(0, Math.min(phaseBuckets - 1, Math.round((wrappedPhase / phaseCycle) * (phaseBuckets - 1))));
+      const mouthBuckets = 8;
+      const mouthBucket = Math.max(0, Math.min(mouthBuckets - 1, Math.round(attackLife * (mouthBuckets - 1))));
       const radiusBucket = Math.max(14, Math.min(36, Math.round(baseR)));
-      const cacheKey = `dragon:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${radiusBucket}:${phaseBucket}`;
+      const cacheKey = `dragon:${sideName}:${minion.super ? 1 : 0}:${upgraded ? 1 : 0}:${radiusBucket}:${phaseBucket}:${mouthBucket}`;
       const cacheWidth = Math.ceil(radiusBucket * 8 * scale + 96);
       const cacheHeight = Math.ceil(radiusBucket * 5.6 * scale + 110);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -9791,7 +10002,8 @@ export class GameRenderer {
           y: h / 2,
           r: radiusBucket,
           flyPhase: (phaseBucket / Math.max(1, phaseBuckets - 1)) * phaseCycle,
-          dragonBreathTtl: 0,
+          dragonBreathTtl: (mouthBucket / Math.max(1, mouthBuckets - 1)) * 0.24,
+          dragonSuperBreathTtl: (mouthBucket / Math.max(1, mouthBuckets - 1)) * 1.8,
           dragonBreathToX: null,
           dragonBreathToY: null,
         };
@@ -9808,29 +10020,47 @@ export class GameRenderer {
 
     ctx.fillStyle = '#00000026';
     ctx.beginPath();
-    ctx.ellipse(x, y + bodyH + 14, bodyW * 0.95, 8 + bodyH * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + bodyH + 14, bodyW * 1.05, 8 + bodyH * 0.24, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.save();
     ctx.translate(x, y);
 
-    ctx.fillStyle = '#263850';
+    const backWingTopY = -bodyH * (1.02 + wingFlap * 0.48);
+    const backWingTipY = bodyH * (0.16 + (1 - wingFlap) * 0.28);
+    ctx.fillStyle = '#243449';
     ctx.beginPath();
-    ctx.moveTo(-dir * 8, -4);
-    ctx.lineTo(-dir * (wingSpan * 0.55), -bodyH * (0.8 + wingLift));
-    ctx.lineTo(-dir * (wingSpan * 0.95), -bodyH * (0.15 + wingLift * 0.3));
-    ctx.lineTo(-dir * (wingSpan * 0.2), bodyH * 0.3);
+    ctx.moveTo(-dir * 7, -5);
+    ctx.lineTo(-dir * (wingSpan * 0.56), backWingTopY);
+    ctx.lineTo(-dir * (wingSpan * 1.02), backWingTipY);
+    ctx.lineTo(-dir * (wingSpan * 0.22), bodyH * 0.4);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = '#485f7d';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-dir * 6, -4);
+    ctx.lineTo(-dir * (wingSpan * 0.62), backWingTopY + bodyH * 0.12);
+    ctx.lineTo(-dir * (wingSpan * 0.88), backWingTipY - bodyH * 0.16);
+    ctx.stroke();
 
+    const frontWingTopY = -bodyH * (0.9 + wingFlap * 0.66);
+    const frontWingTipY = bodyH * (0.14 + (1 - wingFlap) * 0.32);
     ctx.fillStyle = '#2f4664';
     ctx.beginPath();
-    ctx.moveTo(dir * 4, -2);
-    ctx.lineTo(dir * (wingSpan * 0.5), -bodyH * (0.75 + wingLift * 0.9));
-    ctx.lineTo(dir * (wingSpan * 0.92), -bodyH * (0.08 + wingLift * 0.25));
-    ctx.lineTo(dir * (wingSpan * 0.18), bodyH * 0.3);
+    ctx.moveTo(dir * 5, -2);
+    ctx.lineTo(dir * (wingSpan * 0.54), frontWingTopY);
+    ctx.lineTo(dir * (wingSpan * 0.98), frontWingTipY);
+    ctx.lineTo(dir * (wingSpan * 0.2), bodyH * 0.38);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = '#7598c2';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(dir * 4, -2.6);
+    ctx.lineTo(dir * (wingSpan * 0.58), frontWingTopY + bodyH * 0.14);
+    ctx.lineTo(dir * (wingSpan * 0.82), frontWingTipY - bodyH * 0.08);
+    ctx.stroke();
 
     ctx.fillStyle = '#395579';
     ctx.beginPath();
@@ -9846,6 +10076,13 @@ export class GameRenderer {
     ctx.moveTo(-dir * (bodyW * 0.5), 2);
     ctx.lineTo(dir * (bodyW * 0.45), 2);
     ctx.stroke();
+    ctx.globalAlpha = 0.36;
+    ctx.fillStyle = '#b9d7ef';
+    ctx.beginPath();
+    ctx.ellipse(dir * (bodyW * 0.06), bodyH * 0.1, bodyW * 0.5, bodyH * 0.24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
     if (upgraded) {
       ctx.fillStyle = '#9fd1ff';
       for (let i = 0; i < 5; i += 1) {
@@ -9861,10 +10098,11 @@ export class GameRenderer {
     }
 
     const headX = dir * (bodyW * 0.82);
-    const headY = -bodyH * 0.28;
+    const headY = -bodyH * (0.3 + wingSweep * 0.03);
+    const headR = bodyH * 0.7;
     ctx.fillStyle = '#45648c';
     ctx.beginPath();
-    ctx.arc(headX, headY, bodyH * 0.68, 0, Math.PI * 2);
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#1a2a40';
     ctx.lineWidth = 1.8;
@@ -9873,51 +10111,102 @@ export class GameRenderer {
     ctx.strokeStyle = '#adc9ea';
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(headX + dir * 2, headY - bodyH * 0.95);
-    ctx.lineTo(headX + dir * 7, headY - bodyH * 1.4);
-    ctx.moveTo(headX - dir * 1, headY - bodyH * 0.88);
-    ctx.lineTo(headX + dir * 2, headY - bodyH * 1.36);
+    ctx.moveTo(headX + dir * 2, headY - headR * 1.3);
+    ctx.lineTo(headX + dir * 7, headY - headR * 1.86);
+    ctx.moveTo(headX - dir * 1, headY - headR * 1.2);
+    ctx.lineTo(headX + dir * 2, headY - headR * 1.78);
     ctx.stroke();
     if (upgraded) {
       ctx.strokeStyle = '#dce9ff';
       ctx.lineWidth = 2.1;
       ctx.beginPath();
-      ctx.moveTo(headX + dir * 1, headY - bodyH * 0.72);
-      ctx.lineTo(headX + dir * 10.5, headY - bodyH * 1.72);
-      ctx.moveTo(headX - dir * 4, headY - bodyH * 0.58);
-      ctx.lineTo(headX + dir * 1.8, headY - bodyH * 1.46);
+      ctx.moveTo(headX + dir * 1, headY - headR * 0.98);
+      ctx.lineTo(headX + dir * 10.5, headY - headR * 2.18);
+      ctx.moveTo(headX - dir * 4, headY - headR * 0.8);
+      ctx.lineTo(headX + dir * 1.8, headY - headR * 1.9);
       ctx.stroke();
+    }
+
+    const jawDrop = headR * mouthOpen;
+    ctx.fillStyle = '#2c3f59';
+    ctx.beginPath();
+    ctx.moveTo(headX - dir * (headR * 0.38), headY + headR * 0.12);
+    ctx.quadraticCurveTo(
+      headX + dir * (headR * 0.98),
+      headY + headR * 0.34 + jawDrop,
+      headX + dir * (headR * 0.32),
+      headY + headR * 0.95 + jawDrop
+    );
+    ctx.quadraticCurveTo(
+      headX - dir * (headR * 0.22),
+      headY + headR * 0.8 + jawDrop * 0.76,
+      headX - dir * (headR * 0.38),
+      headY + headR * 0.12
+    );
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#556f90';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    if (attackLife > 0.001) {
+      ctx.globalAlpha = 0.5 + attackLife * 0.35;
+      const fireGrad = ctx.createRadialGradient(
+        headX + dir * (headR * 0.48),
+        headY + headR * 0.54 + jawDrop * 0.34,
+        1,
+        headX + dir * (headR * 0.48),
+        headY + headR * 0.54 + jawDrop * 0.34,
+        headR * 0.8
+      );
+      fireGrad.addColorStop(0, '#fff6cc');
+      fireGrad.addColorStop(0.45, '#ffaf56');
+      fireGrad.addColorStop(1, '#ff5c33');
+      ctx.fillStyle = fireGrad;
+      ctx.beginPath();
+      ctx.ellipse(
+        headX + dir * (headR * 0.48),
+        headY + headR * 0.54 + jawDrop * 0.34,
+        headR * (0.48 + attackLife * 0.2),
+        headR * (0.28 + attackLife * 0.15),
+        -dir * 0.12,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
 
     ctx.fillStyle = '#f8fbff';
     ctx.beginPath();
-    ctx.arc(headX + dir * 4.5, headY - 1, 1.7, 0, Math.PI * 2);
+    ctx.arc(headX + dir * 4.8, headY - 1.2, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1a2635';
+    ctx.beginPath();
+    ctx.arc(headX + dir * 5.1, headY - 1.1, 0.8, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = '#5e7ea6';
     ctx.lineWidth = 3.2;
     ctx.beginPath();
-    ctx.moveTo(-dir * (bodyW * 0.8), bodyH * 0.05);
-    ctx.quadraticCurveTo(-dir * (bodyW * 1.2), bodyH * 0.2, -dir * (bodyW * 1.45), bodyH * 0.65);
-    ctx.stroke();
-
-    const heart = this.dragonHeartCore(minion);
-    const heartGradient = ctx.createRadialGradient(heart.x - x, heart.y - y, 1, heart.x - x, heart.y - y, heart.r + 4);
-    heartGradient.addColorStop(0, '#fff5d4');
-    heartGradient.addColorStop(0.45, '#ff7f4b');
-    heartGradient.addColorStop(1, '#ff3a2e');
-    ctx.fillStyle = heartGradient;
-    ctx.beginPath();
-    ctx.arc(heart.x - x, heart.y - y, heart.r, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#ffdcb0';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(heart.x - x, heart.y - y, heart.r + 2.5, 0, Math.PI * 2);
+    ctx.moveTo(-dir * (bodyW * 0.82), bodyH * 0.08);
+    ctx.quadraticCurveTo(
+      -dir * (bodyW * 1.26 + wingSweep * bodyW * 0.08),
+      bodyH * 0.18,
+      -dir * (bodyW * 1.52),
+      bodyH * 0.7 + wingFlap * bodyH * 0.08
+    );
     ctx.stroke();
 
     ctx.restore();
+    if (!cacheRender) {
+      const heart = this.dragonHeartCore(minion);
+      this.drawDragonHeartMarker(heart.x, heart.y, heart.r, {
+        attackLife,
+        side: sideName,
+        seed: Number(minion.id) || 0,
+      });
+    }
     this.drawThemedSpecialLook(minion, 'dragon', { cacheRender, upgraded });
 
     drawDragonLabel();
