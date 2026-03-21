@@ -1470,22 +1470,22 @@ export class GameRenderer {
           ctx.strokeStyle = '#f3e8d4';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.moveTo(7.2 * dir * scale, -1.4 * scale);
-          ctx.lineTo(22.8 * dir * scale, -4.5 * scale);
+          ctx.moveTo(6.4 * dir * scale, -1.8 * scale);
+          ctx.lineTo(20.6 * dir * scale, -6.5 * scale);
           ctx.stroke();
           ctx.fillStyle = '#4f7ea8';
           ctx.beginPath();
-          ctx.moveTo(14 * dir * scale, -3.5 * scale);
-          ctx.lineTo(18.2 * dir * scale, -2 * scale);
-          ctx.lineTo(14 * dir * scale, -0.7 * scale);
+          ctx.moveTo(12.8 * dir * scale, -5.2 * scale);
+          ctx.lineTo(16.6 * dir * scale, -4.2 * scale);
+          ctx.lineTo(12.8 * dir * scale, -3.1 * scale);
           ctx.closePath();
           ctx.fill();
           ctx.fillStyle = '#335f86';
           ctx.beginPath();
-          ctx.moveTo(8 * dir * scale, -1.8 * scale);
-          ctx.lineTo(12.4 * dir * scale, -0.8 * scale);
-          ctx.lineTo(8 * dir * scale, 2.8 * scale);
-          ctx.lineTo(5.9 * dir * scale, 0.6 * scale);
+          ctx.moveTo(7.6 * dir * scale, -2.2 * scale);
+          ctx.lineTo(11.8 * dir * scale, -1.2 * scale);
+          ctx.lineTo(7.7 * dir * scale, 2.1 * scale);
+          ctx.lineTo(5.8 * dir * scale, 0.2 * scale);
           ctx.closePath();
           ctx.fill();
         } else {
@@ -1493,18 +1493,18 @@ export class GameRenderer {
           ctx.strokeStyle = '#dbe3ef';
           ctx.lineWidth = 2.15;
           ctx.beginPath();
-          ctx.moveTo(6.7 * dir * scale, -1.1 * scale);
-          ctx.lineTo(15.1 * dir * scale, -0.8 * scale);
+          ctx.moveTo(6.2 * dir * scale, -1.5 * scale);
+          ctx.lineTo(12.9 * dir * scale, -5.2 * scale);
           ctx.stroke();
           ctx.fillStyle = '#7f92a8';
           ctx.beginPath();
-          ctx.arc(15.9 * dir * scale, -0.7 * scale, 1.65 * scale, 0, Math.PI * 2);
+          ctx.arc(13.5 * dir * scale, -5.6 * scale, 1.45 * scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#f2debb';
           ctx.lineWidth = 1.2;
           ctx.beginPath();
-          ctx.moveTo(14.4 * dir * scale, -2.4 * scale);
-          ctx.lineTo(17.8 * dir * scale, -1 * scale);
+          ctx.moveTo(12.1 * dir * scale, -6.3 * scale);
+          ctx.lineTo(15 * dir * scale, -4.6 * scale);
           ctx.stroke();
         }
         if (upgraded) {
@@ -2090,35 +2090,58 @@ export class GameRenderer {
         ctx.strokeStyle = '#f2dcc3';
         ctx.lineWidth = 2.35;
         ctx.beginPath();
-        ctx.moveTo(7.2 * dir * scale, -1.6 * scale);
-        ctx.lineTo(22.6 * dir * scale, -3.9 * scale);
+        ctx.moveTo(6.6 * dir * scale, -2.1 * scale);
+        ctx.lineTo(20.8 * dir * scale, -6.1 * scale);
         ctx.stroke();
         ctx.fillStyle = '#e5bcc8';
         ctx.beginPath();
-        ctx.moveTo(17 * dir * scale, -4.8 * scale);
-        ctx.lineTo(22.1 * dir * scale, -3.5 * scale);
-        ctx.lineTo(17 * dir * scale, -2.3 * scale);
+        ctx.moveTo(15.9 * dir * scale, -6.8 * scale);
+        ctx.lineTo(20.4 * dir * scale, -5.8 * scale);
+        ctx.lineTo(15.9 * dir * scale, -4.8 * scale);
         ctx.closePath();
         ctx.fill();
       } else {
         // Follow-up profile: short-range horse-archer kit.
+        const bowGripX = 7.8 * dir * scale;
+        const bowGripY = -2.2 * scale;
+        const bowTipTopX = bowGripX + dir * 2.1 * scale;
+        const bowTipTopY = bowGripY - 3.6 * scale;
+        const bowTipBotX = bowGripX + dir * 2 * scale;
+        const bowTipBotY = bowGripY + 1.4 * scale;
+        const bowCurveX = bowGripX + dir * 4.2 * scale;
+        const bowCurveY = bowGripY - 1.3 * scale;
+        const stringOffsetX = -dir * 0.55 * scale;
+        const arrowStartX = bowGripX + dir * 0.3 * scale;
+        const arrowStartY = bowGripY - 0.9 * scale;
+        const arrowEndX = arrowStartX + dir * 6.6 * scale;
+        const arrowEndY = arrowStartY - 2 * scale;
+
         ctx.strokeStyle = '#f5d8e1';
         ctx.lineWidth = 1.9;
         ctx.beginPath();
-        ctx.moveTo(8.4 * dir * scale, -2.1 * scale);
-        ctx.quadraticCurveTo(13.4 * dir * scale, -6.1 * scale, 17.4 * dir * scale, -2.9 * scale);
+        ctx.moveTo(bowTipTopX, bowTipTopY);
+        ctx.quadraticCurveTo(bowCurveX, bowCurveY, bowTipBotX, bowTipBotY);
         ctx.stroke();
+
+        // String sits on the body-side of the bow.
         ctx.strokeStyle = '#d1a0ad';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(9.6 * dir * scale, -2.1 * scale);
-        ctx.lineTo(17 * dir * scale, -3);
+        ctx.moveTo(bowTipTopX + stringOffsetX, bowTipTopY + 0.2 * scale);
+        ctx.lineTo(bowTipBotX + stringOffsetX, bowTipBotY - 0.2 * scale);
         ctx.stroke();
+
+        // Arrow points up and away from the rider.
         ctx.strokeStyle = '#f8e5eb';
         ctx.lineWidth = 1.1;
         ctx.beginPath();
-        ctx.moveTo(10.4 * dir * scale, -1.4 * scale);
-        ctx.lineTo(17.2 * dir * scale, -1.4 * scale);
+        ctx.moveTo(arrowStartX, arrowStartY);
+        ctx.lineTo(arrowEndX, arrowEndY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(arrowEndX - dir * 1.5 * scale, arrowEndY - 1.1 * scale);
+        ctx.lineTo(arrowEndX + dir * 0.9 * scale, arrowEndY);
+        ctx.lineTo(arrowEndX - dir * 1.5 * scale, arrowEndY + 1.1 * scale);
         ctx.stroke();
       }
       // Quiver.
@@ -3012,32 +3035,32 @@ export class GameRenderer {
         ctx.lineWidth = 1.2 * scale;
         if (riderChargeReady) {
           // Opening spike accent.
-          const lanceTipX = drawX + dir * (22.6 * scale);
-          const lanceTipY = drawY - 4 * scale;
+          const lanceTipX = drawX + dir * (16.8 * scale);
+          const lanceTipY = drawY - 6.1 * scale;
           ctx.strokeStyle = european ? '#f6e4bf' : '#f8dce4';
           ctx.lineWidth = 1.75 * scale;
           ctx.beginPath();
-          ctx.moveTo(drawX + dir * 7.2 * scale, drawY - 1.5 * scale);
+          ctx.moveTo(drawX + dir * 5.8 * scale, drawY - 1.6 * scale);
           ctx.lineTo(lanceTipX, lanceTipY);
           ctx.stroke();
           ctx.globalAlpha = (0.46 + pulse * 0.26) * alphaMul;
           ctx.fillStyle = european ? '#ffebb8' : '#ffe3ea';
           ctx.beginPath();
-          ctx.arc(lanceTipX + dir * 0.6 * scale, lanceTipY, 0.9 * scale + riderAttackLife * 0.7 * scale, 0, Math.PI * 2);
+          ctx.arc(lanceTipX + dir * 0.45 * scale, lanceTipY, 0.82 * scale + riderAttackLife * 0.58 * scale, 0, Math.PI * 2);
           ctx.fill();
         } else if (european) {
           // West follow-up: wagging melee swing.
           const wag = Math.sin(fastPhase * 0.72 + animSeed * 0.8);
           const swingMul = 1 + riderAttackLife * 1.45;
-          const fromX = drawX + dir * 8 * scale;
-          const fromY = drawY - 1.1 * scale;
-          const tipX = drawX + dir * (13 + wag * 3.4 * swingMul) * scale;
-          const tipY = drawY + (-0.5 + Math.cos(fastPhase * 0.58 + animSeed) * 1.8 * swingMul) * scale;
+          const fromX = drawX + dir * 7.4 * scale;
+          const fromY = drawY - 1.5 * scale;
+          const tipX = drawX + dir * (10.7 + wag * 2.1 * swingMul) * scale;
+          const tipY = drawY + (-3.7 + Math.cos(fastPhase * 0.58 + animSeed) * 1.15 * swingMul) * scale;
           ctx.beginPath();
           ctx.moveTo(fromX, fromY);
           ctx.quadraticCurveTo(
-            drawX + dir * (10.8 + wag * 2.2) * scale,
-            drawY - (2.4 + Math.sin(fastPhase) * 1.2) * scale,
+            drawX + dir * (8.8 + wag * 1.3) * scale,
+            drawY - (3.8 + Math.sin(fastPhase) * 0.95) * scale,
             tipX,
             tipY
           );
@@ -3049,15 +3072,36 @@ export class GameRenderer {
           ctx.fill();
         } else {
           // East follow-up: short-range arrow shots (visual only).
-          const bowX = drawX + dir * 9 * scale;
-          const bowY = drawY - 2.2 * scale;
-          const shotLen = (8.2 + riderAttackLife * 10.4) * scale;
-          const arrowX = bowX + dir * shotLen;
-          const arrowY = bowY - 0.4 * scale;
+          const bowX = drawX + dir * 7.6 * scale;
+          const bowY = drawY - 2.8 * scale;
+          const bowTopX = bowX + dir * 1.9 * scale;
+          const bowTopY = bowY - 3.4 * scale;
+          const bowBotX = bowX + dir * 1.8 * scale;
+          const bowBotY = bowY + 1.3 * scale;
+          const bowCurveX = bowX + dir * 3.8 * scale;
+          const bowCurveY = bowY - 1.2 * scale;
+          const stringOffsetX = -dir * 0.44 * scale;
+          const shotLen = (6.6 + riderAttackLife * 7.4) * scale;
+          const arrowStartX = bowX + dir * 0.2 * scale;
+          const arrowStartY = bowY - 0.8 * scale;
+          const arrowX = arrowStartX + dir * shotLen;
+          const arrowY = arrowStartY - (1.4 + riderAttackLife * 0.6) * scale;
           ctx.strokeStyle = '#f8dee7';
           ctx.lineWidth = 1.3 * scale;
           ctx.beginPath();
-          ctx.moveTo(bowX, bowY);
+          ctx.moveTo(bowTopX, bowTopY);
+          ctx.quadraticCurveTo(bowCurveX, bowCurveY, bowBotX, bowBotY);
+          ctx.stroke();
+          ctx.strokeStyle = '#e8b7c4';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(bowTopX + stringOffsetX, bowTopY + 0.2 * scale);
+          ctx.lineTo(bowBotX + stringOffsetX, bowBotY - 0.2 * scale);
+          ctx.stroke();
+          ctx.strokeStyle = '#f8dee7';
+          ctx.lineWidth = 1.3 * scale;
+          ctx.beginPath();
+          ctx.moveTo(arrowStartX, arrowStartY);
           ctx.lineTo(arrowX, arrowY);
           ctx.stroke();
           ctx.strokeStyle = '#e8b7c4';
@@ -9456,70 +9500,87 @@ export class GameRenderer {
       ctx.fill();
     }
 
-    const handX = dir * (bodyR - 1);
-    const handY = 2;
+    const handX = dir * (isRider ? (bodyR - 3.6) : (bodyR - 1));
+    const handY = isRider ? 1.4 : 2;
 
     if (!minion.explosive) {
       if (isRider) {
         if (riderChargeReady) {
-          const lanceLen = weaponLen + 13 + (riderSuperHorse ? 3.4 : 0);
+          const lanceLen = weaponLen + 8.2 + (riderSuperHorse ? 2.2 : 0);
+          const lanceTipX = handX + dir * lanceLen;
+          const lanceTipY = handY - 4.3;
           ctx.strokeStyle = '#ffe4a7';
           ctx.lineWidth = minion.super ? 3.9 : 2.9;
           ctx.beginPath();
           ctx.moveTo(handX, handY - 1);
-          ctx.lineTo(handX + dir * lanceLen, handY - 3.2);
+          ctx.lineTo(lanceTipX, lanceTipY);
           ctx.stroke();
           ctx.strokeStyle = '#f6fbff';
           ctx.lineWidth = 1.6;
           ctx.beginPath();
-          ctx.moveTo(handX + dir * (lanceLen - 2), handY - 5.2);
-          ctx.lineTo(handX + dir * (lanceLen + 5), handY - 3.2);
-          ctx.lineTo(handX + dir * (lanceLen - 2), handY - 1.2);
+          ctx.moveTo(lanceTipX - dir * 1.7, lanceTipY - 1.7);
+          ctx.lineTo(lanceTipX + dir * 3.8, lanceTipY);
+          ctx.lineTo(lanceTipX - dir * 1.7, lanceTipY + 1.7);
           ctx.stroke();
         } else if (minion.side === 'left') {
           // West follow-up: short wagging melee profile.
-          const wag = riderSuperHorse ? Math.sin(riderGaitPhase * 1.5) * 2.4 : 0.8;
-          const swingLen = weaponLen + 7.4;
+          const wag = riderSuperHorse ? Math.sin(riderGaitPhase * 1.5) * 2.1 : 0.7;
+          const swingLen = weaponLen + 5.4;
           ctx.strokeStyle = '#d4dde8';
           ctx.lineWidth = minion.super ? 3.6 : 2.7;
           ctx.beginPath();
-          ctx.moveTo(handX, handY - 0.8);
+          ctx.moveTo(handX, handY - 1);
           ctx.quadraticCurveTo(
             handX + dir * (swingLen * 0.55),
-            handY - 2.8 - wag * 0.4,
+            handY - 4.6 - wag * 0.35,
             handX + dir * swingLen,
-            handY - 1.1 + wag * 0.7
+            handY - 4 + wag * 0.48
           );
           ctx.stroke();
           ctx.fillStyle = '#f0e2c7';
           ctx.beginPath();
-          ctx.arc(handX + dir * (swingLen + 1), handY - 1 + wag * 0.7, minion.super ? 2.2 : 1.7, 0, Math.PI * 2);
+          ctx.arc(handX + dir * (swingLen + 1), handY - 3.9 + wag * 0.48, minion.super ? 2.2 : 1.7, 0, Math.PI * 2);
           ctx.fill();
         } else {
           // East follow-up: short-range arrow shooting profile (visual only).
-          const bowBaseX = handX + dir * 1.6;
-          const bowBaseY = handY - 2.2;
-          const bowTopY = bowBaseY - 3.1;
-          const bowBotY = bowBaseY + 1.8;
-          const arrowLen = weaponLen + 4.8 + (riderSuperHorse ? 1.6 : 0);
+          const bowBaseX = handX + dir * 0.9;
+          const bowBaseY = handY - 2.8;
+          const bowTopX = bowBaseX + dir * 2;
+          const bowTopY = bowBaseY - 3.8;
+          const bowBotX = bowBaseX + dir * 1.9;
+          const bowBotY = bowBaseY + 1.2;
+          const bowCurveX = bowBaseX + dir * 4;
+          const bowCurveY = bowBaseY - 1.4;
+          const stringOffsetX = -dir * 0.5;
+          const arrowLen = weaponLen + 3.4 + (riderSuperHorse ? 1.2 : 0);
+          const arrowStartX = bowBaseX + dir * 0.2;
+          const arrowStartY = bowBaseY - 0.8;
+          const arrowEndX = bowBaseX + dir * arrowLen;
+          const arrowEndY = bowBaseY - 2.8;
           ctx.strokeStyle = '#f3d8e2';
           ctx.lineWidth = 1.9;
           ctx.beginPath();
-          ctx.moveTo(bowBaseX, bowTopY);
-          ctx.quadraticCurveTo(bowBaseX + dir * 3.5, bowBaseY - 1, bowBaseX, bowBotY);
+          ctx.moveTo(bowTopX, bowTopY);
+          ctx.quadraticCurveTo(bowCurveX, bowCurveY, bowBotX, bowBotY);
+          ctx.stroke();
+          ctx.strokeStyle = '#d1b8c2';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(bowTopX + stringOffsetX, bowTopY + 0.2);
+          ctx.lineTo(bowBotX + stringOffsetX, bowBotY - 0.2);
           ctx.stroke();
           ctx.strokeStyle = '#e8edf5';
           ctx.lineWidth = 1.2;
           ctx.beginPath();
-          ctx.moveTo(bowBaseX + dir * 0.3, bowBaseY - 1.1);
-          ctx.lineTo(bowBaseX + dir * arrowLen, bowBaseY - 1.1);
+          ctx.moveTo(arrowStartX, arrowStartY);
+          ctx.lineTo(arrowEndX, arrowEndY);
           ctx.stroke();
           ctx.strokeStyle = '#f8f7f2';
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(bowBaseX + dir * (arrowLen - 1.7), bowBaseY - 2.2);
-          ctx.lineTo(bowBaseX + dir * (arrowLen + 1), bowBaseY - 1.1);
-          ctx.lineTo(bowBaseX + dir * (arrowLen - 1.7), bowBaseY);
+          ctx.moveTo(arrowEndX - dir * 1.7, arrowEndY - 1.1);
+          ctx.lineTo(arrowEndX + dir * 1, arrowEndY);
+          ctx.lineTo(arrowEndX - dir * 1.7, arrowEndY + 1.1);
           ctx.stroke();
         }
       } else {
