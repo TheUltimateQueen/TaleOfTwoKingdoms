@@ -8236,6 +8236,176 @@ export class GameRenderer {
     );
   }
 
+  militiaUpgradeVisualTier(minion, stage = 0, tier = 0) {
+    const forced = Number(minion?.upgradeVisualTier);
+    if (Number.isFinite(forced)) return Math.max(0, Math.min(3, Math.round(forced)));
+    const damage = Number(minion?.dmg);
+    if (!Number.isFinite(damage) || damage <= 0) return minion?.super ? 2 : 0;
+
+    let visualTier = 0;
+    if (damage >= 24) visualTier = 1;
+    if (damage >= 38) visualTier = 2;
+    if (damage >= 54) visualTier = 3;
+    if (minion?.super) visualTier = Math.max(2, visualTier);
+    return visualTier;
+  }
+
+  drawThemedMilitiaUpgradeGear(minion, bodyR, stage = 0, tier = 0) {
+    if (!this.isThemedEmpires()) return;
+    if (!minion || minion.rider) return;
+    const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const visualTier = this.militiaUpgradeVisualTier(minion, stage, tier);
+    if (visualTier <= 0) return;
+
+    const beltY = bodyR * 0.18;
+    ctx.strokeStyle = sideName === 'left' ? '#6f452b' : '#31556d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-bodyR * 0.54, beltY - 0.08);
+    ctx.lineTo(bodyR * 0.56, beltY + 0.12);
+    ctx.stroke();
+
+    if (sideName === 'left') {
+      if (visualTier >= 1) {
+        // European padded shoulders + chest strap.
+        ctx.fillStyle = '#6d7988';
+        ctx.beginPath();
+        ctx.ellipse(dir * bodyR * 0.42, -bodyR * 0.1, bodyR * 0.28, bodyR * 0.21, -0.2 * dir, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d4dce6';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#d9be90';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(-dir * bodyR * 0.46, -bodyR * 0.3);
+        ctx.lineTo(dir * bodyR * 0.18, bodyR * 0.24);
+        ctx.stroke();
+      }
+      if (visualTier >= 2) {
+        // European steel helmet + nasal guard.
+        ctx.fillStyle = '#bcc8d6';
+        ctx.beginPath();
+        ctx.arc(0, -bodyR * 0.66, bodyR * 0.43, Math.PI, 0, false);
+        ctx.lineTo(bodyR * 0.32, -bodyR * 0.47);
+        ctx.lineTo(-bodyR * 0.32, -bodyR * 0.47);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#e8eef6';
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+
+        ctx.fillStyle = '#7f8ea2';
+        ctx.fillRect(-bodyR * 0.055, -bodyR * 0.66, bodyR * 0.11, bodyR * 0.24);
+
+        // Sword on belt (scabbard + hilt).
+        ctx.strokeStyle = '#553726';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-dir * bodyR * 0.06, beltY - 0.02);
+        ctx.lineTo(-dir * bodyR * 0.58, bodyR * 0.58);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#d8e0eb';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-dir * bodyR * 0.03, beltY - 0.02);
+        ctx.lineTo(-dir * bodyR * 0.2, beltY - 0.18);
+        ctx.stroke();
+        ctx.fillStyle = '#d4ba82';
+        ctx.beginPath();
+        ctx.arc(-dir * bodyR * 0.025, beltY - 0.02, 0.9, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (visualTier >= 3) {
+        // High-tier knightly trim and second pauldron.
+        ctx.fillStyle = '#78869a';
+        ctx.beginPath();
+        ctx.ellipse(-dir * bodyR * 0.38, -bodyR * 0.04, bodyR * 0.24, bodyR * 0.18, 0.18 * dir, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#dbe4ee';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#f3d7aa';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-bodyR * 0.25, -bodyR * 0.02);
+        ctx.lineTo(bodyR * 0.27, -bodyR * 0.02);
+        ctx.moveTo(-bodyR * 0.2, bodyR * 0.11);
+        ctx.lineTo(bodyR * 0.21, bodyR * 0.11);
+        ctx.stroke();
+      }
+    } else {
+      if (visualTier >= 1) {
+        // Asian lamellar vest slats.
+        ctx.fillStyle = '#335d77';
+        ctx.fillRect(-bodyR * 0.44, -bodyR * 0.35, bodyR * 0.88, bodyR * 0.35);
+        ctx.strokeStyle = '#96b8cc';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        for (let i = 0; i < 4; i += 1) {
+          const sx = -bodyR * 0.3 + i * bodyR * 0.2;
+          ctx.moveTo(sx, -bodyR * 0.33);
+          ctx.lineTo(sx, -bodyR * 0.03);
+        }
+        ctx.stroke();
+      }
+      if (visualTier >= 2) {
+        // Kabuto-like helmet.
+        ctx.fillStyle = '#233b55';
+        ctx.beginPath();
+        ctx.arc(0, -bodyR * 0.66, bodyR * 0.43, Math.PI, 0, false);
+        ctx.lineTo(bodyR * 0.34, -bodyR * 0.48);
+        ctx.lineTo(-bodyR * 0.34, -bodyR * 0.48);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#4b6f89';
+        ctx.fillRect(-bodyR * 0.5, -bodyR * 0.49, bodyR, bodyR * 0.08);
+        ctx.strokeStyle = '#b8d4e5';
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(-bodyR * 0.5, -bodyR * 0.49, bodyR, bodyR * 0.08);
+
+        // Katana on belt (saya + tsuka).
+        ctx.strokeStyle = '#2a3d4f';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-dir * bodyR * 0.04, beltY - 0.03);
+        ctx.lineTo(-dir * bodyR * 0.6, bodyR * 0.53);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#d8b883';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-dir * bodyR * 0.01, beltY - 0.04);
+        ctx.lineTo(-dir * bodyR * 0.15, beltY - 0.19);
+        ctx.stroke();
+        ctx.fillStyle = '#f2ddae';
+        ctx.beginPath();
+        ctx.arc(-dir * bodyR * 0.01, beltY - 0.04, 0.85, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (visualTier >= 3) {
+        // Higher-tier sode shoulder and crest line.
+        ctx.fillStyle = '#3f6883';
+        ctx.fillRect(dir * bodyR * 0.24, -bodyR * 0.2, bodyR * 0.26, bodyR * 0.22);
+        ctx.strokeStyle = '#c7deea';
+        ctx.lineWidth = 0.8;
+        ctx.strokeRect(dir * bodyR * 0.24, -bodyR * 0.2, bodyR * 0.26, bodyR * 0.22);
+
+        ctx.strokeStyle = '#dcbf7f';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-bodyR * 0.22, -bodyR * 0.82);
+        ctx.lineTo(bodyR * 0.22, -bodyR * 0.82);
+        ctx.stroke();
+      }
+    }
+  }
+
   drawStandardMinionHud(minion, x, y, bodyR, scale, options = {}) {
     const isRider = options.isRider === true;
     const { ctx } = this;
@@ -8378,15 +8548,17 @@ export class GameRenderer {
     const t = Math.max(0, Math.min(3, minion.tier || 0));
     const stage = Math.max(0, Math.min(5, Math.floor((minion.level || 0) / 4)));
     const scale = (minion.super ? 2 : 1) * (isRider && riderSuperHorse ? 1.22 : 1);
+    const visualDamageTier = this.militiaUpgradeVisualTier(minion, stage, t);
     const bodyR = 12 + t + Math.min(2, stage * 0.35);
     if (!cacheRender) {
       const sideName = minion.side === 'right' ? 'right' : 'left';
       const cacheKey = [
         'minion',
-        'v3',
+        'v4',
         sideName,
         t,
         stage,
+        visualDamageTier,
         minion.super ? 1 : 0,
         isSummoned ? 1 : 0,
         isRider ? 1 : 0,
@@ -8405,6 +8577,7 @@ export class GameRenderer {
           y: h / 2,
           tier: t,
           level: stage * 4,
+          upgradeVisualTier: visualDamageTier,
           riderGaitPhase: (riderGaitBucket / 11) * riderGaitCycle,
         };
         this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
@@ -8593,6 +8766,7 @@ export class GameRenderer {
 
     ctx.fillStyle = armor;
     ctx.fillRect(-plateW / 2, -10 - t - stage * 0.2, plateW, plateH);
+    if (themedEmpires && !isRider) this.drawThemedMilitiaUpgradeGear(minion, bodyR, stage, t);
 
     if (!themedEmpires && (t >= 1 || stage >= 1)) {
       ctx.fillStyle = '#e8edf7';

@@ -322,6 +322,7 @@ export class GameClient {
     this.testApplyToInput = document.getElementById('testApplyToInput');
     this.testForceSpecialTypeInput = document.getElementById('testForceSpecialTypeInput');
     this.testForceSpecialMinAliveInput = document.getElementById('testForceSpecialMinAliveInput');
+    this.testStartingGoldInput = document.getElementById('testStartingGoldInput');
     this.testOffBtn = document.getElementById('testOffBtn');
     this.testSpecialsBtn = document.getElementById('testSpecialsBtn');
     this.testResetBtn = document.getElementById('testResetBtn');
@@ -1761,6 +1762,7 @@ export class GameClient {
       applyTo: 'both',
       forceSpecialType: null,
       forceSpecialMinAlive: 1,
+      startingGold: null,
       upgrades,
     };
   }
@@ -1775,8 +1777,14 @@ export class GameClient {
         ? cfg.forceSpecialType
         : null,
       forceSpecialMinAlive: Math.max(1, Math.floor(clampNumber(cfg.forceSpecialMinAlive, 1, 12, 1))),
+      startingGold: null,
       upgrades: {},
     };
+    const startingGoldRaw = cfg.startingGold;
+    if (startingGoldRaw !== '' && startingGoldRaw != null) {
+      const startingGoldNum = Number(startingGoldRaw);
+      if (Number.isFinite(startingGoldNum)) normalized.startingGold = Math.floor(startingGoldNum);
+    }
     const sourceUpgrades = (cfg.upgrades && typeof cfg.upgrades === 'object') ? cfg.upgrades : {};
     for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
       const max = Number.isFinite(TEST_UPGRADE_MAX[key]) ? TEST_UPGRADE_MAX[key] : 30;
@@ -1814,6 +1822,7 @@ export class GameClient {
     if (this.testApplyToInput) this.testApplyToInput.value = cfg.applyTo;
     if (this.testForceSpecialTypeInput) this.testForceSpecialTypeInput.value = cfg.forceSpecialType || '';
     if (this.testForceSpecialMinAliveInput) this.testForceSpecialMinAliveInput.value = String(cfg.forceSpecialMinAlive || 1);
+    if (this.testStartingGoldInput) this.testStartingGoldInput.value = Number.isFinite(cfg.startingGold) ? String(cfg.startingGold) : '';
     const specialByKey = new Map(this.testSpecialUpgradeInputs.map((el) => [el?.dataset?.testSpecialUpgrade, el]));
     for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
       const input = specialByKey.get(key);
@@ -1830,6 +1839,7 @@ export class GameClient {
       applyTo: this.testApplyToInput?.value || 'both',
       forceSpecialType: this.testForceSpecialTypeInput?.value || null,
       forceSpecialMinAlive: this.testForceSpecialMinAliveInput?.value,
+      startingGold: this.testStartingGoldInput?.value ?? '',
       upgrades: { ...base.upgrades },
     };
     for (const input of this.testSpecialUpgradeInputs) {
@@ -1852,7 +1862,8 @@ export class GameClient {
     }
     const testState = cfg.enabled ? 'TEST ON' : 'TEST OFF';
     const liveState = (this.hostAuthoritative && this.localRoom) ? 'LIVE' : 'SAVED';
-    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
+    const goldLabel = Number.isFinite(cfg.startingGold) ? `Start UPG ${cfg.startingGold}` : 'Start UPG unchanged';
+    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | ${goldLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
     if (this.testSettingsSummary) {
       this.testSettingsSummary.textContent = cfg.enabled
         ? 'Secret Test Settings - Testing ON'
@@ -1903,6 +1914,7 @@ export class GameClient {
       this.testApplyToInput,
       this.testForceSpecialTypeInput,
       this.testForceSpecialMinAliveInput,
+      this.testStartingGoldInput,
       ...this.testSpecialUpgradeInputs,
     ];
     for (const input of allInputs) {

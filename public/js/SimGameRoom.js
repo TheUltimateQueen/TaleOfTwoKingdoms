@@ -314,7 +314,7 @@ function normalizeDebugConfig(raw = null) {
   const powerDropRateMultiplier = clamp(Number(cfg.powerDropRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
   const startingGoldRaw = Number(cfg.startingGold);
   const startingGold = Number.isFinite(startingGoldRaw)
-    ? clamp(Math.floor(startingGoldRaw), 0, 999999)
+    ? Math.floor(startingGoldRaw)
     : null;
   const candleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
   const forcedSpecialType = (typeof cfg.forceSpecialType === 'string' && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType))
@@ -900,7 +900,9 @@ class GameRoom {
         ? Math.max(1, Math.min(12, Math.floor(Number(cfg.forceSpecialMinAlive) || 1)))
         : 0;
       if (Number.isFinite(cfg.startingGold)) {
-        side.gold = Math.max(0, Math.floor(Number(cfg.startingGold) || 0));
+        const startValue = Math.floor(Number(cfg.startingGold) || 0);
+        side.upgradeCharge = startValue;
+        if (side.upgradeCharge < 0) side.upgradeCharge = 0;
       }
       const up = cfg.upgrades || {};
       for (const type of UPGRADE_TYPES) {
@@ -1016,6 +1018,7 @@ class GameRoom {
       r: roundTo(m.r, 2),
       hp: roundTo(m.hp, 1),
       maxHp: roundTo(m.maxHp, 1),
+      dmg: roundTo(m.dmg, 1),
       super: Boolean(m.super),
       summoned: Boolean(m.summoned),
       necroRevived: Boolean(m.necroRevived),
