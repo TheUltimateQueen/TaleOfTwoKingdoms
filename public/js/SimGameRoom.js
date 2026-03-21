@@ -579,6 +579,7 @@ class GameRoom {
     this.started = false;
     this.gameOver = false;
     this.winner = null;
+    this.nextBalancedJoinSide = 'left';
     this.t = 0;
 
     this.left = left;
@@ -1467,7 +1468,13 @@ class GameRoom {
 
     const leftCount = this.players.left.length;
     const rightCount = this.players.right.length;
-    const side = leftCount <= rightCount ? 'left' : 'right';
+    let side = 'left';
+    if (leftCount === rightCount) {
+      side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
+      this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+    } else {
+      side = leftCount < rightCount ? 'left' : 'right';
+    }
     const slot = this.players[side].length;
     if (slot >= this.archersPerSide) {
       const otherSide = side === 'left' ? 'right' : 'left';
@@ -1660,9 +1667,40 @@ class GameRoom {
     if (this.left.towerHp <= 0 || this.right.towerHp <= 0) {
       this.postGameReportCache = null;
       this.gameOver = true;
-      this.winner = this.left.towerHp > this.right.towerHp ? 'left' : 'right';
+      this.winner = this.resolveTowerWinner();
       this.recordMatchTimelineSample(true);
     }
+  }
+
+  resolveTowerWinner() {
+    const leftHp = Number(this.left?.towerHp) || 0;
+    const rightHp = Number(this.right?.towerHp) || 0;
+    if (leftHp > rightHp) return 'left';
+    if (rightHp > leftHp) return 'right';
+
+    // On exact HP ties, prefer objective performance metrics before random fallback.
+    const leftTotals = this.matchReport?.totals?.left || {};
+    const rightTotals = this.matchReport?.totals?.right || {};
+    const leftTowerDamage = Number(leftTotals.towerDamageDealt) || 0;
+    const rightTowerDamage = Number(rightTotals.towerDamageDealt) || 0;
+    if (leftTowerDamage > rightTowerDamage) return 'left';
+    if (rightTowerDamage > leftTowerDamage) return 'right';
+
+    const leftTotalDamage = (Number(leftTotals.arrowDamage) || 0)
+      + (Number(leftTotals.unitDamage) || 0)
+      + leftTowerDamage;
+    const rightTotalDamage = (Number(rightTotals.arrowDamage) || 0)
+      + (Number(rightTotals.unitDamage) || 0)
+      + rightTowerDamage;
+    if (leftTotalDamage > rightTotalDamage) return 'left';
+    if (rightTotalDamage > leftTotalDamage) return 'right';
+
+    const leftKills = Number(leftTotals.minionKills) || 0;
+    const rightKills = Number(rightTotals.minionKills) || 0;
+    if (leftKills > rightKills) return 'left';
+    if (rightKills > leftKills) return 'right';
+
+    return Math.random() < 0.5 ? 'left' : 'right';
   }
 
   tickShotPowers(dt) {
@@ -4072,7 +4110,7 @@ class GameRoom {
       } else {
         m.x += dir * m.speed * dt;
         if (m.flying) {
-          const desiredY = TOWER_Y - 120 + (m.side === 'left' ? -16 : 16);
+          const desiredY = TOWER_Y - 120;
           m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 2.2);
         }
       }

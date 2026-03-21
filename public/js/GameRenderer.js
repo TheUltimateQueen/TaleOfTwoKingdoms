@@ -4343,10 +4343,12 @@ export class GameRenderer {
       rightPulls
     );
     for (let i = 0; i < leftPulls.length; i += 1) {
-      this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, snapshot.left.shotCd, TEAM_COLORS.left.ring);
+      const timing = this.archerShotTiming(snapshot.left, i, leftPulls.length);
+      this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, timing.cd, TEAM_COLORS.left.ring, timing.interval);
     }
     for (let i = 0; i < rightPulls.length; i += 1) {
-      this.drawShotRing(world.towerRightX, world.towerY - 185 - i * 60, snapshot.right.shotCd, TEAM_COLORS.right.ring);
+      const timing = this.archerShotTiming(snapshot.right, i, rightPulls.length);
+      this.drawShotRing(world.towerRightX, world.towerY - 185 - i * 60, timing.cd, TEAM_COLORS.right.ring, timing.interval);
     }
     this.drawComboBanner('left', world.towerLeftX, world.towerY - 230, snapshot.left);
     this.drawComboBanner('right', world.towerRightX, world.towerY - 230, snapshot.right);
@@ -4402,13 +4404,15 @@ export class GameRenderer {
       const pull = leftPulls[i];
       const leftAim = worldAimAngle('left', pull.pullX, pull.pullY);
       const leftStrength = launchStrengthFromPull('left', pull.pullX, pull.pullY);
-      this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength);
+      const timing = this.archerShotTiming(snapshot.left, i, leftPulls.length);
+      this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength, { active: timing.active });
     }
     for (let i = 0; i < rightPulls.length; i += 1) {
       const pull = rightPulls[i];
       const rightAim = worldAimAngle('right', pull.pullX, pull.pullY);
       const rightStrength = launchStrengthFromPull('right', pull.pullX, pull.pullY);
-      this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength);
+      const timing = this.archerShotTiming(snapshot.right, i, rightPulls.length);
+      this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength, { active: timing.active });
     }
     this.drawColliderDebugOverlay(snapshot, world);
 
@@ -5376,37 +5380,61 @@ export class GameRenderer {
     }));
   }
 
-  drawAimGuide(side, ox, oy, angle, strength) {
+  archerShotTiming(sideState, slot = 0, archerCount = 1) {
+    const count = Math.max(1, Math.floor(Number(archerCount) || 1));
+    const baseCd = Math.max(0, Number(sideState?.shotCd) || 0);
+    const rawNextSlot = Number(sideState?.archerVolleyIndex);
+    const nextSlot = Number.isFinite(rawNextSlot)
+      ? ((Math.round(rawNextSlot) % count) + count) % count
+      : 0;
+    const normalizedSlot = ((Math.floor(Number(slot) || 0) % count) + count) % count;
+    const volleyDistance = (normalizedSlot - nextSlot + count) % count;
+    return {
+      cd: baseCd + volleyDistance * SHOT_INTERVAL,
+      interval: SHOT_INTERVAL * count,
+      active: volleyDistance === 0,
+    };
+  }
+
+  drawAimGuide(side, ox, oy, angle, strength, options = {}) {
     const { ctx } = this;
     const palette = TEAM_COLORS[side];
+    const active = options.active !== false;
+    const dimMul = active ? 1 : 0.32;
     const len = 90 + strength * 180;
-    const lineW = 1.5 + strength * 3.5;
-    const alpha = 0.35 + strength * 0.55;
+    const lineW = (1.5 + strength * 3.5) * (active ? 1 : 0.9);
+    const alpha = (0.35 + strength * 0.55) * dimMul;
     const ex = ox + Math.cos(angle) * len;
     const ey = oy + Math.sin(angle) * len;
 
-    ctx.strokeStyle = `rgba(255,255,255,${0.18 + strength * 0.35})`;
+    ctx.strokeStyle = active
+      ? `rgba(255,255,255,${0.18 + strength * 0.35})`
+      : `rgba(64,72,86,${0.14 + strength * 0.16})`;
     ctx.lineWidth = lineW + 2;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
-    ctx.strokeStyle = this.withAlpha(palette.primary, alpha);
+    ctx.strokeStyle = active
+      ? this.withAlpha(palette.primary, alpha)
+      : this.withAlpha('#576173', 0.2 + strength * 0.2);
     ctx.lineWidth = lineW;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
-    ctx.fillStyle = this.withAlpha(palette.soft, alpha);
+    ctx.fillStyle = active
+      ? this.withAlpha(palette.soft, alpha)
+      : this.withAlpha('#77839a', 0.22 + strength * 0.18);
     ctx.beginPath();
     ctx.arc(ex, ey, 2.5 + strength * 3.5, 0, Math.PI * 2);
     ctx.fill();
 
     const px = ox + Math.cos(angle) * 40;
     const py = oy + Math.sin(angle) * 40;
-    ctx.fillStyle = this.withAlpha('#ffffff', 0.65);
+    ctx.fillStyle = this.withAlpha('#ffffff', active ? 0.65 : 0.28);
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(`${Math.round(strength * 100)}%`, px, py - 6);
@@ -6771,9 +6799,10 @@ export class GameRenderer {
     }
   }
 
-  drawShotRing(x, y, cd, color) {
+  drawShotRing(x, y, cd, color, cooldownDuration = SHOT_INTERVAL) {
     const { ctx } = this;
-    const pct = 1 - Math.max(0, Math.min(1, cd / SHOT_INTERVAL));
+    const duration = Math.max(0.0001, Number(cooldownDuration) || SHOT_INTERVAL);
+    const pct = 1 - Math.max(0, Math.min(1, cd / duration));
     ctx.strokeStyle = '#ffffff44';
     ctx.lineWidth = 5;
     ctx.beginPath();
