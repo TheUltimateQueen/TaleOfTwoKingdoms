@@ -1013,7 +1013,7 @@ button:hover {
 
 #postUpgradeTimeline {
   min-height: 0;
-  max-height: clamp(220px, 46vh, 380px);
+  max-height: clamp(196px, 38vh, 320px);
   flex: 0 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1373,7 +1373,7 @@ body.display-mode.display-game-mode #postGamePanel {
   }
 
   #postUpgradeTimeline {
-    max-height: 320px;
+    max-height: 272px;
   }
 
   .lobby-phone-preview {
