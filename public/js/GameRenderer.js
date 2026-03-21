@@ -9044,7 +9044,7 @@ export class GameRenderer {
         const sideName = minion.side === 'right' ? 'right' : 'left';
         const cacheKey = [
           'minion',
-          'v4',
+          'v5',
           sideName,
           t,
           stage,
@@ -9503,7 +9503,8 @@ export class GameRenderer {
     if (isRider) {
       this.drawThemedSpecialLook(minion, 'rider', { cacheRender, upgraded: riderSuperHorse || minion.super });
     }
-    this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
+    // Keep failed-special hats out of cached sprite atlases; draw only in live render passes.
+    if (!cacheRender) this.drawFailedSpecialHat(minion, x, y, bodyR, scale);
     if (showHud) this.drawStandardMinionHud(minion, x, y, bodyR, scale, { isRider });
     if (!cacheRender) this.drawNecroRevivedOverlay(minion);
   }
