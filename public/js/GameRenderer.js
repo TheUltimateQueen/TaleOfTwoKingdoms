@@ -3503,6 +3503,222 @@ export class GameRenderer {
     return this.cachedThemedBackground;
   }
 
+  harvestBackdropWorkerCount(sideState) {
+    const eco = Math.max(0, Number(sideState?.economyLevel) || 0);
+    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
+    const bounty = Math.max(1, Number(sideState?.bountyLevel) || 1);
+    const improvements = eco + Math.max(0, resource - 1) + Math.max(0, bounty - 1);
+    return Math.min(10, 2 + Math.floor(improvements / 2));
+  }
+
+  drawBackdropHarvester(sideName, x, y, scale = 1, animT = 0) {
+    const { ctx } = this;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const dir = side === 'right' ? -1 : 1;
+    const swing = Math.sin(animT) * 0.38;
+    const step = Math.sin(animT * 0.74 + 1.2) * 0.95;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    // Slightly lifted contrast so silhouettes remain visible without stealing focus.
+    ctx.fillStyle = '#2f3b36';
+    ctx.strokeStyle = '#34413b';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 1.55;
+
+    ctx.beginPath();
+    ctx.arc(0, -7.2 + step * 0.1, 2.05, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(-3.1, -3.6);
+    ctx.lineTo(2.8, -3.6);
+    ctx.lineTo(3.6, 6.5);
+    ctx.lineTo(-3.7, 6.5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(-1.5, 6.2);
+    ctx.lineTo(-2.8, 11 + step * 0.34);
+    ctx.moveTo(1.5, 6.2);
+    ctx.lineTo(2.7, 10.9 - step * 0.34);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(dir * 2.3, -2.1);
+    ctx.rotate(dir * (0.34 + swing));
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(9.6 * dir, -5.2);
+    ctx.stroke();
+    ctx.beginPath();
+    if (side === 'right') {
+      ctx.arc(11 * dir, -5.8, 2.35, dir > 0 ? 0.82 : 2.28, dir > 0 ? 2.68 : 4.4);
+    } else {
+      ctx.arc(11.2 * dir, -5.7, 2.55, dir > 0 ? 0.52 : 2.62, dir > 0 ? 2.56 : 4.62);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  drawBottomCropSilhouettes(sideName, width, bottomY, animSec) {
+    const { ctx } = this;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const start = side === 'left' ? 18 : Math.max(18, width * 0.56);
+    const end = side === 'left' ? Math.max(start + 40, width * 0.45) : width - 18;
+    const span = Math.max(20, end - start);
+    const spacing = 7.8;
+    const count = Math.max(8, Math.floor(span / spacing));
+    const baseY = bottomY - 1;
+
+    if (side === 'left') {
+      // Bread-side crop silhouette (wheat-like stalks).
+      ctx.fillStyle = '#38463f';
+      ctx.strokeStyle = '#415047';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < count; i += 1) {
+        const t = count <= 1 ? 0 : (i / (count - 1));
+        const x = start + t * span + Math.sin(animSec * 0.62 + i * 0.71) * 0.9;
+        const h = 4.5 + (i % 4) * 1.25 + Math.sin(animSec * 1.4 + i * 0.5) * 0.8;
+        ctx.fillRect(x - 0.7, baseY - h, 1.4, h);
+        ctx.beginPath();
+        ctx.moveTo(x, baseY - h + 1.2);
+        ctx.lineTo(x - 2.1, baseY - h - 0.6);
+        ctx.moveTo(x, baseY - h + 0.6);
+        ctx.lineTo(x + 2, baseY - h - 0.4);
+        ctx.stroke();
+      }
+      return;
+    }
+
+    // Rice-side crop silhouette (bent rice stems).
+    ctx.strokeStyle = '#42524a';
+    ctx.lineWidth = 1.05;
+    for (let i = 0; i < count; i += 1) {
+      const t = count <= 1 ? 0 : (i / (count - 1));
+      const x = start + t * span + Math.sin(animSec * 0.58 + i * 0.67) * 0.85;
+      const h = 5 + (i % 5) * 1.05 + Math.sin(animSec * 1.22 + i * 0.6) * 0.75;
+      const lean = 1.4 + Math.sin(animSec * 1.1 + i * 0.33) * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x, baseY);
+      ctx.quadraticCurveTo(x + lean * 0.35, baseY - h * 0.55, x + lean, baseY - h);
+      ctx.stroke();
+      ctx.fillStyle = '#3a4841';
+      ctx.beginPath();
+      ctx.ellipse(x + lean + 0.45, baseY - h + 0.1, 1.15, 0.64, 0.22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  backdropWorkerFieldPoint(sideName, workerIndex, lane, width, bottomY, animSec) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const leftStart = 26;
+    const leftEnd = Math.max(leftStart + 30, width * 0.42 - 20);
+    const rightStart = Math.min(width - 50, width * 0.56 + 20);
+    const rightEnd = width - 26;
+    const start = side === 'left' ? leftStart : rightStart;
+    const end = side === 'left' ? leftEnd : rightEnd;
+    const span = Math.max(24, end - start);
+
+    const speed = (side === 'left' ? 12 : 10.6) + lane * 1.7 + (workerIndex % 3) * 0.6;
+    const seed = workerIndex * 13.73 + lane * 4.91 + (side === 'left' ? 0 : 17.3);
+    const cycle = (animSec * speed + seed) % (span * 2);
+    const ping = cycle <= span ? cycle : (span * 2 - cycle);
+    const t = ping / span;
+    const x = start + ping;
+
+    const slopeDrop = side === 'left'
+      ? (1 - t) * (3.6 + lane * 0.8)
+      : t * (4.2 + lane * 0.85);
+    const laneOffset = side === 'left' ? lane * 5.1 : lane * 5.5;
+    const bob = Math.sin(animSec * (1.2 + lane * 0.15) + seed) * (1.4 + lane * 0.25);
+    const drift = Math.cos(animSec * 0.72 + seed * 0.6) * 1.6;
+    const yBase = side === 'left'
+      ? bottomY - 7 - laneOffset - slopeDrop
+      : bottomY - 8 - laneOffset - slopeDrop;
+    const y = yBase + bob + drift;
+    const scale = side === 'left'
+      ? (0.88 + lane * 0.11 + t * 0.07)
+      : (0.86 + lane * 0.1 + (1 - t) * 0.07);
+    const animPhase = animSec * (2.4 + lane * 0.2) + seed * 0.8;
+    return { x, y, scale, animPhase };
+  }
+
+  drawThemedHarvestBackdrop(snapshot, world, nowMs, width, height) {
+    const { ctx } = this;
+    const bottomY = height - 2;
+    const horizonY = Number(world?.groundY) || Math.round(height * 0.74);
+    const leftState = snapshot?.left || {};
+    const rightState = snapshot?.right || {};
+    const anim = nowMs * 0.001;
+
+    ctx.save();
+    // Distant high silhouettes so the mountains/terraces stay up in the background.
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = '#2a312e';
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY);
+    ctx.lineTo(0, horizonY - 116);
+    ctx.quadraticCurveTo(width * 0.12, horizonY - 212, width * 0.2, horizonY - 142);
+    ctx.quadraticCurveTo(width * 0.29, horizonY - 92, width * 0.43, horizonY - 156);
+    ctx.lineTo(width * 0.48, horizonY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#2b332f';
+    ctx.beginPath();
+    ctx.moveTo(width, horizonY);
+    ctx.lineTo(width, horizonY - 146);
+    ctx.quadraticCurveTo(width * 0.9, horizonY - 252, width * 0.82, horizonY - 164);
+    ctx.quadraticCurveTo(width * 0.72, horizonY - 92, width * 0.57, horizonY - 152);
+    ctx.lineTo(width * 0.52, horizonY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = '#202825';
+    for (let row = 0; row < 6; row += 1) {
+      const y = horizonY - 12 - row * 11;
+      const xStart = 20 + row * 9;
+      const xEnd = width * 0.42 - row * 13;
+      if (xEnd > xStart + 14) ctx.fillRect(xStart, y, xEnd - xStart, 2);
+    }
+    for (let terrace = 0; terrace < 7; terrace += 1) {
+      const t = terrace / 6;
+      const y = horizonY - 9 - t * 112;
+      const xStart = width * 0.57 + t * 58;
+      const xEnd = width - 18 - t * 8;
+      if (xEnd > xStart + 16) ctx.fillRect(xStart, y, xEnd - xStart, 2);
+    }
+
+    ctx.globalAlpha = 0.3;
+    this.drawBottomCropSilhouettes('left', width, bottomY, anim);
+    this.drawBottomCropSilhouettes('right', width, bottomY, anim);
+
+    const leftWorkers = this.harvestBackdropWorkerCount(leftState);
+    const rightWorkers = this.harvestBackdropWorkerCount(rightState);
+
+    ctx.globalAlpha = 0.38;
+    for (let i = 0; i < leftWorkers; i += 1) {
+      const lane = i % 3;
+      const p = this.backdropWorkerFieldPoint('left', i, lane, width, bottomY, anim);
+      this.drawBackdropHarvester('left', p.x, p.y, p.scale, p.animPhase);
+    }
+
+    for (let i = 0; i < rightWorkers; i += 1) {
+      const lane = i % 4;
+      const p = this.backdropWorkerFieldPoint('right', i, lane, width, bottomY, anim);
+      this.drawBackdropHarvester('right', p.x, p.y, p.scale, p.animPhase);
+    }
+    ctx.restore();
+  }
+
   spawnParticle(x, y, vx, vy, life, maxLife, size, color, gravity) {
     if (this.particles.length >= this.maxLiveParticles()) return;
     const particle = this.particlePool.pop() || {};
@@ -4007,10 +4223,13 @@ export class GameRenderer {
 
     ctx.fillStyle = this.backgroundGradient(h);
     ctx.fillRect(0, 0, w, h);
+    if (this.isThemedEmpires()) this.drawThemedHarvestBackdrop(snapshot, world, now, w, h);
     ctx.fillStyle = '#20354f';
     ctx.fillRect(w / 2 - 3, 0, 6, h);
-    ctx.fillStyle = '#2d3b53';
-    ctx.fillRect(0, world.groundY, w, 4);
+    if (!this.isThemedEmpires()) {
+      ctx.fillStyle = '#2d3b53';
+      ctx.fillRect(0, world.groundY, w, 4);
+    }
 
     const barracksCounts = this.buildBarracksActiveCounts(snapshot);
     this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left);
