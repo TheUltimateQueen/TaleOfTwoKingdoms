@@ -859,6 +859,25 @@ export class GameRenderer {
       : Math.sin(animNow * (moveFreq * 0.45) + animSeed * 0.91) * (specialType === 'rider' ? 0.07 : (specialType === 'dragon' ? 0.05 : 0.032)) * (upgraded ? 1.28 : 1);
     const drawX = x + animSwayX;
     const drawY = y + animBobY;
+    const heroSwingPhase = specialType === 'hero'
+      ? (Number.isFinite(minion.heroSwing) ? minion.heroSwing : animNow * 8.2)
+      : 0;
+    const heroWave = specialType === 'hero' ? Math.sin(heroSwingPhase * 1.35) : 0;
+    const digPhase = specialType === 'digger'
+      ? (Number.isFinite(minion.digPhase) ? minion.digPhase : animNow * 6.8)
+      : 0;
+    const digSwing = specialType === 'digger' ? Math.sin(digPhase * 3.1) : 0;
+    const digBob = specialType === 'digger' ? Math.sin(digPhase * 1.9) * (1.7 * scale) : 0;
+    const digHandLift = specialType === 'digger' ? Math.cos(digPhase * 2.6) * (1.2 * scale) : 0;
+    const heroSwingBucket = specialType === 'hero'
+      ? Math.max(0, Math.min(8, Math.round((heroWave + 1) * 4)))
+      : -1;
+    const digPhaseCycle = Math.PI * 2;
+    const digPhaseBuckets = 10;
+    const wrappedDigPhase = ((digPhase % digPhaseCycle) + digPhaseCycle) % digPhaseCycle;
+    const digPhaseBucket = specialType === 'digger'
+      ? Math.max(0, Math.min(digPhaseBuckets - 1, Math.round((wrappedDigPhase / digPhaseCycle) * (digPhaseBuckets - 1))))
+      : -1;
     let beamFx = upgraded && specialType === 'president'
       ? {
         life: Math.max(
@@ -917,6 +936,8 @@ export class GameRenderer {
         upgraded ? 1 : 0,
         shieldDarkBucket,
         shieldPoseBucket,
+        heroSwingBucket,
+        digPhaseBucket,
       ].join(':');
       const cacheWidth = Math.ceil(radiusBucket * widthMult + 56);
       const cacheHeight = Math.ceil(radiusBucket * heightMult + 56);
@@ -931,6 +952,10 @@ export class GameRenderer {
         if (specialType === 'shield') {
           proxy.shieldDarkMetalTtl = (Math.max(0, shieldDarkBucket) / 5) * SHIELD_DARK_METAL_DURATION;
           proxy.shieldGuardPose = Math.max(0, shieldPoseBucket) / 6;
+        } else if (specialType === 'hero') {
+          proxy.heroSwing = (Math.asin(heroSwingBucket / 4 - 1) || 0) / 1.35;
+        } else if (specialType === 'digger') {
+          proxy.digPhase = (digPhaseBucket / Math.max(1, digPhaseBuckets - 1)) * digPhaseCycle;
         }
         this.drawThemedSpecialSprite(proxy, specialType, {
           showHud: false,
@@ -1299,17 +1324,30 @@ export class GameRenderer {
         ctx.lineTo(-4 * scale, -10.8 * scale);
         ctx.closePath();
         ctx.fill();
+        const swordA = dir * (0.34 + heroWave * 0.42);
+        const swordLen = 13.2 * scale;
+        const swordStartX = 6.2 * dir * scale;
+        const swordStartY = (-2.2 + heroWave * 0.75) * scale;
+        const swordEndX = swordStartX + Math.cos(swordA) * swordLen;
+        const swordEndY = swordStartY + Math.sin(swordA) * swordLen;
+        const shieldWave = heroWave * 1.2 * scale;
         ctx.strokeStyle = '#dbeaf8';
         ctx.lineWidth = 2.4;
         ctx.beginPath();
-        ctx.moveTo(6.4 * dir * scale, -2.2 * scale);
-        ctx.lineTo(19 * dir * scale, -5.4 * scale);
+        ctx.moveTo(swordStartX, swordStartY);
+        ctx.lineTo(swordEndX, swordEndY);
+        ctx.stroke();
+        ctx.strokeStyle = '#8db7d9';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(swordEndX - dir * (2.1 * scale), swordEndY - 0.8 * scale);
+        ctx.lineTo(swordEndX + dir * (2.8 * scale), swordEndY + 0.6 * scale);
         ctx.stroke();
         ctx.fillStyle = '#3b6b94';
         ctx.beginPath();
         ctx.moveTo(-8.6 * dir * scale, -3.2 * scale);
-        ctx.lineTo(-14.2 * dir * scale, -0.7 * scale);
-        ctx.lineTo(-14.2 * dir * scale, 6.6 * scale);
+        ctx.lineTo(-14.2 * dir * scale, -0.7 * scale + shieldWave);
+        ctx.lineTo(-14.2 * dir * scale, 6.6 * scale + shieldWave * 0.7);
         ctx.lineTo(-9.7 * dir * scale, 9.8 * scale);
         ctx.lineTo(-7.5 * dir * scale, 2.6 * scale);
         ctx.closePath();
@@ -1317,15 +1355,16 @@ export class GameRenderer {
         ctx.strokeStyle = '#d1e6f6';
         ctx.lineWidth = 1.1;
         ctx.beginPath();
-        ctx.moveTo(-11.2 * dir * scale, 0.4 * scale);
-        ctx.lineTo(-10 * dir * scale, 6.4 * scale);
+        ctx.moveTo(-11.2 * dir * scale, 0.4 * scale + shieldWave * 0.8);
+        ctx.lineTo(-10 * dir * scale, 6.4 * scale + shieldWave * 0.5);
         ctx.stroke();
         if (upgraded) {
+          const bannerWave = heroWave * 2.1 * scale;
           ctx.fillStyle = '#5587b3';
           ctx.beginPath();
           ctx.moveTo(-9 * scale, -6 * scale);
-          ctx.lineTo(-16 * scale, -18 * scale);
-          ctx.lineTo(-13 * scale, 4 * scale);
+          ctx.lineTo(-16 * scale, -18 * scale + bannerWave);
+          ctx.lineTo(-13 * scale, 4 * scale + bannerWave * 0.6);
           ctx.closePath();
           ctx.fill();
           ctx.fillStyle = '#e7f4ff';
@@ -1341,36 +1380,43 @@ export class GameRenderer {
         ctx.beginPath();
         ctx.ellipse(0, 7 * scale, 12.6 * scale, 7.4 * scale, 0, 0, Math.PI * 2);
         ctx.fill();
+        const upperBob = digBob;
+        const handX = 4 * dir * scale;
+        const handY = 2 * scale + upperBob + digHandLift;
+        const shovelA = dir * (0.25 + digSwing * 0.45);
+        const shovelLen = 17 * scale;
+        const shovelTipX = handX + Math.cos(shovelA) * shovelLen;
+        const shovelTipY = handY + Math.sin(shovelA) * shovelLen;
         ctx.fillStyle = '#f0d7ba';
         ctx.beginPath();
-        ctx.arc(0, -8.6 * scale, 3.3 * scale, 0, Math.PI * 2);
+        ctx.arc(0, -8.6 * scale + upperBob, 3.3 * scale, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#3a617f';
         ctx.beginPath();
-        ctx.arc(0, -10.8 * scale, 2.8 * scale, Math.PI, 0, false);
+        ctx.arc(0, -10.8 * scale + upperBob, 2.8 * scale, Math.PI, 0, false);
         ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = '#d5e8f8';
         ctx.lineWidth = 2.3;
         ctx.beginPath();
-        ctx.moveTo(4 * dir * scale, 2 * scale);
-        ctx.lineTo(16 * dir * scale, -10 * scale);
+        ctx.moveTo(handX, handY);
+        ctx.lineTo(shovelTipX, shovelTipY);
         ctx.stroke();
         ctx.fillStyle = '#9bb0c7';
         ctx.beginPath();
-        ctx.moveTo(16 * dir * scale, -10 * scale);
-        ctx.lineTo(21 * dir * scale, -8 * scale);
-        ctx.lineTo(16 * dir * scale, -5 * scale);
+        ctx.moveTo(shovelTipX, shovelTipY);
+        ctx.lineTo(shovelTipX + dir * (5 * scale), shovelTipY + 2 * scale);
+        ctx.lineTo(shovelTipX + dir * (0.2 * scale), shovelTipY + 4.8 * scale);
         ctx.closePath();
         ctx.fill();
         if (upgraded) {
           ctx.fillStyle = '#ffd666';
           ctx.beginPath();
-          ctx.arc(-6.4 * scale, -9.5 * scale, 1.7 * scale, 0, Math.PI * 2);
+          ctx.arc(-6.4 * scale, -9.5 * scale + upperBob, 1.7 * scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = '#fff3c4';
           ctx.beginPath();
-          ctx.arc(-5.8 * scale, -9.5 * scale, 0.8 * scale, 0, Math.PI * 2);
+          ctx.arc(-5.8 * scale, -9.5 * scale + upperBob, 0.8 * scale, 0, Math.PI * 2);
           ctx.fill();
         }
       } else if (specialType === 'rider') {
@@ -1865,34 +1911,42 @@ export class GameRenderer {
       ctx.lineTo(-2.4 * scale, -15.4 * scale);
       ctx.closePath();
       ctx.fill();
+      const swordA = dir * (0.32 + heroWave * 0.4);
+      const swordLen = 12.8 * scale;
+      const swordStartX = 6 * dir * scale;
+      const swordStartY = (-2 + heroWave * 0.72) * scale;
+      const swordEndX = swordStartX + Math.cos(swordA) * swordLen;
+      const swordEndY = swordStartY + Math.sin(swordA) * swordLen;
+      const sashWave = heroWave * 1.3 * scale;
       ctx.strokeStyle = '#f8dbe3';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(6 * dir * scale, -2 * scale);
-      ctx.lineTo(18 * dir * scale, -4.4 * scale);
-      ctx.lineTo(16.4 * dir * scale, -2.8 * scale);
+      ctx.moveTo(swordStartX, swordStartY);
+      ctx.lineTo(swordEndX, swordEndY);
+      ctx.lineTo(swordEndX - dir * (1.6 * scale), swordEndY + 1.6 * scale);
       ctx.stroke();
       ctx.fillStyle = '#a16271';
       ctx.beginPath();
       ctx.moveTo(-8.2 * dir * scale, -2.4 * scale);
-      ctx.lineTo(-13.4 * dir * scale, -6.4 * scale);
-      ctx.lineTo(-13.4 * dir * scale, 4 * scale);
+      ctx.lineTo(-13.4 * dir * scale, -6.4 * scale + sashWave);
+      ctx.lineTo(-13.4 * dir * scale, 4 * scale + sashWave * 0.7);
       ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = '#f3d6df';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(-11.4 * dir * scale, -5.2 * scale);
-      ctx.lineTo(-11.4 * dir * scale, 2.8 * scale);
+      ctx.moveTo(-11.4 * dir * scale, -5.2 * scale + sashWave);
+      ctx.lineTo(-11.4 * dir * scale, 2.8 * scale + sashWave * 0.6);
       ctx.stroke();
       if (upgraded) {
+        const flagWave = heroWave * 2.2 * scale;
         ctx.fillStyle = '#f6d9e2';
         ctx.fillRect(-12.6 * scale, -10.2 * scale, 2.2 * scale, 12.6 * scale);
         ctx.fillStyle = '#8c5462';
         ctx.beginPath();
         ctx.moveTo(-10.4 * scale, -10 * scale);
-        ctx.lineTo(-4 * scale, -7.6 * scale);
-        ctx.lineTo(-10.4 * scale, -5.2 * scale);
+        ctx.lineTo(-4 * scale, -7.6 * scale + flagWave);
+        ctx.lineTo(-10.4 * scale, -5.2 * scale + flagWave * 0.6);
         ctx.closePath();
         ctx.fill();
       }
@@ -1901,33 +1955,40 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.ellipse(0, 7.2 * scale, 12.6 * scale, 7.6 * scale, 0, 0, Math.PI * 2);
       ctx.fill();
+      const upperBob = digBob;
+      const handX = 4 * dir * scale;
+      const handY = 2 * scale + upperBob + digHandLift;
+      const shovelA = dir * (0.25 + digSwing * 0.45);
+      const shovelLen = 17 * scale;
+      const shovelTipX = handX + Math.cos(shovelA) * shovelLen;
+      const shovelTipY = handY + Math.sin(shovelA) * shovelLen;
       ctx.fillStyle = '#f0dcc0';
       ctx.beginPath();
-      ctx.arc(0, -8.6 * scale, 3.2 * scale, 0, Math.PI * 2);
+      ctx.arc(0, -8.6 * scale + upperBob, 3.2 * scale, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#8b5160';
-      ctx.fillRect(-3.8 * scale, -12.6 * scale, 7.6 * scale, 2.1 * scale);
+      ctx.fillRect(-3.8 * scale, -12.6 * scale + upperBob, 7.6 * scale, 2.1 * scale);
       ctx.strokeStyle = '#dfb2bd';
       ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.moveTo(4 * dir * scale, 2 * scale);
-      ctx.lineTo(16 * dir * scale, -10 * scale);
+      ctx.moveTo(handX, handY);
+      ctx.lineTo(shovelTipX, shovelTipY);
       ctx.stroke();
       ctx.fillStyle = '#e5bcc8';
       ctx.beginPath();
-      ctx.moveTo(16 * dir * scale, -10 * scale);
-      ctx.lineTo(21 * dir * scale, -8 * scale);
-      ctx.lineTo(16 * dir * scale, -5 * scale);
+      ctx.moveTo(shovelTipX, shovelTipY);
+      ctx.lineTo(shovelTipX + dir * (5 * scale), shovelTipY + 2 * scale);
+      ctx.lineTo(shovelTipX + dir * (0.2 * scale), shovelTipY + 4.8 * scale);
       ctx.closePath();
       ctx.fill();
       if (upgraded) {
         ctx.strokeStyle = '#f7dbe3';
         ctx.lineWidth = 1.3;
         ctx.beginPath();
-        ctx.moveTo(-4.8 * scale, -8.2 * scale);
-        ctx.lineTo(-9.8 * scale, -12.8 * scale);
-        ctx.moveTo(-2.4 * scale, -7.8 * scale);
-        ctx.lineTo(-7.4 * scale, -12.4 * scale);
+        ctx.moveTo(-4.8 * scale, -8.2 * scale + upperBob);
+        ctx.lineTo(-9.8 * scale, -12.8 * scale + upperBob);
+        ctx.moveTo(-2.4 * scale, -7.8 * scale + upperBob);
+        ctx.lineTo(-7.4 * scale, -12.4 * scale + upperBob);
         ctx.stroke();
       }
     } else if (specialType === 'rider') {

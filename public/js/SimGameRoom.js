@@ -142,6 +142,9 @@ const HERO_HP_MULT = 3;
 const HERO_HP_BOOST_MULT = 2.5;
 const HERO_SIZE_MULT = 1.5;
 const HERO_ARROW_FINISHER_HITS = 9;
+const HERO_SWING_ATTACK_WINDOW = 0.34;
+const HERO_SWING_ATTACK_SPEED = 20;
+const HERO_SWING_IDLE_RETURN_SPEED = 9;
 const SHIELD_PUSH_INTERVAL = 5;
 const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
@@ -3213,8 +3216,15 @@ class GameRoom {
       }
       if (m.heroLineCd > 0) m.heroLineCd = Math.max(0, m.heroLineCd - dt);
       if (m.hero) {
-        if (!Number.isFinite(m.heroSwing)) m.heroSwing = Math.random() * Math.PI * 2;
-        m.heroSwing += dt * 8.2;
+        if (!Number.isFinite(m.heroSwing)) m.heroSwing = 0;
+        if (!Number.isFinite(m.heroSwingAttackT)) m.heroSwingAttackT = 0;
+        if (m.heroSwingAttackT > 0) {
+          m.heroSwingAttackT = Math.max(0, m.heroSwingAttackT - dt);
+          m.heroSwing += dt * HERO_SWING_ATTACK_SPEED;
+        } else {
+          m.heroSwing += (0 - m.heroSwing) * Math.min(1, dt * HERO_SWING_IDLE_RETURN_SPEED);
+          if (Math.abs(m.heroSwing) < 0.001) m.heroSwing = 0;
+        }
       }
       if (m.shieldBearer) {
         m.dmg = 0;
@@ -3575,6 +3585,7 @@ class GameRoom {
             m.atkCd = 0.72;
           } else if (m.hero) {
             m.atkCd = 0.46;
+            this.triggerHeroAttackSwing(m);
           } else if (m.digger) {
             m.atkCd = 1.2;
           } else {
@@ -4563,6 +4574,7 @@ class GameRoom {
 
   heroSlash(hero, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!hero || !hero.hero) return;
+    this.triggerHeroAttackSwing(hero);
     const sideState = hero.side === 'right' ? this.right : this.left;
     const slashR = Math.max(70, Number(hero.heroSlashRadius) || 88);
     const damage = this.minionOutgoingDamage(hero, hero.dmg * 0.96);
@@ -4603,6 +4615,13 @@ class GameRoom {
       hero.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
       if (sideState) sideState.heroLineCd = HERO_RANDOM_LINE_INTERVAL;
     }
+  }
+
+  triggerHeroAttackSwing(hero) {
+    if (!hero || !hero.hero) return;
+    const prev = Number(hero.heroSwingAttackT) || 0;
+    hero.heroSwingAttackT = HERO_SWING_ATTACK_WINDOW;
+    if (prev <= 0 || !Number.isFinite(hero.heroSwing)) hero.heroSwing = 0;
   }
 
   tickMonk(monk, dt) {
@@ -4912,7 +4931,7 @@ class GameRoom {
       failedSpecialType: typeof minion.failedSpecialType === 'string' ? minion.failedSpecialType : null,
       digPhase: Number.isFinite(minion.digPhase) ? minion.digPhase : (Math.random() * Math.PI * 2),
       flyPhase: Number.isFinite(minion.flyPhase) ? minion.flyPhase : (Math.random() * Math.PI * 2),
-      heroSwing: Number.isFinite(minion.heroSwing) ? minion.heroSwing : (Math.random() * Math.PI * 2),
+      heroSwing: Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0,
       dragonBreathTtl: 0,
       dragonBreathToX: null,
       dragonBreathToY: null,
@@ -5137,6 +5156,8 @@ class GameRoom {
     if (revived.hero) {
       revived.heroRetreating = false;
       revived.heroArrowHits = 0;
+      revived.heroSwing = 0;
+      revived.heroSwingAttackT = 0;
     }
     if (revived.monk) {
       revived.monkFirstHeal = true;
@@ -5274,6 +5295,7 @@ class GameRoom {
       heroSlashRadius: 0,
       heroLineCd: 0,
       heroSwing: 0,
+      heroSwingAttackT: 0,
       heroRetreating: false,
       heroRetreatHpPct: 0,
       heroReturnHpPct: 0,
@@ -5751,7 +5773,8 @@ class GameRoom {
       heroArrowHits: 0,
       heroSlashRadius: isHero ? (84 + side.unitLevel * 2.4) : 0,
       heroLineCd: 0,
-      heroSwing: isHero ? Math.random() * Math.PI * 2 : 0,
+      heroSwing: 0,
+      heroSwingAttackT: 0,
       heroRetreating: false,
       heroRetreatHpPct: isHero ? 0.3 : 0,
       heroReturnHpPct: isHero ? 0.92 : 0,
