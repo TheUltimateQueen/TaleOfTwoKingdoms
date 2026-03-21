@@ -8383,6 +8383,7 @@ export class GameRenderer {
       const sideName = minion.side === 'right' ? 'right' : 'left';
       const cacheKey = [
         'minion',
+        'v3',
         sideName,
         t,
         stage,
@@ -8409,7 +8410,7 @@ export class GameRenderer {
         this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
       });
       if (drewCached) {
-        this.drawEmpireStyleAccent(minion, { cacheRender });
+        if (isRider) this.drawEmpireStyleAccent(minion, { cacheRender });
         if (isRider) {
           this.drawThemedSpecialLook(minion, 'rider', { cacheRender, upgraded: riderSuperHorse || minion.super });
         }
@@ -8430,7 +8431,6 @@ export class GameRenderer {
     const plateH = 7 + Math.floor(stage * 0.8);
     const dir = minion.side === 'left' ? 1 : -1;
     const themedEmpires = this.isThemedEmpires();
-    const westBreadBasic = this.isThemedEmpires() && minion.side === 'left';
 
     ctx.fillStyle = '#00000022';
     ctx.beginPath();
@@ -8567,8 +8567,6 @@ export class GameRenderer {
       ctx.arc(bodyR * 0.08, -bodyR * 0.3, 0.8, 0, Math.PI * 2);
       ctx.fill();
       if (minion.side === 'left') {
-        ctx.fillStyle = '#7a3b27';
-        ctx.fillRect(-bodyR * 0.14, -bodyR * 0.88, bodyR * 0.28, bodyR * 0.84);
         ctx.strokeStyle = '#f2cf98';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -8576,8 +8574,6 @@ export class GameRenderer {
         ctx.lineTo(bodyR * 0.3, bodyR * 0.18);
         ctx.stroke();
       } else {
-        ctx.fillStyle = '#315c74';
-        ctx.fillRect(-bodyR * 0.12, -bodyR * 0.84, bodyR * 0.24, bodyR * 0.78);
         ctx.strokeStyle = '#def2ff';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -8598,18 +8594,9 @@ export class GameRenderer {
     ctx.fillStyle = armor;
     ctx.fillRect(-plateW / 2, -10 - t - stage * 0.2, plateW, plateH);
 
-    if (t >= 1 || stage >= 1) {
-      if (westBreadBasic) {
-        ctx.strokeStyle = '#5c3522';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(-3.4, -14 - t - stage * 0.3);
-        ctx.lineTo(3.2, -14.8 - t - stage * 0.3);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = '#e8edf7';
-        ctx.fillRect(-2, -16 - t - stage * 0.4, 4, 6 + Math.min(4, stage));
-      }
+    if (!themedEmpires && (t >= 1 || stage >= 1)) {
+      ctx.fillStyle = '#e8edf7';
+      ctx.fillRect(-2, -16 - t - stage * 0.4, 4, 6 + Math.min(4, stage));
     }
     if (t >= 2 || stage >= 2) {
       ctx.strokeStyle = '#c9d4e6';
@@ -8619,7 +8606,7 @@ export class GameRenderer {
       ctx.lineTo(10 + stage * 1.5, 1);
       ctx.stroke();
     }
-    if ((t >= 3 || stage >= 4 || minion.super) && !westBreadBasic) {
+    if (!themedEmpires && (t >= 3 || stage >= 4 || minion.super)) {
       ctx.fillStyle = '#fff7c0';
       ctx.beginPath();
       ctx.moveTo(0, -22);
@@ -8650,39 +8637,77 @@ export class GameRenderer {
         ctx.stroke();
       } else {
         if (themedEmpires && minion.side === 'left') {
-          const baguetteLen = weaponLen + 3.5;
-          ctx.strokeStyle = '#d7a96f';
-          ctx.lineWidth = minion.super ? 4.6 : 3.4;
+          const loafCx = handX - dir * (bodyR * 0.6);
+          const loafCy = handY - 0.2;
+          const loafLen = Math.max(11, bodyR * (minion.super ? 1.46 : 1.32));
+          const loafH = Math.max(6, bodyR * (minion.super ? 0.72 : 0.64));
+          const loafR = loafH * 0.48;
           ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(handX, handY - 0.6);
-          ctx.lineTo(handX + dir * baguetteLen, handY - 2.5);
-          ctx.stroke();
           ctx.strokeStyle = '#9a6732';
-          ctx.lineWidth = 0.9;
-          for (let i = 0; i < 3; i += 1) {
-            const cutX = handX + dir * (2.8 + i * 3.2);
-            const cutY = handY - 1.5 - i * 0.1;
-            ctx.beginPath();
-            ctx.moveTo(cutX - dir * 0.6, cutY - 0.7);
-            ctx.lineTo(cutX + dir * 0.8, cutY + 0.7);
-            ctx.stroke();
-          }
-          ctx.fillStyle = '#f1cb94';
+          ctx.lineWidth = 1.2;
           ctx.beginPath();
-          ctx.ellipse(handX + dir * (baguetteLen + 0.9), handY - 2.7, 1.9, 1.3, 0, 0, Math.PI * 2);
+          ctx.moveTo(handX - dir * 0.4, handY + 0.2);
+          ctx.lineTo(loafCx + dir * (loafLen * 0.38), loafCy + 0.2);
+          ctx.stroke();
+          ctx.save();
+          ctx.translate(loafCx, loafCy);
+          ctx.rotate(-0.1 * dir);
+          ctx.fillStyle = '#ca8c49';
+          ctx.beginPath();
+          ctx.moveTo(-loafLen * 0.5 + loafR, -loafH * 0.5);
+          ctx.lineTo(loafLen * 0.5 - loafR, -loafH * 0.5);
+          ctx.quadraticCurveTo(loafLen * 0.5, -loafH * 0.5, loafLen * 0.5, -loafH * 0.5 + loafR);
+          ctx.lineTo(loafLen * 0.5, loafH * 0.5 - loafR);
+          ctx.quadraticCurveTo(loafLen * 0.5, loafH * 0.5, loafLen * 0.5 - loafR, loafH * 0.5);
+          ctx.lineTo(-loafLen * 0.5 + loafR, loafH * 0.5);
+          ctx.quadraticCurveTo(-loafLen * 0.5, loafH * 0.5, -loafLen * 0.5, loafH * 0.5 - loafR);
+          ctx.lineTo(-loafLen * 0.5, -loafH * 0.5 + loafR);
+          ctx.quadraticCurveTo(-loafLen * 0.5, -loafH * 0.5, -loafLen * 0.5 + loafR, -loafH * 0.5);
+          ctx.closePath();
           ctx.fill();
+          ctx.strokeStyle = '#9a6732';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Softer inner crumb highlight.
+          ctx.fillStyle = '#e2b97f';
+          ctx.beginPath();
+          ctx.moveTo(-loafLen * 0.33, -loafH * 0.18);
+          ctx.quadraticCurveTo(0, -loafH * 0.36, loafLen * 0.34, -loafH * 0.16);
+          ctx.quadraticCurveTo(0, loafH * 0.06, -loafLen * 0.33, -loafH * 0.18);
+          ctx.fill();
+
+          // Top score cuts for "fresh loaf" look.
+          ctx.strokeStyle = '#f1d4a7';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let i = 0; i < 3; i += 1) {
+            const cutX = (i - 1) * loafLen * 0.24;
+            ctx.moveTo(cutX - dir * 0.45, -loafH * 0.28);
+            ctx.lineTo(cutX + dir * 0.75, -loafH * 0.03);
+          }
+          ctx.stroke();
+
+          // Flour dust specks.
+          ctx.fillStyle = '#f6e4c8';
+          ctx.beginPath();
+          ctx.arc(-loafLen * 0.24, -loafH * 0.1, 0.52, 0, Math.PI * 2);
+          ctx.arc(loafLen * 0.03, -loafH * 0.2, 0.48, 0, Math.PI * 2);
+          ctx.arc(loafLen * 0.26, -loafH * 0.07, 0.45, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
           ctx.lineCap = 'butt';
         } else if (themedEmpires && minion.side === 'right') {
-          const stickLen = weaponLen + 2.2;
+          const stickLen = weaponLen + 7.2;
+          const stickTail = Math.max(3, bodyR * 0.28);
           const spread = minion.super ? 2.1 : 1.7;
           ctx.strokeStyle = '#f1e2c4';
           ctx.lineWidth = minion.super ? 2.5 : 1.9;
           ctx.lineCap = 'round';
           ctx.beginPath();
-          ctx.moveTo(handX, handY - spread * 0.5);
+          ctx.moveTo(handX - dir * stickTail, handY - spread * 0.5);
           ctx.lineTo(handX + dir * stickLen, handY - 2.8 - spread * 0.6);
-          ctx.moveTo(handX, handY + spread * 0.5);
+          ctx.moveTo(handX - dir * stickTail, handY + spread * 0.5);
           ctx.lineTo(handX + dir * stickLen, handY - 1.2 + spread * 0.6);
           ctx.stroke();
           const riceX = handX + dir * (stickLen + 1.5);
@@ -8762,7 +8787,7 @@ export class GameRenderer {
     }
 
     ctx.restore();
-    this.drawEmpireStyleAccent(minion, { cacheRender });
+    if (isRider) this.drawEmpireStyleAccent(minion, { cacheRender });
     if (isRider) {
       this.drawThemedSpecialLook(minion, 'rider', { cacheRender, upgraded: riderSuperHorse || minion.super });
     }
