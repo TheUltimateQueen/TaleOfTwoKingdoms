@@ -1022,6 +1022,7 @@ class GameRoom {
       hp: roundTo(m.hp, 1),
       maxHp: roundTo(m.maxHp, 1),
       dmg: roundTo(m.dmg, 1),
+      atkCd: roundTo(m.atkCd, 3),
       super: Boolean(m.super),
       summoned: Boolean(m.summoned),
       necroRevived: Boolean(m.necroRevived),

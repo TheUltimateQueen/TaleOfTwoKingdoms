@@ -232,6 +232,10 @@ const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
+const MAX_MILITIA_FOOD_FX = 380;
+const MILITIA_FOOD_GAG_TTL = 0.62;
+const MILITIA_FOOD_TRIGGER_MIN_CD = 0.2;
+const MILITIA_FOOD_TRIGGER_DELTA = 0.14;
 const TOWER_HIT_PARTICLE_COLORS = ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'];
 const BLOCKED_PARTICLE_COLORS = ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'];
 const CANDLE_HIT_FIRE_COLORS = ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'];
@@ -262,6 +266,8 @@ export class GameRenderer {
     this.deathGhosts = [];
     this.reviveSpirits = [];
     this.healCircles = [];
+    this.prevMinionAtkCd = new Map();
+    this.militiaFoodFx = new Map();
     this.towerShake = {
       left: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
       right: { ttl: 0, amp: 0, seed: Math.random() * 1000 },
@@ -312,6 +318,8 @@ export class GameRenderer {
       this.cachedThemedBackground = null;
       this.cachedThemedBackgroundKey = '';
       this.spriteCache.clear();
+      this.prevMinionAtkCd.clear();
+      this.militiaFoodFx.clear();
     }
   }
 
@@ -3377,6 +3385,360 @@ export class GameRenderer {
     this.heroLines.push(line);
   }
 
+  isMilitiaFoodMinion(minion) {
+    if (!minion || !this.isThemedEmpires()) return false;
+    if (minion.side !== 'left' && minion.side !== 'right') return false;
+    if (minion.dragon || minion.digger || minion.gunner || minion.necrominion) return false;
+    if (minion.explosive || minion.hero || minion.monk || minion.shieldBearer) return false;
+    if (minion.stoneGolem || minion.president || minion.rider) return false;
+    return true;
+  }
+
+  updateMilitiaFoodFx(minions, dt) {
+    if (!this.isThemedEmpires()) {
+      this.prevMinionAtkCd.clear();
+      this.militiaFoodFx.clear();
+      return;
+    }
+    if (!Array.isArray(minions) || !minions.length) {
+      this.prevMinionAtkCd.clear();
+      this.militiaFoodFx.clear();
+      return;
+    }
+    const seen = new Set();
+    for (const minion of minions) {
+      if (!minion) continue;
+      const id = Number(minion.id);
+      if (!Number.isFinite(id)) continue;
+      seen.add(id);
+
+      if (!this.isMilitiaFoodMinion(minion)) {
+        this.prevMinionAtkCd.delete(id);
+        this.militiaFoodFx.delete(id);
+        continue;
+      }
+
+      const atkCd = Math.max(0, Number(minion.atkCd) || 0);
+      const prevAtkCd = Math.max(0, Number(this.prevMinionAtkCd.get(id)) || 0);
+      const triggered = atkCd >= MILITIA_FOOD_TRIGGER_MIN_CD && (atkCd - prevAtkCd) >= MILITIA_FOOD_TRIGGER_DELTA;
+
+      if (triggered) {
+        const existing = this.militiaFoodFx.get(id);
+        this.militiaFoodFx.delete(id);
+        this.militiaFoodFx.set(id, {
+          t: 0,
+          side: minion.side === 'right' ? 'right' : 'left',
+          seed: existing?.seed ?? (((id * 0.173) % (Math.PI * 2)) + 0.1),
+        });
+      }
+
+      const fx = this.militiaFoodFx.get(id);
+      if (fx) {
+        fx.t += dt;
+        if (fx.t > MILITIA_FOOD_GAG_TTL) this.militiaFoodFx.delete(id);
+      }
+      this.prevMinionAtkCd.set(id, atkCd);
+    }
+
+    for (const id of this.prevMinionAtkCd.keys()) {
+      if (!seen.has(id)) this.prevMinionAtkCd.delete(id);
+    }
+    for (const id of this.militiaFoodFx.keys()) {
+      if (!seen.has(id)) this.militiaFoodFx.delete(id);
+    }
+    while (this.militiaFoodFx.size > MAX_MILITIA_FOOD_FX) {
+      const oldest = this.militiaFoodFx.keys().next().value;
+      this.militiaFoodFx.delete(oldest);
+    }
+  }
+
+  drawMilitiaFoodAttackOverlays(minions) {
+    if (!this.isThemedEmpires() || !Array.isArray(minions) || !minions.length) return;
+    if (!this.militiaFoodFx.size) return;
+    const { ctx } = this;
+    const lowFx = this.fxQuality === 'low';
+    for (const minion of minions) {
+      if (!this.isMilitiaFoodMinion(minion)) continue;
+      const id = Number(minion.id);
+      if (!Number.isFinite(id)) continue;
+      const fx = this.militiaFoodFx.get(id);
+      if (!fx) continue;
+      const p = Math.max(0, Math.min(1, (Number(fx.t) || 0) / MILITIA_FOOD_GAG_TTL));
+      if (p <= 0) continue;
+
+      const sideName = minion.side === 'right' ? 'right' : 'left';
+      const dir = sideName === 'left' ? 1 : -1;
+      const tier = Math.max(0, Math.min(3, Number(minion.tier) || 0));
+      const stage = Math.max(0, Math.min(5, Math.floor((Number(minion.level) || 0) / 4)));
+      const scale = minion.super ? 2 : 1;
+      const bodyR = 12 + tier + Math.min(2, stage * 0.35);
+      const x = Number(minion.x) || 0;
+      const y = Number(minion.y) || 0;
+      const handX = x + dir * (bodyR - 1) * scale;
+      const handY = y + 2 * scale;
+      const stashX = x - dir * (bodyR + 2.8) * scale;
+      const stashY = y + 2.4 * scale;
+      const frontX = x + dir * (bodyR + 18.2) * scale;
+      const frontY = y - 1.2 * scale;
+      const foodScale = scale * 1.32;
+      const pulse = 0.65 + Math.sin((fx.seed || 0) + p * Math.PI * 2) * 0.35;
+
+      ctx.save();
+      if (sideName === 'left') {
+        if (p < 0.45) {
+          const g = p / 0.45;
+          const knifeX = handX + (stashX - handX) * (0.66 * g);
+          const knifeY = handY + (stashY - handY) * (0.66 * g) - Math.sin(g * Math.PI) * 2.3 * scale;
+          const knifeLen = 7.6 * scale;
+          const knifeA = dir * (-0.24 + Math.sin(g * Math.PI) * 0.2);
+          ctx.save();
+          ctx.translate(knifeX, knifeY);
+          ctx.rotate(knifeA);
+          ctx.strokeStyle = '#7b4f2a';
+          ctx.lineWidth = 1.3 * scale;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(-dir * (3.9 * scale), 0.2 * scale);
+          ctx.lineTo(0, 0);
+          ctx.stroke();
+          ctx.fillStyle = '#c7ccd3';
+          ctx.beginPath();
+          ctx.moveTo(0, -0.9 * scale);
+          ctx.lineTo(dir * (knifeLen - 1.4 * scale), -1.3 * scale);
+          ctx.quadraticCurveTo(dir * knifeLen, -1.1 * scale, dir * knifeLen, -0.4 * scale);
+          ctx.lineTo(dir * knifeLen, 0.7 * scale);
+          ctx.quadraticCurveTo(dir * knifeLen, 1.2 * scale, dir * (knifeLen - 1.3 * scale), 1.3 * scale);
+          ctx.lineTo(0, 0.9 * scale);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#8b9199';
+          ctx.lineWidth = 0.7 * scale;
+          ctx.stroke();
+          ctx.fillStyle = '#f7df7f';
+          ctx.beginPath();
+          ctx.ellipse(dir * (knifeLen * 0.68), -0.18 * scale, 1.15 * scale, 0.58 * scale, 0.2 * dir, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          ctx.fillStyle = this.withAlpha('#ffefad', 0.3 + pulse * 0.3);
+          ctx.beginPath();
+          ctx.ellipse(stashX, stashY - 0.9 * scale, 2.2 * scale, 1 * scale, 0.1 * dir, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          const g = (p - 0.45) / 0.55;
+          const flingG = Math.min(1.12, g * 1.1);
+          const sliceX = stashX + (frontX - stashX) * flingG;
+          const sliceY = stashY + (frontY - stashY) * flingG - Math.sin(g * Math.PI) * 6.1 * scale;
+          const spin = ((fx.seed || 0.3) * 0.35 + g * Math.PI * 2.7) * dir;
+          const knifeLen = 7.4 * scale;
+          const flickX = handX + (frontX - handX) * (0.58 * g);
+          const flickY = handY + (frontY - handY) * (0.56 * g) - Math.sin(g * Math.PI) * 2.1 * scale;
+          const flickA = dir * (0.06 + g * 0.78);
+          ctx.save();
+          ctx.translate(flickX, flickY);
+          ctx.rotate(flickA);
+          ctx.strokeStyle = this.withAlpha('#7b4f2a', 0.65);
+          ctx.lineWidth = 1.25 * scale;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(-dir * (3.6 * scale), 0.2 * scale);
+          ctx.lineTo(0, 0);
+          ctx.stroke();
+          ctx.fillStyle = this.withAlpha('#c7ccd3', 0.86);
+          ctx.beginPath();
+          ctx.moveTo(0, -0.8 * scale);
+          ctx.lineTo(dir * (knifeLen - 1.2 * scale), -1.2 * scale);
+          ctx.lineTo(dir * knifeLen, 0.5 * scale);
+          ctx.lineTo(0, 0.8 * scale);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          if (!lowFx) {
+            ctx.strokeStyle = this.withAlpha('#f8dea5', 0.3 + (1 - g) * 0.3);
+            ctx.lineWidth = 1.25;
+            ctx.beginPath();
+            ctx.moveTo(sliceX - dir * 6.2 * scale, sliceY + 0.8 * scale);
+            ctx.quadraticCurveTo(sliceX - dir * 1.9 * scale, sliceY - 3.1 * scale, sliceX + dir * 2.5 * scale, sliceY - 1.4 * scale);
+            ctx.stroke();
+          }
+          ctx.save();
+          ctx.translate(sliceX, sliceY);
+          ctx.rotate(spin);
+          ctx.fillStyle = '#ce8f4f';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 3.1 * foodScale, 2 * foodScale, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#9b6735';
+          ctx.lineWidth = 1.05;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 3.1 * foodScale, 2 * foodScale, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = '#f7de7d';
+          ctx.beginPath();
+          ctx.ellipse(dir * 1.1 * foodScale, -0.33 * foodScale, 1.3 * foodScale, 0.7 * foodScale, 0.18 * dir, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          if (g > 0.82) {
+            const splatX = frontX + dir * 2.2 * scale;
+            const splatY = frontY + 0.8 * scale;
+            ctx.fillStyle = this.withAlpha('#f6df84', 0.45 + pulse * 0.3);
+            ctx.beginPath();
+            ctx.ellipse(splatX, splatY, 2.7 * scale, 1.2 * scale, 0.15 * dir, 0, Math.PI * 2);
+            ctx.ellipse(splatX - dir * 1.9 * scale, splatY + 0.2 * scale, 1.1 * scale, 0.56 * scale, -0.2, 0, Math.PI * 2);
+            ctx.ellipse(splatX + dir * 1.7 * scale, splatY - 0.15 * scale, 1.02 * scale, 0.52 * scale, 0.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else {
+        if (p < 0.45) {
+          const g = p / 0.45;
+          const riceX = stashX + (handX - stashX) * g;
+          const riceY = stashY + (handY - stashY) * g - Math.sin(g * Math.PI) * 2.2 * scale;
+          const stickLen = 8.7 * scale;
+          const stickX = stashX + (handX - stashX) * (0.62 * g);
+          const stickY = stashY + (handY - stashY) * (0.62 * g) - Math.sin(g * Math.PI) * 2 * scale;
+          const stickA = dir * (0.08 + Math.sin(g * Math.PI) * 0.2);
+          ctx.save();
+          ctx.translate(stickX, stickY);
+          ctx.rotate(stickA);
+          ctx.strokeStyle = '#f1e2c4';
+          ctx.lineWidth = 1.05 * scale;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(-dir * (2.8 * scale), -0.42 * scale);
+          ctx.lineTo(dir * stickLen, -1.35 * scale);
+          ctx.moveTo(-dir * (2.8 * scale), 0.42 * scale);
+          ctx.lineTo(dir * stickLen, -0.05 * scale);
+          ctx.stroke();
+          ctx.restore();
+          if (!lowFx) {
+            ctx.strokeStyle = this.withAlpha('#e9f7ff', 0.3 + (1 - g) * 0.34);
+            ctx.lineWidth = 1.02;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(stashX + dir * 0.9 * scale, stashY - 0.5 * scale);
+            ctx.lineTo(riceX - dir * 0.8 * scale, riceY - 0.3 * scale);
+            ctx.stroke();
+          }
+          ctx.fillStyle = '#f8fdff';
+          ctx.beginPath();
+          ctx.ellipse(riceX, riceY, 1.28 * foodScale, 1.22 * foodScale, 0.08, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#dce8ee';
+          ctx.lineWidth = 0.75;
+          ctx.stroke();
+          if (!lowFx) {
+            ctx.fillStyle = this.withAlpha('#ffffff', 0.46);
+            ctx.beginPath();
+            ctx.ellipse(
+              riceX - dir * 0.35 * foodScale,
+              riceY - 0.32 * foodScale,
+              0.44 * foodScale,
+              0.32 * foodScale,
+              0,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+            ctx.fillStyle = this.withAlpha('#d7e5ec', 0.35);
+            ctx.beginPath();
+            ctx.ellipse(
+              riceX + dir * 0.25 * foodScale,
+              riceY + 0.36 * foodScale,
+              0.58 * foodScale,
+              0.4 * foodScale,
+              0,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+          }
+          if (!lowFx) {
+            ctx.beginPath();
+            ctx.ellipse(riceX - dir * 1.4 * scale, riceY + 0.68 * scale, 0.56 * scale, 0.42 * scale, 0.18, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else {
+          const g = (p - 0.45) / 0.55;
+          const flingG = Math.min(1.1, g * 1.08);
+          const coreX = handX + (frontX - handX) * flingG;
+          const coreY = handY + (frontY - handY) * flingG - Math.sin(g * Math.PI) * 5.8 * scale;
+          const stickLen = 8.6 * scale;
+          const flickX = handX + (frontX - handX) * (0.58 * g);
+          const flickY = handY + (frontY - handY) * (0.56 * g) - Math.sin(g * Math.PI) * 2.2 * scale;
+          const flickA = dir * (0.24 + g * 0.74);
+          ctx.save();
+          ctx.translate(flickX, flickY);
+          ctx.rotate(flickA);
+          ctx.strokeStyle = this.withAlpha('#f1e2c4', 0.82);
+          ctx.lineWidth = 1.08 * scale;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(-dir * (2.7 * scale), -0.4 * scale);
+          ctx.lineTo(dir * stickLen, -1.2 * scale);
+          ctx.moveTo(-dir * (2.7 * scale), 0.4 * scale);
+          ctx.lineTo(dir * stickLen, 0.1 * scale);
+          ctx.stroke();
+          ctx.restore();
+          if (!lowFx) {
+            ctx.strokeStyle = this.withAlpha('#dff3ff', 0.3 + (1 - g) * 0.28);
+            ctx.lineWidth = 1.12;
+            ctx.beginPath();
+            ctx.moveTo(handX - dir * 0.6 * scale, handY - 0.4 * scale);
+            ctx.quadraticCurveTo(coreX - dir * 3.1 * scale, coreY - 3.3 * scale, coreX, coreY);
+            ctx.stroke();
+          }
+          ctx.fillStyle = '#f7fcff';
+          ctx.beginPath();
+          ctx.ellipse(coreX, coreY, 1.22 * foodScale, 1.16 * foodScale, 0.08, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#d9e6ee';
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+          if (!lowFx) {
+            ctx.fillStyle = this.withAlpha('#ffffff', 0.5);
+            ctx.beginPath();
+            ctx.ellipse(
+              coreX - dir * 0.36 * foodScale,
+              coreY - 0.32 * foodScale,
+              0.46 * foodScale,
+              0.34 * foodScale,
+              0,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+            // Tiny crumb pieces so it still reads as tossed rice, not a snowball.
+            ctx.fillStyle = this.withAlpha('#edf6fb', 0.95);
+            ctx.beginPath();
+            ctx.ellipse(coreX - dir * 1.25 * scale, coreY + 0.55 * scale, 0.52 * scale, 0.34 * scale, 0.2, 0, Math.PI * 2);
+            ctx.ellipse(coreX + dir * 1.05 * scale, coreY + 0.4 * scale, 0.44 * scale, 0.3 * scale, -0.18, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          if (g > 0.82) {
+            const splatX = frontX + dir * 1.8 * scale;
+            const splatY = frontY + 0.75 * scale;
+            const count = lowFx ? 3 : 6;
+            for (let i = 0; i < count; i += 1) {
+              const spread = i - (count - 1) * 0.5;
+              ctx.beginPath();
+              ctx.ellipse(
+                splatX - dir * spread * 1.05 * scale,
+                splatY + Math.abs(spread) * 0.2 * scale,
+                0.94 * scale,
+                0.64 * scale,
+                0.2,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            }
+          }
+        }
+      }
+      ctx.restore();
+    }
+  }
+
   draw(snapshot, world) {
     if (!snapshot || !world) return;
 
@@ -3387,6 +3749,7 @@ export class GameRenderer {
     this.updateFxQuality(dt);
     this.updateTowerShake(dt);
     this.updateGameOverCinematic(snapshot, world, now, dt);
+    this.updateMilitiaFoodFx(snapshot.minions, dt);
 
     const w = canvas.width;
     const h = canvas.height;
@@ -3452,6 +3815,7 @@ export class GameRenderer {
       this.drawCandleScorch(snapshot.candleScorch);
     }
     for (const minion of snapshot.minions) this.drawMinionSprite(minion);
+    this.drawMilitiaFoodAttackOverlays(snapshot.minions);
     this.drawExecutiveOrderEffects(snapshot.minions);
     if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
     this.updateHealCircles(dt);
@@ -8611,47 +8975,52 @@ export class GameRenderer {
     const scale = (minion.super ? 2 : 1) * (isRider && riderSuperHorse ? 1.22 : 1);
     const visualDamageTier = this.militiaUpgradeVisualTier(minion, stage, t);
     const bodyR = 12 + t + Math.min(2, stage * 0.35);
+    const foodUtensilAnimating = !cacheRender
+      && this.isMilitiaFoodMinion(minion)
+      && this.militiaFoodFx.has(Number(minion.id));
     if (!cacheRender) {
-      const sideName = minion.side === 'right' ? 'right' : 'left';
-      const cacheKey = [
-        'minion',
-        'v4',
-        sideName,
-        t,
-        stage,
-        visualDamageTier,
-        minion.super ? 1 : 0,
-        isSummoned ? 1 : 0,
-        isRider ? 1 : 0,
-        riderSuperHorse ? 1 : 0,
-        riderGaitBucket,
-        minion.riderChargeReady ? 1 : 0,
-      ].join(':');
-      const widthBase = isRider ? 188 : 128;
-      const heightBase = isRider ? 148 : 126;
-      const cacheWidth = Math.ceil(widthBase * Math.max(1, scale * 0.8));
-      const cacheHeight = Math.ceil(heightBase * Math.max(1, scale * 0.8));
-      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
-        const proxy = {
-          ...minion,
-          x: w / 2,
-          y: h / 2,
-          tier: t,
-          level: stage * 4,
-          upgradeVisualTier: visualDamageTier,
-          riderGaitPhase: (riderGaitBucket / 11) * riderGaitCycle,
-        };
-        this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
-      });
-      if (drewCached) {
-        if (isRider) this.drawEmpireStyleAccent(minion, { cacheRender });
-        if (isRider) {
-          this.drawThemedSpecialLook(minion, 'rider', { cacheRender, upgraded: riderSuperHorse || minion.super });
+      if (!foodUtensilAnimating) {
+        const sideName = minion.side === 'right' ? 'right' : 'left';
+        const cacheKey = [
+          'minion',
+          'v4',
+          sideName,
+          t,
+          stage,
+          visualDamageTier,
+          minion.super ? 1 : 0,
+          isSummoned ? 1 : 0,
+          isRider ? 1 : 0,
+          riderSuperHorse ? 1 : 0,
+          riderGaitBucket,
+          minion.riderChargeReady ? 1 : 0,
+        ].join(':');
+        const widthBase = isRider ? 188 : 128;
+        const heightBase = isRider ? 148 : 126;
+        const cacheWidth = Math.ceil(widthBase * Math.max(1, scale * 0.8));
+        const cacheHeight = Math.ceil(heightBase * Math.max(1, scale * 0.8));
+        const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+          const proxy = {
+            ...minion,
+            x: w / 2,
+            y: h / 2,
+            tier: t,
+            level: stage * 4,
+            upgradeVisualTier: visualDamageTier,
+            riderGaitPhase: (riderGaitBucket / 11) * riderGaitCycle,
+          };
+          this.drawMinionSprite(proxy, { showHud: false, cacheRender: true });
+        });
+        if (drewCached) {
+          if (isRider) this.drawEmpireStyleAccent(minion, { cacheRender });
+          if (isRider) {
+            this.drawThemedSpecialLook(minion, 'rider', { cacheRender, upgraded: riderSuperHorse || minion.super });
+          }
+          this.drawFailedSpecialHat(minion, minion.x, minion.y, bodyR, scale);
+          if (showHud) this.drawStandardMinionHud(minion, minion.x, minion.y, bodyR, scale, { isRider });
+          if (!cacheRender) this.drawNecroRevivedOverlay(minion);
+          return;
         }
-        this.drawFailedSpecialHat(minion, minion.x, minion.y, bodyR, scale);
-        if (showHud) this.drawStandardMinionHud(minion, minion.x, minion.y, bodyR, scale, { isRider });
-        if (!cacheRender) this.drawNecroRevivedOverlay(minion);
-        return;
       }
     }
 
@@ -8872,21 +9241,30 @@ export class GameRenderer {
         ctx.stroke();
       } else {
         if (themedEmpires && minion.side === 'left') {
-          const loafCx = handX - dir * (bodyR * 0.6);
-          const loafCy = handY - 0.2;
-          const loafLen = Math.max(11, bodyR * (minion.super ? 1.46 : 1.32));
-          const loafH = Math.max(6, bodyR * (minion.super ? 0.72 : 0.64));
-          const loafR = loafH * 0.48;
+          const offHandX = -dir * (bodyR - 2.4);
+          const offHandY = handY + 0.9;
+          const loafCx = -dir * (bodyR * 1.03);
+          const loafCy = offHandY + 0.55;
+          const loafLen = Math.max(10.5, bodyR * (minion.super ? 1.3 : 1.2));
+          const loafH = Math.max(5.8, bodyR * (minion.super ? 0.66 : 0.58));
+          const loafR = loafH * 0.46;
+          const knifeLen = Math.max(12, weaponLen + (minion.super ? 2.4 : 1.6));
+          const knifeTilt = -0.08 * dir;
+          const knifeBaseX = handX - dir * 0.5;
+          const knifeBaseY = handY + 0.1;
+          const handleLen = Math.max(4.4, bodyR * 0.36);
+
+          // Bread loaf in the off-hand.
           ctx.lineCap = 'round';
           ctx.strokeStyle = '#9a6732';
-          ctx.lineWidth = 1.2;
+          ctx.lineWidth = 1.15;
           ctx.beginPath();
-          ctx.moveTo(handX - dir * 0.4, handY + 0.2);
-          ctx.lineTo(loafCx + dir * (loafLen * 0.38), loafCy + 0.2);
+          ctx.moveTo(offHandX, offHandY);
+          ctx.lineTo(loafCx + dir * (loafLen * 0.34), loafCy + 0.1);
           ctx.stroke();
           ctx.save();
           ctx.translate(loafCx, loafCy);
-          ctx.rotate(-0.1 * dir);
+          ctx.rotate(-0.08 * dir);
           ctx.fillStyle = '#ca8c49';
           ctx.beginPath();
           ctx.moveTo(-loafLen * 0.5 + loafR, -loafH * 0.5);
@@ -8901,65 +9279,103 @@ export class GameRenderer {
           ctx.closePath();
           ctx.fill();
           ctx.strokeStyle = '#9a6732';
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 0.9;
           ctx.stroke();
-
-          // Softer inner crumb highlight.
-          ctx.fillStyle = '#e2b97f';
-          ctx.beginPath();
-          ctx.moveTo(-loafLen * 0.33, -loafH * 0.18);
-          ctx.quadraticCurveTo(0, -loafH * 0.36, loafLen * 0.34, -loafH * 0.16);
-          ctx.quadraticCurveTo(0, loafH * 0.06, -loafLen * 0.33, -loafH * 0.18);
-          ctx.fill();
-
-          // Top score cuts for "fresh loaf" look.
           ctx.strokeStyle = '#f1d4a7';
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 0.9;
           ctx.beginPath();
           for (let i = 0; i < 3; i += 1) {
             const cutX = (i - 1) * loafLen * 0.24;
-            ctx.moveTo(cutX - dir * 0.45, -loafH * 0.28);
-            ctx.lineTo(cutX + dir * 0.75, -loafH * 0.03);
+            ctx.moveTo(cutX - dir * 0.4, -loafH * 0.25);
+            ctx.lineTo(cutX + dir * 0.66, -loafH * 0.03);
           }
           ctx.stroke();
-
-          // Flour dust specks.
-          ctx.fillStyle = '#f6e4c8';
-          ctx.beginPath();
-          ctx.arc(-loafLen * 0.24, -loafH * 0.1, 0.52, 0, Math.PI * 2);
-          ctx.arc(loafLen * 0.03, -loafH * 0.2, 0.48, 0, Math.PI * 2);
-          ctx.arc(loafLen * 0.26, -loafH * 0.07, 0.45, 0, Math.PI * 2);
-          ctx.fill();
           ctx.restore();
-          ctx.lineCap = 'butt';
+
+          if (!foodUtensilAnimating) {
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#7b4f2a';
+            ctx.lineWidth = minion.super ? 2.4 : 2.1;
+            ctx.beginPath();
+            ctx.moveTo(knifeBaseX - dir * handleLen, knifeBaseY + 0.2);
+            ctx.lineTo(knifeBaseX, knifeBaseY);
+            ctx.stroke();
+
+            ctx.save();
+            ctx.translate(knifeBaseX, knifeBaseY);
+            ctx.rotate(knifeTilt);
+
+            // Butter knife blade.
+            ctx.fillStyle = '#c7ccd3';
+            ctx.beginPath();
+            ctx.moveTo(0, -1.3);
+            ctx.lineTo(dir * (knifeLen - 2.3), -2.1);
+            ctx.quadraticCurveTo(dir * knifeLen, -1.8, dir * knifeLen, -0.8);
+            ctx.lineTo(dir * knifeLen, 1);
+            ctx.quadraticCurveTo(dir * knifeLen, 2, dir * (knifeLen - 2.2), 2.2);
+            ctx.lineTo(0, 1.5);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#8b9199';
+            ctx.lineWidth = 0.9;
+            ctx.stroke();
+
+            // Butter dab near the front of the blade.
+            ctx.fillStyle = '#f7df7f';
+            ctx.beginPath();
+            ctx.ellipse(dir * (knifeLen * 0.72), -0.35, 2.4, 1.2, 0.22 * dir, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff2b4';
+            ctx.beginPath();
+            ctx.ellipse(dir * (knifeLen * 0.75), -0.62, 1.1, 0.5, 0.2 * dir, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            ctx.lineCap = 'butt';
+          }
         } else if (themedEmpires && minion.side === 'right') {
           const stickLen = weaponLen + 7.2;
           const stickTail = Math.max(3, bodyR * 0.28);
           const spread = minion.super ? 2.1 : 1.7;
-          ctx.strokeStyle = '#f1e2c4';
-          ctx.lineWidth = minion.super ? 2.5 : 1.9;
-          ctx.lineCap = 'round';
+          const potX = -dir * (bodyR * 1.03);
+          const potY = handY + bodyR * 0.42;
+          const offHandX = -dir * (bodyR - 2.2);
+          const offHandY = handY + 0.9;
+          if (!foodUtensilAnimating) {
+            ctx.strokeStyle = '#f1e2c4';
+            ctx.lineWidth = minion.super ? 2.5 : 1.9;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(handX - dir * stickTail, handY - spread * 0.5);
+            ctx.lineTo(handX + dir * stickLen, handY - 2.8 - spread * 0.6);
+            ctx.moveTo(handX - dir * stickTail, handY + spread * 0.5);
+            ctx.lineTo(handX + dir * stickLen, handY - 1.2 + spread * 0.6);
+            ctx.stroke();
+          }
+          // Off-hand rice pot on the opposite side.
+          ctx.strokeStyle = '#9eb1bf';
+          ctx.lineWidth = 1.1;
           ctx.beginPath();
-          ctx.moveTo(handX - dir * stickTail, handY - spread * 0.5);
-          ctx.lineTo(handX + dir * stickLen, handY - 2.8 - spread * 0.6);
-          ctx.moveTo(handX - dir * stickTail, handY + spread * 0.5);
-          ctx.lineTo(handX + dir * stickLen, handY - 1.2 + spread * 0.6);
+          ctx.moveTo(offHandX, offHandY);
+          ctx.lineTo(potX - dir * 1.1, potY - 0.9);
           ctx.stroke();
-          const riceX = handX + dir * (stickLen + 1.5);
-          const riceY = handY - 2.1;
-          ctx.fillStyle = '#f8fbff';
+          ctx.fillStyle = '#c8d7e2';
           ctx.beginPath();
-          ctx.ellipse(riceX, riceY, 2.7, 2.1, 0.16, 0, Math.PI * 2);
+          ctx.arc(potX, potY, 4.2, Math.PI, 0, false);
+          ctx.lineTo(potX + 4.2, potY + 2.1);
+          ctx.lineTo(potX - 4.2, potY + 2.1);
+          ctx.closePath();
           ctx.fill();
-          ctx.strokeStyle = '#d5e2ef';
-          ctx.lineWidth = 0.8;
+          ctx.strokeStyle = '#8798a8';
+          ctx.lineWidth = 0.9;
+          ctx.beginPath();
+          ctx.arc(potX, potY, 4.2, Math.PI, 0, false);
           ctx.stroke();
-          ctx.fillStyle = '#fdfefe';
+          ctx.fillStyle = '#f8fcff';
           ctx.beginPath();
-          ctx.ellipse(riceX - dir * 1.3, riceY - 0.35, 0.7, 0.5, 0.2, 0, Math.PI * 2);
-          ctx.ellipse(riceX + dir * 0.8, riceY + 0.3, 0.62, 0.46, -0.18, 0, Math.PI * 2);
+          ctx.ellipse(potX - dir * 1.05, potY - 1.05, 1.4, 0.82, 0.18, 0, Math.PI * 2);
+          ctx.ellipse(potX + dir * 0.28, potY - 1.28, 1.28, 0.78, -0.15, 0, Math.PI * 2);
           ctx.fill();
-          ctx.lineCap = 'butt';
+          if (!foodUtensilAnimating) ctx.lineCap = 'butt';
         } else {
           ctx.strokeStyle = '#d4dde8';
           ctx.lineWidth = minion.super ? 3.6 : 2.5;

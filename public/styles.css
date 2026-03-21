@@ -1013,25 +1013,26 @@ button:hover {
 
 #postUpgradeTimeline {
   min-height: 0;
-  max-height: none;
-  flex: 1 1 auto;
+  max-height: clamp(220px, 46vh, 380px);
+  flex: 0 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   padding-right: 8px;
+  scrollbar-gutter: stable;
 }
 
 .post-upgrade-item {
   display: grid;
-  grid-template-columns: 20px 1fr auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  line-height: 1.26;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.2;
   color: #dce9ff;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 8px;
   border: 1px solid #7ca0ce4f;
   background: #0f1d3494;
@@ -1058,6 +1059,10 @@ button:hover {
 
 .post-upgrade-label {
   color: #e2edff;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .post-upgrade-side {
@@ -1074,7 +1079,7 @@ button:hover {
 
 .post-upgrade-time {
   color: #a8c4ef;
-  font-size: 11.5px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

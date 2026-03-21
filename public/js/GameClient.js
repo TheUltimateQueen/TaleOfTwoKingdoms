@@ -127,6 +127,25 @@ const POST_UPGRADE_ICONS = {
   presidentExecutiveOrderLevel: '📜',
   superMinionLevel: '⭐',
 };
+const POST_UPGRADE_FEED_MAX_EVENTS = 40;
+
+function compactUpgradeFeedEvents(events, maxEvents = POST_UPGRADE_FEED_MAX_EVENTS) {
+  const source = Array.isArray(events) ? events : [];
+  const limit = Math.max(8, Math.floor(Number(maxEvents) || 0));
+  if (source.length <= limit) return source.slice();
+  const sampled = [];
+  const lastIndex = source.length - 1;
+  const step = lastIndex / (limit - 1);
+  let previousIndex = -1;
+  for (let i = 0; i < limit; i += 1) {
+    let index = Math.round(i * step);
+    if (index <= previousIndex) index = Math.min(lastIndex, previousIndex + 1);
+    sampled.push(source[index]);
+    previousIndex = index;
+  }
+  return sampled;
+}
+
 function colorWithAlpha(color, alpha = 1) {
   const safe = Math.max(0, Math.min(1, Number(alpha) || 0));
   if (typeof color !== 'string') return `rgba(255,255,255,${safe})`;
@@ -1520,7 +1539,7 @@ export class GameClient {
 
   renderPostUpgradeFeed(report) {
     if (!this.postUpgradeTimeline) return;
-    const upgrades = Array.isArray(report?.upgrades) ? report.upgrades.slice(-80) : [];
+    const upgrades = compactUpgradeFeedEvents(report?.upgrades);
     if (!upgrades.length) {
       this.postUpgradeFeedEvents = [];
       this.postUpgradeTimeline.innerHTML = '<p class="sub">No upgrade activations captured.</p>';
@@ -1530,15 +1549,19 @@ export class GameClient {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const label = UPGRADE_LABELS[event.type] || event.type;
-      const side = sideDisplayName(event.side, this.state.themeMode);
+      const side = sideShortName(event.side, this.state.themeMode);
+      const sideLong = sideDisplayName(event.side, this.state.themeMode);
       const sideColor = event.side === 'right' ? '#ffb4b4' : '#a9d7ff';
       const sideClass = event.side === 'right' ? 'side-east' : 'side-west';
+      const level = Math.max(0, Number(event.level) || 0);
+      const eventTimeText = this.formatPostTime(event.t || 0);
       const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
+      const title = `${sideLong} ${label} (Level ${level}) at ${eventTimeText}`;
       return `
-        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}">
+        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" title="${title}">
           <span class="post-upgrade-icon" style="color:${sideColor}">${icon}</span>
-          <span class="post-upgrade-label"><span class="post-upgrade-side">${side}</span> ${label} (Lv ${Math.max(0, Number(event.level) || 0)})</span>
-          <span class="post-upgrade-time">${code} ${this.formatPostTime(event.t || 0)}</span>
+          <span class="post-upgrade-label"><span class="post-upgrade-side">${side}</span> ${label} Lv ${level}</span>
+          <span class="post-upgrade-time">${code} ${eventTimeText}</span>
         </article>
       `;
     }).join('');
