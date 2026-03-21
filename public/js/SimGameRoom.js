@@ -3348,6 +3348,17 @@ class GameRoom {
         );
         if (this.tickDiggerGoldFinder(m, dt)) continue;
       }
+      if (m.shieldBearer) {
+        if (!Number.isFinite(m.shieldBaseY)) m.shieldBaseY = m.y;
+        if (!Number.isFinite(m.shieldBobPhase)) m.shieldBobPhase = Math.random() * Math.PI * 2;
+        m.shieldBobPhase += dt * (1.18 + Math.min(0.45, m.speed / 180));
+        const shieldBobAmp = 1.2 + Math.min(1.6, (Number(m.r) || 20) * 0.035);
+        m.y = clamp(
+          m.shieldBaseY + Math.sin(m.shieldBobPhase) * shieldBobAmp,
+          TOWER_Y - 170,
+          TOWER_Y + 170
+        );
+      }
       if (m.flying) {
         if (!Number.isFinite(m.flyBaseY)) m.flyBaseY = m.y;
         if (!Number.isFinite(m.flyPhase)) m.flyPhase = Math.random() * Math.PI * 2;
@@ -5776,6 +5787,8 @@ class GameRoom {
       shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
       shieldGuardPose: isShieldBearer ? 0 : 0,
       shieldGuardTarget: isShieldBearer ? 0 : 0,
+      shieldBaseY: isShieldBearer ? spawnY : null,
+      shieldBobPhase: isShieldBearer ? Math.random() * Math.PI * 2 : null,
       shieldDarkMetalCd: isShieldBearer ? (SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER) : 0,
       shieldDarkMetalTtl: 0,
       stoneGolem: isStoneGolem,

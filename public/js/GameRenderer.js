@@ -841,12 +841,13 @@ export class GameRenderer {
     const mediumFx = this.fxQuality === 'medium';
     const animNow = performance.now() * 0.001;
     const animSeed = (Number(minion.id) || 0) * 0.37 + (european ? 0 : 1.9);
+    const physicsDrivenBob = specialType === 'dragon' || specialType === 'shield';
     const upgradeMotionBoost = upgraded ? 1.42 : 1;
     const moveFreq = specialType === 'rider' ? 7.4 : (specialType === 'dragon' ? 6.5 : 5.4);
     const bobAmp = cacheRender
       ? 0
-      : (specialType === 'rider' ? 1.55 : (specialType === 'dragon' ? 1.2 : 0.82)) * scale * upgradeMotionBoost;
-    const swayAmpX = cacheRender ? 0 : (specialType === 'rider' ? 0.9 : 0.55) * scale * (upgraded ? 1.3 : 1);
+      : ((physicsDrivenBob ? 0 : (specialType === 'rider' ? 1.55 : (specialType === 'dragon' ? 1.2 : 0.82))) * scale * upgradeMotionBoost);
+    const swayAmpX = cacheRender || physicsDrivenBob ? 0 : (specialType === 'rider' ? 0.9 : 0.55) * scale * (upgraded ? 1.3 : 1);
     const animBobY = Math.sin(animNow * moveFreq + animSeed) * bobAmp;
     const animSwayX = Math.sin(animNow * (moveFreq * 0.5) + animSeed * 0.7) * swayAmpX;
     const animTilt = cacheRender
