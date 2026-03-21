@@ -598,7 +598,7 @@ export class GameRenderer {
         ctx.stroke();
       }
       if (upgraded) {
-        ctx.strokeStyle = sideName === 'left' ? '#f8d098' : '#d8f1ff';
+        ctx.strokeStyle = sideName === 'left' ? '#f8d098' : '#f8d4dc';
         ctx.lineWidth = 2.1;
         ctx.beginPath();
         ctx.moveTo(-9.8 * dir * scale, -5.4 * scale);
@@ -622,7 +622,7 @@ export class GameRenderer {
         ctx.fillRect(-4 * scale, -21 * scale, 8 * scale, 4.5 * scale);
       }
       if (upgraded) {
-        ctx.strokeStyle = sideName === 'left' ? '#d7c7ff' : '#b6fff0';
+        ctx.strokeStyle = sideName === 'left' ? '#d7c7ff' : '#f3cfd8';
         ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.arc(0, -2 * scale, 7.2 * scale, 0, Math.PI * 2);
@@ -649,7 +649,7 @@ export class GameRenderer {
         ctx.fill();
       }
       if (upgraded) {
-        ctx.strokeStyle = sideName === 'left' ? '#ffd8a3' : '#d0ffd7';
+        ctx.strokeStyle = sideName === 'left' ? '#ffd8a3' : '#f5d4dd';
         ctx.lineWidth = 1.8;
         ctx.beginPath();
         ctx.arc(0, -1.5 * scale, 8.6 * scale, 0, Math.PI * 2);
@@ -671,13 +671,13 @@ export class GameRenderer {
         ctx.fillRect(10.3 * scale, 0.2 * scale, 3.2 * scale, 6.2 * scale);
       } else {
         // Tate-like rectangular shield panel.
-        ctx.fillStyle = '#325670';
+        ctx.fillStyle = '#704552';
         ctx.fillRect(7.2 * scale, -6 * scale, 8.8 * scale, 18 * scale);
-        ctx.fillStyle = '#d7ebf7';
+        ctx.fillStyle = '#edc4cf';
         ctx.fillRect(10.8 * scale, -3 * scale, 1.8 * scale, 12 * scale);
       }
       if (upgraded) {
-        ctx.strokeStyle = sideName === 'left' ? '#fbe9c6' : '#e4f6ff';
+        ctx.strokeStyle = sideName === 'left' ? '#fbe9c6' : '#f6d9e2';
         ctx.lineWidth = 1.4;
         ctx.strokeRect(7.2 * scale, -6 * scale, 8.8 * scale, 18 * scale);
       }
@@ -695,13 +695,13 @@ export class GameRenderer {
         ctx.fill();
       } else {
         // Court cap.
-        ctx.fillStyle = '#1c2c42';
+        ctx.fillStyle = '#583543';
         ctx.fillRect(-5.6 * scale, -20.5 * scale, 11.2 * scale, 4.2 * scale);
-        ctx.fillStyle = '#a7c4d8';
+        ctx.fillStyle = '#ddb4bf';
         ctx.fillRect(-1.2 * scale, -16.3 * scale, 2.4 * scale, 5.2 * scale);
       }
       if (upgraded) {
-        ctx.fillStyle = sideName === 'left' ? '#f3e0b6' : '#e2f6ff';
+        ctx.fillStyle = sideName === 'left' ? '#f3e0b6' : '#f6d8e2';
         ctx.fillRect(dir * 5.5 * scale, -2 * scale, 5.2 * scale, 6.2 * scale);
       }
     } else if (specialType === 'dragon') {
@@ -717,7 +717,7 @@ export class GameRenderer {
         ctx.stroke();
       } else {
         // Eastern whiskers + pearl.
-        ctx.strokeStyle = '#d8f3ff';
+        ctx.strokeStyle = '#f3d3dd';
         ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.moveTo(8 * scale, -8 * scale);
@@ -725,13 +725,13 @@ export class GameRenderer {
         ctx.moveTo(8 * scale, -6 * scale);
         ctx.quadraticCurveTo(14 * scale, -3 * scale, 17 * scale, 2 * scale);
         ctx.stroke();
-        ctx.fillStyle = '#ecfbff';
+        ctx.fillStyle = '#fde8ed';
         ctx.beginPath();
         ctx.arc(11.5 * scale, -2 * scale, 2.1 * scale, 0, Math.PI * 2);
         ctx.fill();
       }
       if (upgraded) {
-        ctx.strokeStyle = sideName === 'left' ? '#ffcf8f' : '#d7f6ff';
+        ctx.strokeStyle = sideName === 'left' ? '#ffcf8f' : '#f7d8e1';
         ctx.lineWidth = 2.1;
         ctx.beginPath();
         ctx.arc(0, -2 * scale, 10.2 * scale, 0, Math.PI * 2);
@@ -770,9 +770,9 @@ export class GameRenderer {
         ctx.fillStyle = '#f5d8a8';
         ctx.fillRect(-2 * scale, -14 * scale, 2 * scale, 10 * scale);
       } else {
-        ctx.fillStyle = '#345d76';
+        ctx.fillStyle = '#764757';
         ctx.fillRect(-2.1 * scale, -14 * scale, 4.2 * scale, 10 * scale);
-        ctx.fillStyle = '#d6ecf8';
+        ctx.fillStyle = '#f3d2db';
         ctx.fillRect(-0.4 * scale, -14 * scale, 0.8 * scale, 10 * scale);
       }
     } else if (specialType === 'bomber') {
@@ -783,11 +783,11 @@ export class GameRenderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(7 * scale, -2.5 * scale, 5 * scale, 7 * scale);
       } else {
-        ctx.fillStyle = '#526f86';
+        ctx.fillStyle = '#9f5a69';
         ctx.beginPath();
         ctx.arc(9.2 * scale, 0.4 * scale, 3.4 * scale, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#f6f3df';
+        ctx.fillStyle = '#fbeef2';
         ctx.fillRect(8.3 * scale, -4.8 * scale, 1.8 * scale, 2.2 * scale);
       }
     }
@@ -836,9 +836,9 @@ export class GameRenderer {
       ? Math.max(0, Math.min(1, (Number(minion.atkCd) || 0) / 0.72))
       : 0;
 
-    const sideAccentSoft = westSide ? '#e3f1ff' : '#fce7ec';
-    const sideAccentMain = westSide ? '#8fbfe3' : '#dca2af';
-    const sideAccentDark = westSide ? '#4a7399' : '#8b5662';
+    const sideAccentSoft = westSide ? '#cee8ff' : '#ffd0d6';
+    const sideAccentMain = westSide ? '#6eb3f1' : '#e66f79';
+    const sideAccentDark = westSide ? '#345f9c' : '#8e3f48';
     const hpScale = Math.max(0.95, Math.min(1.85, scale * 1.06));
     const labelY = y - (baseR * (european ? 1.95 : 2.05));
     const labelColor = sideAccentSoft;
@@ -1562,7 +1562,7 @@ export class GameRenderer {
         return false;
       }
       } else if (specialType === 'gunner') {
-      ctx.fillStyle = '#8a4f5d';
+      ctx.fillStyle = '#a04f5d';
       ctx.beginPath();
       ctx.moveTo(-9 * scale, 12 * scale);
       ctx.lineTo(9 * scale, 12 * scale);
@@ -1576,7 +1576,7 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -10.4 * scale, 3.8 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#734450';
+      ctx.fillStyle = '#8f4453';
       ctx.fillRect(-4.4 * scale, -13.5 * scale, 8.8 * scale, 2.3 * scale);
       ctx.fillStyle = '#f7e6eb';
       ctx.beginPath();
@@ -1597,7 +1597,7 @@ export class GameRenderer {
       ctx.lineTo(17 * dir * scale, -4.9 * scale);
       ctx.stroke();
       if (upgraded) {
-        ctx.fillStyle = '#9a5d6b';
+        ctx.fillStyle = '#b1606f';
         ctx.fillRect(-8 * scale, -8.4 * scale, 5.8 * scale, 4.2 * scale);
         ctx.strokeStyle = '#f6d8e1';
         ctx.lineWidth = 2;
@@ -1622,7 +1622,7 @@ export class GameRenderer {
       ctx.fill();
       ctx.fillStyle = '#f0dde2';
       ctx.fillRect(-2.6 * scale, -6.2 * scale, 5.2 * scale, 18.2 * scale);
-      ctx.fillStyle = '#8c5360';
+      ctx.fillStyle = '#a05463';
       ctx.fillRect(-1.3 * scale, -6.2 * scale, 2.6 * scale, 18.2 * scale);
       ctx.fillStyle = '#f1e0c7';
       ctx.beginPath();
@@ -1680,7 +1680,7 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -10.4 * scale, 3.8 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#8a5360';
+      ctx.fillStyle = '#9f5261';
       ctx.fillRect(-4.2 * scale, -13.1 * scale, 8.4 * scale, 2.1 * scale);
       ctx.fillStyle = '#7c5834';
       ctx.beginPath();
@@ -1715,7 +1715,7 @@ export class GameRenderer {
       const shieldH = 30.2 * scale;
       const shieldTiltRad = Math.PI / 12;
       const shieldRot = -((Math.PI * 0.5) - shieldTiltRad) * dir * shieldGuardPose;
-      ctx.fillStyle = shieldDarkMetalActive ? '#1f2a34' : '#7e4a57';
+      ctx.fillStyle = shieldDarkMetalActive ? '#1f2a34' : '#964f5f';
       ctx.beginPath();
       ctx.moveTo(-bodyHalfW, bodyBottom);
       ctx.lineTo(bodyHalfW, bodyBottom);
@@ -1745,7 +1745,7 @@ export class GameRenderer {
       ctx.save();
       ctx.translate(shieldCx, shieldCy);
       ctx.rotate(shieldRot);
-      ctx.fillStyle = shieldDarkMetalActive ? '#21303d' : '#925a67';
+      ctx.fillStyle = shieldDarkMetalActive ? '#21303d' : '#ad6070';
       ctx.beginPath();
       ctx.moveTo(-shieldW * 0.5, -shieldH * 0.46);
       ctx.lineTo(shieldW * 0.5, -shieldH * 0.46);
@@ -1802,12 +1802,12 @@ export class GameRenderer {
       }
     } else if (specialType === 'president') {
       // Court-official silhouette with robe, table, fan and command baton.
-      ctx.fillStyle = '#7a4754';
+      ctx.fillStyle = '#944e5e';
       ctx.fillRect(-9.4 * scale, 2 * scale, 18.8 * scale, 10.4 * scale);
       ctx.strokeStyle = '#f0d0d9';
       ctx.lineWidth = 1.2;
       ctx.strokeRect(-9.4 * scale, 2 * scale, 18.8 * scale, 10.4 * scale);
-      ctx.fillStyle = '#6f3f4b';
+      ctx.fillStyle = '#894555';
       ctx.beginPath();
       ctx.moveTo(-8 * scale, 7.8 * scale);
       ctx.lineTo(8 * scale, 7.8 * scale);
@@ -1821,11 +1821,11 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -11.1 * scale, 4 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#623844';
+      ctx.fillStyle = '#7a3a49';
       ctx.fillRect(-6.7 * scale, -19.3 * scale, 13.4 * scale, 2.8 * scale);
-      ctx.fillStyle = '#8a5562';
+      ctx.fillStyle = '#a75d6d';
       ctx.fillRect(-3.4 * scale, -16.5 * scale, 6.8 * scale, 2 * scale);
-      ctx.fillStyle = '#7a4a56';
+      ctx.fillStyle = '#935263';
       ctx.beginPath();
       ctx.moveTo(-9.2 * scale, -2 * scale);
       ctx.lineTo(-5.2 * scale, 2.8 * scale);
@@ -1872,7 +1872,7 @@ export class GameRenderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(dir * 6 * scale, -0.8 * scale, 5.6 * scale, 7.4 * scale);
         // Added jade seal marker.
-        ctx.fillStyle = '#f3ced8';
+        ctx.fillStyle = '#f5d5dd';
         ctx.beginPath();
         ctx.arc(-6.6 * dir * scale, -2.6 * scale, 1.6 * scale, 0, Math.PI * 2);
         ctx.fill();
@@ -1882,14 +1882,14 @@ export class GameRenderer {
         : 0;
       if (beamLife > 0.001) beamFx = { life: beamLife };
     } else if (specialType === 'dragon') {
-      ctx.strokeStyle = '#8b5361';
+      ctx.strokeStyle = '#a85d6d';
       ctx.lineWidth = 7.2 * scale;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(-16 * dir * scale, 6 * scale);
       ctx.quadraticCurveTo(-4 * dir * scale, -13 * scale, 12 * dir * scale, -2 * scale);
       ctx.stroke();
-      ctx.strokeStyle = '#6f434f';
+      ctx.strokeStyle = '#844959';
       ctx.lineWidth = 4 * scale;
       ctx.beginPath();
       ctx.moveTo(-12 * dir * scale, 7 * scale);
@@ -1918,11 +1918,11 @@ export class GameRenderer {
       }
     } else if (specialType === 'hero') {
       // East champion: lamellar cuirass, sashimono, dao.
-      ctx.fillStyle = '#7c4b58';
+      ctx.fillStyle = '#955062';
       ctx.beginPath();
       ctx.arc(0, 0, 11 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#945d6b';
+      ctx.fillStyle = '#ac6172';
       ctx.fillRect(-4.6 * scale, -5.8 * scale, 9.2 * scale, 11.6 * scale);
       ctx.strokeStyle = '#f6d8e1';
       ctx.lineWidth = 0.9;
@@ -1940,7 +1940,7 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -10.7 * scale, 3.8 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#7f4f5b';
+      ctx.fillStyle = '#9a5566';
       ctx.fillRect(-4 * scale, -13.4 * scale, 8 * scale, 2.2 * scale);
       ctx.fillStyle = '#f4dbe2';
       ctx.beginPath();
@@ -1975,7 +1975,7 @@ export class GameRenderer {
       ctx.lineTo(swordEndX, swordEndY);
       ctx.lineTo(swordEndX - dir * (1.6 * scale), swordEndY + 1.6 * scale);
       ctx.stroke();
-      ctx.fillStyle = '#a16271';
+      ctx.fillStyle = '#ba6c7f';
       ctx.beginPath();
       ctx.moveTo(-8.2 * dir * scale, -2.4 * scale);
       ctx.lineTo(-13.4 * dir * scale, -6.4 * scale + sashWave);
@@ -1992,7 +1992,7 @@ export class GameRenderer {
         const flagWave = heroWave * 2.2 * scale;
         ctx.fillStyle = '#f6d9e2';
         ctx.fillRect(-12.6 * scale, -10.2 * scale, 2.2 * scale, 12.6 * scale);
-        ctx.fillStyle = '#8c5462';
+        ctx.fillStyle = '#a85d6d';
         ctx.beginPath();
         ctx.moveTo(-10.4 * scale, -10 * scale);
         ctx.lineTo(-4 * scale, -7.6 * scale + flagWave);
@@ -2026,7 +2026,7 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -8.6 * scale + upperBob, 3.2 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#8b5160';
+      ctx.fillStyle = '#9f5868';
       ctx.fillRect(-3.8 * scale, -12.6 * scale + upperBob, 7.6 * scale, 2.1 * scale);
       ctx.strokeStyle = '#dfb2bd';
       ctx.lineWidth = 2.2;
@@ -2068,7 +2068,7 @@ export class GameRenderer {
       ctx.moveTo((hx - 1.8 * dir * scale), 4.4 * scale);
       ctx.lineTo((hx - 5.8 * dir * scale), 1.2 * scale);
       ctx.stroke();
-      ctx.fillStyle = '#8e5261';
+      ctx.fillStyle = '#a45a6a';
       ctx.beginPath();
       ctx.moveTo(-5 * scale, 6 * scale);
       ctx.lineTo(5 * scale, 6 * scale);
@@ -2174,7 +2174,7 @@ export class GameRenderer {
         ctx.fill();
       }
       } else if (specialType === 'bomber') {
-        ctx.fillStyle = '#87505f';
+        ctx.fillStyle = '#a45969';
         ctx.beginPath();
         ctx.arc(0, 0, 11 * scale, 0, Math.PI * 2);
         ctx.fill();
@@ -2182,14 +2182,14 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, -10.2 * scale, 3.6 * scale, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#9c6271';
+      ctx.fillStyle = '#bc6f80';
       ctx.beginPath();
       ctx.arc(10.4 * dir * scale, 0.8 * scale, 4.2 * scale, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#f8f1db';
       ctx.fillRect(Math.min(9.4 * dir * scale, 11.6 * dir * scale), -5.2 * scale, 2.2 * scale, 2.6 * scale);
       if (upgraded) {
-        ctx.fillStyle = '#935a68';
+        ctx.fillStyle = '#b26475';
         ctx.beginPath();
         ctx.arc(-10.6 * dir * scale, 1 * scale, 3.6 * scale, 0, Math.PI * 2);
         ctx.fill();
@@ -2210,28 +2210,28 @@ export class GameRenderer {
       ctx.fillStyle = kitFill;
       ctx.lineWidth = 1;
       if (specialType === 'gunner') {
-        ctx.strokeStyle = european ? '#cbe7fa' : '#f1c8d2';
+        ctx.strokeStyle = european ? '#cbe7fa' : '#f4d1da';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(-6.5 * scale, -3.2 * scale);
         ctx.lineTo(5.8 * scale, 5.2 * scale);
         ctx.stroke();
-        ctx.fillStyle = european ? '#2d546d' : '#6f424f';
+        ctx.fillStyle = european ? '#2d546d' : '#844757';
         ctx.fillRect(-8.8 * scale, 2.8 * scale, 2 * scale, 4.2 * scale);
         ctx.fillRect(-5.8 * scale, 4.2 * scale, 2 * scale, 4.2 * scale);
       } else if (specialType === 'necro') {
-        ctx.fillStyle = european ? '#426886' : '#7a4b58';
+        ctx.fillStyle = european ? '#426886' : '#915264';
         ctx.fillRect(-5.8 * scale, -1.4 * scale, 1.6 * scale, 5 * scale);
         ctx.fillRect(-2.8 * scale, -0.6 * scale, 1.6 * scale, 4.2 * scale);
         ctx.fillRect(0.2 * scale, -1.2 * scale, 1.6 * scale, 4.8 * scale);
-        ctx.strokeStyle = european ? '#9ac3d4' : '#efc5cf';
+        ctx.strokeStyle = european ? '#9ac3d4' : '#f3d0d9';
         ctx.beginPath();
         ctx.moveTo(-6.4 * scale, 1.2 * scale);
         ctx.lineTo(2.2 * scale, 1.2 * scale);
         ctx.stroke();
       } else if (specialType === 'monk') {
         const beadY = 1.5 * scale;
-        const beadColor = european ? '#d8f2ff' : '#f0ccd6';
+        const beadColor = european ? '#d8f2ff' : '#f3d2db';
         ctx.fillStyle = beadColor;
         ctx.beginPath();
         ctx.arc(-4 * scale, beadY, 1.05 * scale, 0, Math.PI * 2);
@@ -2240,7 +2240,7 @@ export class GameRenderer {
         ctx.arc(3.8 * scale, beadY, 1.05 * scale, 0, Math.PI * 2);
         ctx.fill();
       } else if (specialType === 'shield') {
-        ctx.fillStyle = european ? '#d7ecf8' : '#f0ccd6';
+        ctx.fillStyle = european ? '#d7ecf8' : '#f3d2db';
         ctx.beginPath();
         ctx.arc(12.2 * dir * scale, -2.8 * scale, 0.9 * scale, 0, Math.PI * 2);
         ctx.arc(14.8 * dir * scale, 0.6 * scale, 0.9 * scale, 0, Math.PI * 2);
@@ -2248,7 +2248,7 @@ export class GameRenderer {
         ctx.arc(12.2 * dir * scale, 7.2 * scale, 0.9 * scale, 0, Math.PI * 2);
         ctx.fill();
       } else if (specialType === 'president') {
-        ctx.strokeStyle = european ? '#d9f2ff' : '#f1ccd6';
+        ctx.strokeStyle = european ? '#d9f2ff' : '#f3d2db';
         ctx.lineWidth = 1.1;
         ctx.beginPath();
         ctx.moveTo(-4.6 * scale, -1 * scale);
@@ -2256,12 +2256,12 @@ export class GameRenderer {
         ctx.moveTo(-4.6 * scale, 1.4 * scale);
         ctx.lineTo(4.6 * scale, 1.4 * scale);
         ctx.stroke();
-        ctx.fillStyle = european ? '#6da9c5' : '#ab6775';
+        ctx.fillStyle = european ? '#6da9c5' : '#bf6f82';
         ctx.beginPath();
         ctx.arc(0, 4.6 * scale, 1.2 * scale, 0, Math.PI * 2);
         ctx.fill();
       } else if (specialType === 'dragon') {
-        ctx.fillStyle = european ? '#d7f2ff' : '#f2c9d4';
+        ctx.fillStyle = european ? '#d7f2ff' : '#f4d0d9';
         ctx.beginPath();
         ctx.moveTo(-4.2 * scale, -4.2 * scale);
         ctx.lineTo(-2.6 * scale, -6.6 * scale);
@@ -2277,7 +2277,7 @@ export class GameRenderer {
         ctx.closePath();
         ctx.fill();
       } else if (specialType === 'hero') {
-        ctx.fillStyle = european ? '#2a5d78' : '#8e5160';
+        ctx.fillStyle = european ? '#2a5d78' : '#a65b6d';
         ctx.beginPath();
         ctx.moveTo(-8.6 * scale, -3.6 * scale);
         ctx.lineTo(-4.6 * scale, -6.8 * scale);
@@ -2292,7 +2292,7 @@ export class GameRenderer {
         ctx.lineTo(7.2 * scale, 0.8 * scale);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = european ? '#dcf3ff' : '#f3cdd7';
+        ctx.strokeStyle = european ? '#dcf3ff' : '#f5d5dd';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(0, -2.6 * scale);
@@ -2301,7 +2301,7 @@ export class GameRenderer {
         ctx.lineTo(2.4 * scale, 0.8 * scale);
         ctx.stroke();
       } else if (specialType === 'digger') {
-        ctx.strokeStyle = european ? '#d6ebf8' : '#f0cad4';
+        ctx.strokeStyle = european ? '#d6ebf8' : '#f3d2db';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(-5.4 * scale, -1.2 * scale);
@@ -2310,9 +2310,9 @@ export class GameRenderer {
         ctx.lineTo(4.2 * scale, 7.2 * scale);
         ctx.stroke();
       } else if (specialType === 'rider') {
-        ctx.fillStyle = european ? '#315e78' : '#8e5361';
+        ctx.fillStyle = european ? '#315e78' : '#a75d6e';
         ctx.fillRect(-9 * scale, 5.2 * scale, 13.2 * scale, 3.4 * scale);
-        ctx.strokeStyle = european ? '#daf0ff' : '#f0cbd5';
+        ctx.strokeStyle = european ? '#daf0ff' : '#f3d3dc';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(-7.6 * scale, 6.9 * scale);
@@ -2450,7 +2450,7 @@ export class GameRenderer {
         ctx.fillStyle = european ? '#e8f8ff' : '#f6dce4';
         if (specialType === 'gunner') {
           ctx.fillRect(-8.8 * scale, -7.8 * scale, 3.8 * scale, 2.2 * scale);
-          ctx.strokeStyle = european ? '#ddf1ff' : '#f1c6d2';
+          ctx.strokeStyle = european ? '#ddf1ff' : '#f3d0d9';
           ctx.beginPath();
           ctx.moveTo(10.2 * dir * scale, -4.2 * scale);
           ctx.lineTo(18.2 * dir * scale, -4.2 * scale);
@@ -2458,7 +2458,7 @@ export class GameRenderer {
           ctx.lineTo(18.2 * dir * scale, -2.1 * scale);
           ctx.stroke();
         } else if (specialType === 'necro') {
-          ctx.strokeStyle = european ? '#c8f2ff' : '#f0c6d1';
+          ctx.strokeStyle = european ? '#c8f2ff' : '#f2cfd8';
           ctx.beginPath();
           ctx.arc(0, 1.2 * scale, 3.8 * scale, 0, Math.PI * 2);
           ctx.stroke();
@@ -2478,7 +2478,7 @@ export class GameRenderer {
           ctx.arc(3.6 * scale, -1.4 * scale, 0.9 * scale, 0, Math.PI * 2);
           ctx.fill();
         } else if (specialType === 'shield') {
-          ctx.strokeStyle = european ? '#e3f4ff' : '#f3ccd6';
+          ctx.strokeStyle = european ? '#e3f4ff' : '#f4d3db';
           ctx.beginPath();
           ctx.moveTo(11 * dir * scale, -0.5 * scale);
           ctx.lineTo(14.6 * dir * scale, 3 * scale);
@@ -2507,7 +2507,7 @@ export class GameRenderer {
           ctx.closePath();
           ctx.fill();
         } else if (specialType === 'hero') {
-          ctx.strokeStyle = european ? '#e7f7ff' : '#f3ced8';
+          ctx.strokeStyle = european ? '#e7f7ff' : '#f5d5dd';
           ctx.beginPath();
           ctx.moveTo(-3.6 * scale, -4 * scale);
           ctx.lineTo(0, -7.2 * scale);
@@ -2538,30 +2538,6 @@ export class GameRenderer {
       }
       ctx.restore();
 
-      {
-        // Global side-color harmonization pass for themed specials.
-        // Applied with source-atop so only sprite pixels are tinted.
-        const washIntensity = cacheRender ? 1 : 0.88;
-        const washMain = westSide ? '#86bbdf' : '#d69ca9';
-        const washDark = westSide ? '#3f6990' : '#86505c';
-        ctx.save();
-        ctx.globalCompositeOperation = 'source-atop';
-        const wash = ctx.createLinearGradient(
-          -23 * scale,
-          -16 * scale,
-          23 * scale,
-          14 * scale
-        );
-        wash.addColorStop(0, this.withAlpha(washMain, 0.24 * washIntensity));
-        wash.addColorStop(0.52, this.withAlpha(washMain, 0.14 * washIntensity));
-        wash.addColorStop(1, this.withAlpha(washDark, 0.2 * washIntensity));
-        ctx.fillStyle = wash;
-        ctx.fillRect(-30 * scale, -26 * scale, 60 * scale, 52 * scale);
-        ctx.fillStyle = this.withAlpha(sideAccentSoft, 0.08 * washIntensity);
-        ctx.fillRect(-12 * scale, -20 * scale, 24 * scale, 40 * scale);
-        ctx.restore();
-      }
-
       ctx.restore();
     }
 
@@ -2586,7 +2562,7 @@ export class GameRenderer {
       ctx.save();
       ctx.globalAlpha = shieldDarkMetalActive ? 0.8 : 0.72;
       ctx.setLineDash([3.2 * scale, 2.1 * scale]);
-      ctx.strokeStyle = shieldDarkMetalActive ? '#f0bb65' : '#f3ccd6';
+      ctx.strokeStyle = shieldDarkMetalActive ? '#f0bb65' : '#f4d3db';
       ctx.lineWidth = 1.15;
       ctx.beginPath();
       ctx.arc(zoneHeadX, zoneHeadY, zoneHeadR + 1.1 * scale, 0, Math.PI * 2);
@@ -2619,7 +2595,7 @@ export class GameRenderer {
 
       ctx.save();
       ctx.globalAlpha = 0.28 + attackLife * 0.2;
-      ctx.fillStyle = westSide ? '#9fd4ff4d' : '#f3c8d34d';
+      ctx.fillStyle = westSide ? '#77c2ff4d' : '#ffb5bf4d';
       ctx.beginPath();
       ctx.moveTo(drawX + dir * (baseR * 0.22), drawY - baseR * 0.18);
       ctx.lineTo(drawX + dir * (wingReach * 1.16), drawY - wingPeak);
@@ -2636,7 +2612,7 @@ export class GameRenderer {
       ctx.fill();
 
       ctx.globalAlpha = 0.46 + attackLife * 0.2;
-      ctx.strokeStyle = westSide ? '#d8f1ff' : '#f5d4dc';
+      ctx.strokeStyle = westSide ? '#cee8ff' : '#ffd0d6';
       ctx.lineWidth = 1.15 * scale;
       ctx.beginPath();
       ctx.moveTo(drawX + dir * (baseR * 0.18), drawY - baseR * 0.1);
@@ -2864,7 +2840,7 @@ export class GameRenderer {
         }
         // Keep the vulnerable head zone obvious, especially during fast combat.
         ctx.globalAlpha = (0.46 + pulse * 0.24) * alphaMul;
-        ctx.strokeStyle = shieldDarkMetalActive ? '#edf5ff' : (westSide ? '#e3f2ff' : '#f6d2dc');
+        ctx.strokeStyle = shieldDarkMetalActive ? '#edf5ff' : (westSide ? '#cee8ff' : '#ffd0d6');
         ctx.lineWidth = 1.05 * scale;
         ctx.beginPath();
         ctx.arc(headX, headY, baseR * 0.42 + Math.sin(fastPhase * 0.9) * 0.32 * scale, 0, Math.PI * 2);
@@ -2978,7 +2954,7 @@ export class GameRenderer {
           ctx.stroke();
         } else {
           ctx.globalAlpha = (0.42 + pulse * 0.3) * alphaMul;
-          ctx.fillStyle = '#8e5160';
+          ctx.fillStyle = '#a65b6d';
           ctx.beginPath();
           ctx.moveTo(drawX - dir * (7 * scale), drawY - 1.6 * scale);
           ctx.lineTo(drawX - dir * (14.8 * scale), drawY - 5.8 * scale + flutter * 0.4);
@@ -3028,7 +3004,7 @@ export class GameRenderer {
       } else if (specialType === 'rider') {
         const dustCount = lowFx ? 2 : 3;
         ctx.globalAlpha = (0.5 + pulse * 0.24) * alphaMul;
-        ctx.fillStyle = european ? '#d9ecff' : '#f1ccd6';
+        ctx.fillStyle = european ? '#d9ecff' : '#f3d2db';
         for (let i = 0; i < dustCount; i += 1) {
           const dx = drawX - dir * (7.4 - i * 4.4) * scale;
           const dy = drawY + (8.2 + Math.sin(fastPhase + i) * 0.8) * scale;
@@ -3190,7 +3166,7 @@ export class GameRenderer {
         ctx.closePath();
         ctx.fill();
       } else if (specialType === 'monk') {
-          ctx.fillStyle = westSide ? '#c7e6ff' : '#f7c7d1';
+          ctx.fillStyle = westSide ? '#bfe2ff' : '#ffb7c2';
         ctx.beginPath();
         ctx.moveTo(drawX - 3.6 * scale, drawY + 1.2 * scale);
         ctx.lineTo(drawX - 8 * scale, drawY + 5.2 * scale + clothWaveA * 0.34);
@@ -3370,11 +3346,11 @@ export class GameRenderer {
       const life = muzzleFx.life;
       ctx.save();
       ctx.globalAlpha = 0.45 + life * 0.5;
-      ctx.fillStyle = westSide ? '#ecf8ff' : '#ffe8ed';
+      ctx.fillStyle = westSide ? '#dff1ff' : '#ffe0e3';
       ctx.beginPath();
       ctx.arc(drawX + muzzleFx.mx, drawY + muzzleFx.my, 2 + life * 4.2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = westSide ? '#93d3ff' : '#ff9aab';
+      ctx.fillStyle = westSide ? '#6eb3f1' : '#e66f79';
       ctx.beginPath();
       ctx.arc(drawX + muzzleFx.mx + dir * (2 + life * 1.8), drawY + muzzleFx.my, 1.2 + life * 2.6, 0, Math.PI * 2);
       ctx.fill();
@@ -3410,11 +3386,11 @@ export class GameRenderer {
       ctx.save();
       ctx.globalAlpha = (lowFx ? 0.28 : 0.34) + life * (lowFx ? 0.36 : 0.6);
       if (lowFx) {
-        ctx.strokeStyle = westSide ? '#9edaff' : '#ff9aa8';
+        ctx.strokeStyle = westSide ? '#7dc8ff' : '#f08b97';
       } else {
         const grad = ctx.createLinearGradient(fromX, fromY, toX, toY);
-        grad.addColorStop(0, westSide ? '#e8f6ff' : '#ffe6ec');
-        grad.addColorStop(1, westSide ? '#7fcaff' : '#ff7f96');
+        grad.addColorStop(0, westSide ? '#dff1ff' : '#ffe0e3');
+        grad.addColorStop(1, westSide ? '#6eb3f1' : '#e66f79');
         ctx.strokeStyle = grad;
       }
       ctx.lineWidth = (lowFx ? 3 : 4) + life * (lowFx ? 3.2 : 6);
