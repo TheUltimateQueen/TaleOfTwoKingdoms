@@ -4623,6 +4623,32 @@ export class GameRenderer {
       }
       return;
     }
+    if (type === 'foodburst') {
+      const riceSide = event?.foodType === 'rice' || pside === 'right';
+      const heavy = Boolean(event?.heavy);
+      const burstCount = this.scaledParticleCount(heavy ? 54 : 38, 6);
+      const colors = riceSide
+        ? ['#f8fdff', '#dceefe', '#c1d6e7', '#2b3e52']
+        : ['#f1c58b', '#d59755', '#ba7742', '#7f4c2b'];
+      const speed = heavy ? 420 : 320;
+      const life = heavy ? 0.84 : 0.68;
+      for (let i = 0; i < burstCount; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = speed * (0.5 + Math.random() * 0.72);
+        this.spawnParticle(
+          px + (Math.random() * 12 - 6),
+          py + (Math.random() * 8 - 4),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - (riceSide ? 24 : 28),
+          life * (0.72 + Math.random() * 0.34),
+          life,
+          (riceSide ? 2.2 : 2.8) + Math.random() * (heavy ? 4.8 : 3.4),
+          colors[Math.floor(Math.random() * colors.length)],
+          heavy ? 560 : 500
+        );
+      }
+      return;
+    }
 
     let count = 8;
     let colors = [palette.soft, '#ffffff'];
@@ -9977,10 +10003,19 @@ export class GameRenderer {
       const storedFromY = Number.isFinite(minion.balloonBombFromY) ? Number(minion.balloonBombFromY) : bombFromY;
       const fromX = upgraded ? toX : storedFromX;
       const fromY = storedFromY;
+      const impactHold = Math.abs(fromX - toX) < 0.01 && Math.abs(fromY - toY) < 0.01;
       const drop = 1 - bombLife;
+      const impactPreview = impactHold
+        ? Math.max(0, Math.min(1, Math.pow(drop, 0.9)))
+        : 0;
+      const impactBurst = impactHold
+        ? Math.max(0, Math.min(1, Math.pow(drop, 1.15)))
+        : 0;
       const px = fromX + (toX - fromX) * drop;
       const py = fromY + (toY - fromY) * drop;
       const bombScale = upgraded ? 6.2 : 5.2;
+      ctx.save();
+      if (impactHold) ctx.globalAlpha = 0.8 - drop * 0.44;
       if (sideName === 'left') {
         // Bread loaf bomb.
         const loafRx = r * 0.115 * bombScale;
@@ -10046,12 +10081,64 @@ export class GameRenderer {
           ctx.fill();
         }
       }
-      ctx.strokeStyle = this.withAlpha('#fff4c8', 0.25 + bombLife * 0.45);
-      ctx.lineWidth = upgraded ? 3.2 : 2;
-      ctx.beginPath();
-      const impactBase = upgraded ? 2.8 : 1.95;
-      ctx.arc(toX, toY, r * impactBase * (1 + (1 - bombLife) * 0.75), 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.restore();
+      // Broken impact ring instead of a full damage-circle outline.
+      const impactBase = upgraded ? 2.92 : 2.08;
+      const blastRadius = Math.max(r * impactBase, Number(minion.balloonBombBlastRadius) || 0);
+      const ringR = impactHold
+        ? blastRadius * (0.28 + impactPreview * 0.92)
+        : r * impactBase * (0.78 + impactPreview * 0.95);
+      if (impactHold) {
+        const ringPieces = upgraded ? 10 : 7;
+        ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#ffd9a6' : '#e4f6ff', 0.18 + impactPreview * 0.44);
+        ctx.lineWidth = (upgraded ? 4 : 2.8) * (0.78 + impactPreview * 0.32);
+        for (let i = 0; i < ringPieces; i += 1) {
+          if (((i + ((Number(minion.id) || 0) % 3)) % 3) === 0) continue;
+          const a0 = (Math.PI * 2 * i) / ringPieces + impactPreview * 0.42;
+          const a1 = a0 + (Math.PI * 2 / ringPieces) * 0.55;
+          ctx.beginPath();
+          ctx.arc(toX, toY, ringR * (0.94 + (i % 2) * 0.08), a0, a1);
+          ctx.stroke();
+        }
+      }
+
+      if (impactBurst > 0.001) {
+        const burstPieces = upgraded ? 18 : 11;
+        const burstReach = blastRadius * (0.22 + impactBurst * 0.52);
+        const seedBase = (Number(minion.id) || 1) * 0.73;
+        const hash = (n) => {
+          const raw = Math.sin(n) * 43758.5453123;
+          return raw - Math.floor(raw);
+        };
+        for (let i = 0; i < burstPieces; i += 1) {
+          const a = hash(seedBase + i * 3.17) * Math.PI * 2;
+          const dist = burstReach * (0.35 + hash(seedBase + i * 4.91) * 0.72);
+          const bx = toX + Math.cos(a) * dist;
+          const by = toY + Math.sin(a) * dist * (0.62 + hash(seedBase + i * 2.23) * 0.36);
+          if (sideName === 'left') {
+            const rx = r * (0.1 + hash(seedBase + i * 5.12) * 0.16) * (0.55 + impactBurst * 0.75);
+            const ry = rx * (0.58 + hash(seedBase + i * 1.61) * 0.36);
+            ctx.fillStyle = this.withAlpha('#d79b61', 0.25 + impactBurst * 0.6);
+            ctx.beginPath();
+            ctx.ellipse(bx, by, rx, ry, a * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = this.withAlpha('#8f562e', 0.2 + impactBurst * 0.45);
+            ctx.lineWidth = Math.max(1, rx * 0.2);
+            ctx.beginPath();
+            ctx.moveTo(bx - rx * 0.45, by - ry * 0.2);
+            ctx.lineTo(bx + rx * 0.5, by + ry * 0.24);
+            ctx.stroke();
+          } else {
+            const rr = r * (0.085 + hash(seedBase + i * 6.03) * 0.12) * (0.55 + impactBurst * 0.75);
+            ctx.fillStyle = this.withAlpha('#f3fcff', 0.24 + impactBurst * 0.62);
+            ctx.beginPath();
+            ctx.arc(bx, by, rr, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = this.withAlpha('#233748', 0.18 + impactBurst * 0.42);
+            ctx.fillRect(bx - rr * 0.45, by + rr * 0.18, rr * 0.9, rr * 0.35);
+          }
+        }
+      }
     }
 
     ctx.restore();

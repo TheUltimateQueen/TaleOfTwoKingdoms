@@ -138,14 +138,18 @@ const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
 const GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY = 0.24;
 const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
 const BALLOON_BOMB_BASE_RADIUS = 72;
-const BALLOON_BOMB_BASE_DAMAGE_MULT = 0.76;
-const BALLOON_BOMB_TOWER_DAMAGE_MULT = 0.54;
+const BALLOON_BOMB_TOWER_DAMAGE_MULT = 0.82;
 const BALLOON_THROW_TOWER_DAMAGE_MULT = 0.44;
 const BALLOON_BOMB_BASE_INTERVAL = 3.2;
 const BALLOON_BOMB_INTERVAL_JITTER = 1.05;
+const BALLOON_BOMB_DROP_TTL_MIN = 1.4;
+const BALLOON_BOMB_DROP_TTL_MULT = 1.85;
 const BALLOON_HEAVY_BOMB_RADIUS_MULT = 5.5;
-const BALLOON_HEAVY_BOMB_DAMAGE_MULT = 1.92;
-const BALLOON_HEAVY_BOMB_TOWER_DAMAGE_MULT = 0.82;
+const BALLOON_HEAVY_BOMB_TOWER_DAMAGE_MULT = 1.18;
+const BALLOON_BOMB_DAMAGE_VS_CANNON_MULT = 4;
+const BALLOON_HEAVY_BOMB_DROP_TTL_MIN = 2.7;
+const BALLOON_HEAVY_BOMB_DROP_TTL_MULT = 2.65;
+const BALLOON_BOMB_EXPLOSION_VISUAL_TTL = 0.6;
 const BALLOON_HEAVY_BOMB_INTERVAL_MIN = 2;
 const BALLOON_HEAVY_BOMB_INTERVAL_MAX = 4;
 const BALLOON_TOP_MIN_Y = 26;
@@ -215,7 +219,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
-  balloon: 0.05,
+  balloon: 0.14,
   super: 0.3,
 };
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
@@ -1065,6 +1069,7 @@ class GameRoom {
       balloonBombFromY: finiteOrNull(m.balloonBombFromY, 1),
       balloonBombToX: finiteOrNull(m.balloonBombToX, 1),
       balloonBombToY: finiteOrNull(m.balloonBombToY, 1),
+      balloonBombBlastRadius: roundTo(m.balloonBombBlastRadius, 1),
       dragonBreathTtl: roundTo(m.dragonBreathTtl, 2),
       dragonBreathToX: finiteOrNull(m.dragonBreathToX, 1),
       dragonBreathToY: finiteOrNull(m.dragonBreathToY, 1),
@@ -2924,7 +2929,7 @@ class GameRoom {
             const core = this.dragonHeartCore(minion);
             damage *= 2.2;
             this.queueHitSfx('dragon', core?.x ?? minion.x, core?.y ?? minion.y, a.side);
-          } else {
+          } else if (!minion.balloon) {
             this.queueHitSfx('minion', minion.x, minion.y, a.side);
           }
           consumed = a.pierce <= 0;
@@ -3269,30 +3274,20 @@ class GameRoom {
 
   balloonThrowAtMinion(balloon, target) {
     if (!balloon || !target) return;
-    const from = this.balloonPayloadOrigin(balloon, 'throw');
-    const fromX = from.x;
-    const fromY = from.y;
     const toX = target.x;
     const toY = target.y - Math.max(4, target.r * 0.2);
     balloon.balloonThrowTtl = Math.max(Number(balloon.balloonThrowMaxTtl) || 0.6, 0.6);
     balloon.balloonThrowToX = toX;
     balloon.balloonThrowToY = toY;
-    this.queueHitSfx('gunhit', fromX, fromY, balloon.side);
-    this.queueHitSfx('gunhit', toX, toY, balloon.side);
     this.dealMinionDamage(balloon, target, balloon.dmg * 0.68, 'gunshot');
     if (target.hp <= 0) this.killMinionByRef(target, balloon.side, { goldScalar: 0.9 });
   }
 
   balloonThrowAtTower(balloon, enemySideName, enemyX, enemyY) {
     if (!balloon) return;
-    const from = this.balloonPayloadOrigin(balloon, 'throw');
-    const fromX = from.x;
-    const fromY = from.y;
     balloon.balloonThrowTtl = Math.max(Number(balloon.balloonThrowMaxTtl) || 0.6, 0.6);
     balloon.balloonThrowToX = enemyX;
     balloon.balloonThrowToY = enemyY;
-    this.queueHitSfx('gunhit', fromX, fromY, balloon.side);
-    this.queueHitSfx('gunhit', enemyX, enemyY, balloon.side);
     this.applyMinionTowerDamage(balloon, enemySideName, balloon.dmg * BALLOON_THROW_TOWER_DAMAGE_MULT, enemyX, enemyY);
   }
 
@@ -3306,14 +3301,20 @@ class GameRoom {
     const blastRadius = upgraded
       ? (BALLOON_BOMB_BASE_RADIUS * BALLOON_HEAVY_BOMB_RADIUS_MULT + Math.min(36, (level - 2) * 10))
       : (BALLOON_BOMB_BASE_RADIUS + Math.min(24, (level - 1) * 6));
-    const damage = upgraded
-      ? balloon.dmg * (BALLOON_HEAVY_BOMB_DAMAGE_MULT + Math.min(0.6, (level - 2) * 0.16))
-      : balloon.dmg * (BALLOON_BOMB_BASE_DAMAGE_MULT + Math.min(0.22, (level - 1) * 0.07));
+    const damage = balloon.dmg * GUNNER_SKY_CANNON_MINION_DAMAGE_MULT * BALLOON_BOMB_DAMAGE_VS_CANNON_MULT;
     const towerDamageMult = upgraded ? BALLOON_HEAVY_BOMB_TOWER_DAMAGE_MULT : BALLOON_BOMB_TOWER_DAMAGE_MULT;
     const dropDistance = Math.max(36, impactY - (Number(bombOrigin.y) || impactY));
-    const heavyDropTtl = Math.max(1.2, (dropDistance / GUNNER_SKY_CANNON_FALL_SPEED) * 1.18);
-    balloon.balloonBombMaxTtl = upgraded ? heavyDropTtl : 0.52;
-    balloon.balloonBombTtl = Math.max(Number(balloon.balloonBombMaxTtl) || 0.52, upgraded ? heavyDropTtl : 0.52);
+    const baseDropTtl = Math.max(
+      BALLOON_BOMB_DROP_TTL_MIN,
+      (dropDistance / GUNNER_SKY_CANNON_FALL_SPEED) * BALLOON_BOMB_DROP_TTL_MULT
+    );
+    const heavyDropTtl = Math.max(
+      BALLOON_HEAVY_BOMB_DROP_TTL_MIN,
+      (dropDistance / GUNNER_SKY_CANNON_FALL_SPEED) * BALLOON_HEAVY_BOMB_DROP_TTL_MULT
+    );
+    const dropTtl = upgraded ? heavyDropTtl : baseDropTtl;
+    balloon.balloonBombMaxTtl = dropTtl;
+    balloon.balloonBombTtl = dropTtl;
     balloon.balloonBombFromX = bombOrigin.x;
     balloon.balloonBombFromY = bombOrigin.y;
     balloon.balloonBombToX = impactX;
@@ -3339,7 +3340,10 @@ class GameRoom {
     const towerDamageMult = Math.max(0, Number(balloon.balloonBombTowerDamageMult) || 0);
     const enemyTowerX = enemySideName === 'right' ? TOWER_X_RIGHT : TOWER_X_LEFT;
     const enemyTowerY = TOWER_Y - 24;
-    this.queueHitSfx('explosion', impactX, impactY, balloon.side);
+    this.queueHitSfx('foodburst', impactX, impactY, balloon.side, {
+      foodType: balloon.side === 'left' ? 'bread' : 'rice',
+      heavy: blastRadius >= BALLOON_BOMB_BASE_RADIUS * BALLOON_HEAVY_BOMB_RADIUS_MULT * 0.9,
+    });
     this.forEachEnemyMinionInRadius(
       balloon.side,
       impactX,
@@ -3359,6 +3363,13 @@ class GameRoom {
       this.applyMinionTowerDamage(balloon, enemySideName, damage * towerDamageMult, enemyTowerX, enemyTowerY);
     }
     balloon.balloonBombImpactPending = false;
+    // Keep a short post-impact visual phase so the blast is readable.
+    balloon.balloonBombFromX = impactX;
+    balloon.balloonBombFromY = impactY;
+    balloon.balloonBombToX = impactX;
+    balloon.balloonBombToY = impactY;
+    balloon.balloonBombMaxTtl = BALLOON_BOMB_EXPLOSION_VISUAL_TTL;
+    balloon.balloonBombTtl = BALLOON_BOMB_EXPLOSION_VISUAL_TTL;
   }
 
   balloonBombCooldown(balloon) {
