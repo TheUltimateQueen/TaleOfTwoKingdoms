@@ -624,6 +624,10 @@ button:hover {
   color: #dbe7ff;
 }
 
+.test-settings-inner > .test-toggle {
+  margin-top: 6px;
+}
+
 .test-check-card {
   display: grid !important;
   grid-template-columns: auto 1fr;

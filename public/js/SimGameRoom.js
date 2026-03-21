@@ -38,6 +38,7 @@ const UPGRADE_COST_RULES = {
   bountyLevel: { base: 118, growth: 14, start: 1 },
   powerLevel: { base: 164, growth: 20, start: 1 },
   specialRateLevel: { base: 182, growth: 22, start: 1 },
+  balloonLevel: { base: 252, growth: 28, start: 0 },
   dragonLevel: { base: 236, growth: 26, start: 0 },
   dragonSuperBreathLevel: { base: 328, growth: 0, start: 0 },
   shieldDarkMetalLevel: { base: 304, growth: 0, start: 0 },
@@ -59,6 +60,7 @@ const UPGRADE_PATH_BY_TYPE = {
   bountyLevel: 'economy',
   powerLevel: 'power',
   specialRateLevel: 'special',
+  balloonLevel: 'special',
   dragonLevel: 'special',
   dragonSuperBreathLevel: 'special',
   shieldDarkMetalLevel: 'special',
@@ -72,6 +74,7 @@ const UPGRADE_PATH_BY_TYPE = {
 };
 const UPGRADE_LEVEL_CAPS = {
   volleyLevel: 4,
+  balloonLevel: 4,
   dragonSuperBreathLevel: 1,
   shieldDarkMetalLevel: 1,
   monkHealCircleLevel: 1,
@@ -134,6 +137,14 @@ const GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS = 2;
 const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
 const GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY = 0.24;
 const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
+const BALLOON_BOMB_BASE_RADIUS = 72;
+const BALLOON_BOMB_BASE_DAMAGE_MULT = 0.76;
+const BALLOON_BOMB_TOWER_DAMAGE_MULT = 0.54;
+const BALLOON_THROW_TOWER_DAMAGE_MULT = 0.44;
+const BALLOON_BOMB_BASE_INTERVAL = 3.2;
+const BALLOON_BOMB_INTERVAL_JITTER = 1.05;
+const BALLOON_TOP_MIN_Y = 26;
+const BALLOON_TOP_MAX_Y = 188;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
 const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
@@ -186,6 +197,7 @@ const SPECIAL_SPAWN_QUEUE_ORDER = [
   'monk',
   'hero',
   'president',
+  'balloon',
   'super',
 ];
 const SPECIAL_SPAWN_BASE_CHANCE = {
@@ -198,6 +210,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
+  balloon: 0.05,
   super: 0.3,
 };
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
@@ -255,6 +268,7 @@ const DEBUG_FORCE_SPECIAL_TYPES = new Set([
   'monk',
   'hero',
   'president',
+  'balloon',
   'super',
 ]);
 const MATCH_SAMPLE_INTERVAL_SEC = 1;
@@ -320,6 +334,7 @@ function normalizeDebugConfig(raw = null) {
   const startingGold = Number.isFinite(startingGoldRaw)
     ? Math.floor(startingGoldRaw)
     : null;
+  const colliderDebug = Boolean(cfg.colliderDebug);
   const candleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
   const forcedSpecialType = (typeof cfg.forceSpecialType === 'string' && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType))
     ? cfg.forceSpecialType
@@ -357,6 +372,7 @@ function normalizeDebugConfig(raw = null) {
     forceSpecialType: forcedSpecialType,
     forceSpecialMinAlive,
     startingGold,
+    colliderDebug,
     specialChanceOverrides,
     upgrades,
   };
@@ -392,6 +408,7 @@ function serializeSideState(side) {
     bountyLevel: Math.max(0, Math.round(Number(state.bountyLevel) || 0)),
     powerLevel: Math.max(0, Math.round(Number(state.powerLevel) || 0)),
     specialRateLevel: Math.max(0, Math.round(Number(state.specialRateLevel) || 0)),
+    balloonLevel: Math.max(0, Math.round(Number(state.balloonLevel) || 0)),
     dragonLevel: Math.max(0, Math.round(Number(state.dragonLevel) || 0)),
     dragonSuperBreathLevel: Math.max(0, Math.round(Number(state.dragonSuperBreathLevel) || 0)),
     shieldDarkMetalLevel: Math.max(0, Math.round(Number(state.shieldDarkMetalLevel) || 0)),
@@ -482,6 +499,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     bountyLevel: 1,
     powerLevel: 1,
     specialRateLevel: 1,
+    balloonLevel: 0,
     dragonLevel: 0,
     dragonSuperBreathLevel: 0,
     shieldDarkMetalLevel: 0,
@@ -571,6 +589,7 @@ class GameRoom {
     this.candleCarrierCounts = { left: 0, right: 0 };
     this.debugResourceRateMultiplier = 1;
     this.debugPowerDropRateMultiplier = 1;
+    this.debugColliderOverlay = false;
 
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
@@ -866,6 +885,7 @@ class GameRoom {
     const cfg = this.debugConfig || normalizeDebugConfig(null);
     const targets = new Set(cfg.enabled ? this.debugTargetSides() : []);
     const allSides = ['left', 'right'];
+    this.debugColliderOverlay = Boolean(cfg.enabled && cfg.colliderDebug);
 
     this.debugResourceRateMultiplier = cfg.enabled
       ? clamp(Number(cfg.resourceRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX)
@@ -1028,7 +1048,16 @@ class GameRoom {
       summoned: Boolean(m.summoned),
       necroRevived: Boolean(m.necroRevived),
       dragon: Boolean(m.dragon),
+      balloon: Boolean(m.balloon),
       flying: Boolean(m.flying),
+      balloonThrowTtl: roundTo(m.balloonThrowTtl, 2),
+      balloonThrowMaxTtl: roundTo(m.balloonThrowMaxTtl, 2),
+      balloonThrowToX: finiteOrNull(m.balloonThrowToX, 1),
+      balloonThrowToY: finiteOrNull(m.balloonThrowToY, 1),
+      balloonBombTtl: roundTo(m.balloonBombTtl, 2),
+      balloonBombMaxTtl: roundTo(m.balloonBombMaxTtl, 2),
+      balloonBombToX: finiteOrNull(m.balloonBombToX, 1),
+      balloonBombToY: finiteOrNull(m.balloonBombToY, 1),
       dragonBreathTtl: roundTo(m.dragonBreathTtl, 2),
       dragonBreathToX: finiteOrNull(m.dragonBreathToX, 1),
       dragonBreathToY: finiteOrNull(m.dragonBreathToY, 1),
@@ -1067,6 +1096,10 @@ class GameRoom {
       reviveShieldTtl: roundTo(m.reviveShieldTtl, 2),
       reviveShieldMaxTtl: roundTo(m.reviveShieldMaxTtl, 2),
       hitFlashTtl: roundTo(m.hitFlashTtl, 3),
+      balloonHitCircleIndex: Number.isFinite(m.balloonHitCircleIndex)
+        ? clamp(Math.round(m.balloonHitCircleIndex), -1, 2)
+        : -1,
+      balloonHitCircleTtl: roundTo(m.balloonHitCircleTtl, 3),
       hero: Boolean(m.hero),
       monk: Boolean(m.monk),
       monkHealScale: roundTo(m.monkHealScale, 3),
@@ -1201,6 +1234,9 @@ class GameRoom {
         right: rightPrimary,
       },
       postGameReport: this.gameOver ? this.buildPostGameReport() : null,
+      debug: {
+        colliderOverlay: Boolean(this.debugColliderOverlay),
+      },
       hasDisplay: Boolean(this.display),
     };
   }
@@ -1498,6 +1534,7 @@ class GameRoom {
     if (type === 'monk') return Boolean(minion.monk);
     if (type === 'hero') return Boolean(minion.hero);
     if (type === 'president') return Boolean(minion.president);
+    if (type === 'balloon') return Boolean(minion.balloon);
     if (type === 'super') return Boolean(minion.super);
     return false;
   }
@@ -1906,6 +1943,63 @@ class GameRoom {
       0,
       1
     );
+  }
+
+  balloonCollisionCircles(minion) {
+    if (!minion || !minion.balloon) return null;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const r = Math.max(16, Number(minion.r) || 16);
+    const topY = y - r * 0.24;
+    const basketY = y + r * 0.98;
+    return [
+      { x: x - r * 0.23, y: topY, r: r * 0.25 },
+      { x: x + r * 0.23, y: topY, r: r * 0.25 },
+      { x, y: basketY, r: r * 0.34 },
+    ];
+  }
+
+  arrowHitsBalloonBody(arrow, minion, prevX = null, prevY = null) {
+    if (!arrow || !minion || !minion.balloon) return -1;
+    const circles = this.balloonCollisionCircles(minion);
+    if (!Array.isArray(circles) || !circles.length) return -1;
+    const arrowX = Number(arrow.x) || 0;
+    const arrowY = Number(arrow.y) || 0;
+    const fromX = Number.isFinite(prevX) ? prevX : arrowX;
+    const fromY = Number.isFinite(prevY) ? prevY : arrowY;
+    const arrowR = Math.max(0, Number(arrow.r) || 0);
+    for (let i = 0; i < circles.length; i += 1) {
+      const c = circles[i];
+      if (!c) continue;
+      const hitR = Math.max(1, (Number(c.r) || 0) + arrowR);
+      const dx = arrowX - c.x;
+      const dy = arrowY - c.y;
+      if (dx * dx + dy * dy <= hitR * hitR) return i;
+      if (this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, c.x, c.y, hitR)) return i;
+    }
+    return -1;
+  }
+
+  minionInsideRadius(minion, centerX, centerY, radius) {
+    if (!minion || minion.removed) return false;
+    const x = Number.isFinite(centerX) ? centerX : 0;
+    const y = Number.isFinite(centerY) ? centerY : 0;
+    const r = Math.max(0, Number(radius) || 0);
+    if (!minion.balloon) {
+      const dx = (Number(minion.x) || 0) - x;
+      const dy = (Number(minion.y) || 0) - y;
+      return dx * dx + dy * dy <= r * r;
+    }
+    const circles = this.balloonCollisionCircles(minion);
+    if (!Array.isArray(circles) || !circles.length) return false;
+    for (const c of circles) {
+      if (!c) continue;
+      const dx = c.x - x;
+      const dy = c.y - y;
+      const hitR = Math.max(1, r + Math.max(0, Number(c.r) || 0));
+      if (dx * dx + dy * dy <= hitR * hitR) return true;
+    }
+    return false;
   }
 
   arrowInsideShieldBearerShield(arrow, minion, prevX = null, prevY = null) {
@@ -2788,6 +2882,7 @@ class GameRoom {
           if (!minion || minion.removed || minion.side === a.side) continue;
           let shieldVulnerableHit = null;
           let dragonHeartshot = false;
+          let balloonHitCircleIndex = -1;
           if (minion.shieldBearer) {
             if (this.arrowInsideShieldBearerShield(a, minion, prevX, prevY)) {
               this.markArrowMiss(a);
@@ -2805,6 +2900,9 @@ class GameRoom {
             const hitR = core.r * 1.69 + a.r;
             if (dist2(a, core) > hitR * hitR) continue;
             dragonHeartshot = true;
+          } else if (minion.balloon) {
+            balloonHitCircleIndex = this.arrowHitsBalloonBody(a, minion, prevX, prevY);
+            if (balloonHitCircleIndex < 0) continue;
           } else {
             const hitR = minion.r + a.r;
             if (dist2(a, minion) > hitR * hitR) continue;
@@ -2853,6 +2951,10 @@ class GameRoom {
             minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL * 1.85);
           }
           minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+          if (minion.balloon && balloonHitCircleIndex >= 0) {
+            minion.balloonHitCircleIndex = clamp(Math.round(balloonHitCircleIndex), 0, 2);
+            minion.balloonHitCircleTtl = Math.max(Number(minion.balloonHitCircleTtl) || 0, MINION_HIT_FLASH_TTL);
+          }
           if (shieldHeadshot && minion.hp > 0) {
             const retreatDir = minion.side === 'left' ? -1 : 1;
             minion.x = clamp(minion.x + retreatDir * SHIELD_HEADSHOT_RETREAT, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
@@ -2992,7 +3094,6 @@ class GameRoom {
     const x = Number.isFinite(centerX) ? centerX : 0;
     const y = Number.isFinite(centerY) ? centerY : 0;
     const r = Math.max(0, Number(radius) || 0);
-    const r2 = r * r;
 
     if (buckets?.left instanceof Map && buckets?.right instanceof Map) {
       const width = Math.max(1, bucketW);
@@ -3003,9 +3104,7 @@ class GameRoom {
         if (leftBucket) {
           for (const other of leftBucket) {
             if (!other || other.removed) continue;
-            const dx = other.x - x;
-            const dy = other.y - y;
-            if (dx * dx + dy * dy > r2) continue;
+            if (!this.minionInsideRadius(other, x, y, r)) continue;
             fn(other);
           }
         }
@@ -3013,9 +3112,7 @@ class GameRoom {
         if (!rightBucket) continue;
         for (const other of rightBucket) {
           if (!other || other.removed) continue;
-          const dx = other.x - x;
-          const dy = other.y - y;
-          if (dx * dx + dy * dy > r2) continue;
+          if (!this.minionInsideRadius(other, x, y, r)) continue;
           fn(other);
         }
       }
@@ -3024,9 +3121,7 @@ class GameRoom {
 
     for (const other of this.minions) {
       if (!other || other.removed) continue;
-      const dx = other.x - x;
-      const dy = other.y - y;
-      if (dx * dx + dy * dy > r2) continue;
+      if (!this.minionInsideRadius(other, x, y, r)) continue;
       fn(other);
     }
   }
@@ -3038,7 +3133,6 @@ class GameRoom {
     const x = Number.isFinite(centerX) ? centerX : 0;
     const y = Number.isFinite(centerY) ? centerY : 0;
     const r = Math.max(0, Number(radius) || 0);
-    const r2 = r * r;
 
     if (buckets && buckets[enemySide] instanceof Map) {
       const scan = Math.max(1, Math.ceil(r / Math.max(1, bucketW)));
@@ -3048,9 +3142,7 @@ class GameRoom {
         if (!bucket) continue;
         for (const other of bucket) {
           if (!other || other.removed || other.side === sideName) continue;
-          const dx = other.x - x;
-          const dy = other.y - y;
-          if (dx * dx + dy * dy > r2) continue;
+          if (!this.minionInsideRadius(other, x, y, r)) continue;
           fn(other);
         }
       }
@@ -3059,9 +3151,7 @@ class GameRoom {
 
     for (const other of this.minions) {
       if (!other || other.removed || other.side === sideName) continue;
-      const dx = other.x - x;
-      const dy = other.y - y;
-      if (dx * dx + dy * dy > r2) continue;
+      if (!this.minionInsideRadius(other, x, y, r)) continue;
       fn(other);
     }
   }
@@ -3171,6 +3261,66 @@ class GameRoom {
     return true;
   }
 
+  balloonThrowAtMinion(balloon, target) {
+    if (!balloon || !target) return;
+    const dir = balloon.side === 'left' ? 1 : -1;
+    const fromX = balloon.x + dir * Math.max(16, balloon.r * 0.58);
+    const fromY = balloon.y + Math.max(6, balloon.r * 0.22);
+    const toX = target.x;
+    const toY = target.y - Math.max(4, target.r * 0.2);
+    balloon.balloonThrowTtl = Math.max(Number(balloon.balloonThrowMaxTtl) || 0.22, 0.22);
+    balloon.balloonThrowToX = toX;
+    balloon.balloonThrowToY = toY;
+    this.queueHitSfx('gunhit', fromX, fromY, balloon.side);
+    this.queueHitSfx('gunhit', toX, toY, balloon.side);
+    this.dealMinionDamage(balloon, target, balloon.dmg * 0.68, 'gunshot');
+    if (target.hp <= 0) this.killMinionByRef(target, balloon.side, { goldScalar: 0.9 });
+  }
+
+  balloonThrowAtTower(balloon, enemySideName, enemyX, enemyY) {
+    if (!balloon) return;
+    const dir = balloon.side === 'left' ? 1 : -1;
+    const fromX = balloon.x + dir * Math.max(16, balloon.r * 0.58);
+    const fromY = balloon.y + Math.max(6, balloon.r * 0.22);
+    balloon.balloonThrowTtl = Math.max(Number(balloon.balloonThrowMaxTtl) || 0.22, 0.22);
+    balloon.balloonThrowToX = enemyX;
+    balloon.balloonThrowToY = enemyY;
+    this.queueHitSfx('gunhit', fromX, fromY, balloon.side);
+    this.queueHitSfx('gunhit', enemyX, enemyY, balloon.side);
+    this.applyMinionTowerDamage(balloon, enemySideName, balloon.dmg * BALLOON_THROW_TOWER_DAMAGE_MULT, enemyX, enemyY);
+  }
+
+  balloonDropBomb(balloon, enemySideName, targetX, targetY, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!balloon) return;
+    const level = Math.max(1, Number(balloon.balloonLevel) || 1);
+    const blastRadius = BALLOON_BOMB_BASE_RADIUS + Math.min(24, (level - 1) * 6);
+    const damage = balloon.dmg * (BALLOON_BOMB_BASE_DAMAGE_MULT + Math.min(0.22, (level - 1) * 0.07));
+    const enemyTowerX = enemySideName === 'right' ? TOWER_X_RIGHT : TOWER_X_LEFT;
+    const enemyTowerY = TOWER_Y - 24;
+    balloon.balloonBombTtl = Math.max(Number(balloon.balloonBombMaxTtl) || 0.52, 0.52);
+    balloon.balloonBombToX = targetX;
+    balloon.balloonBombToY = targetY;
+    this.queueHitSfx('explosion', targetX, targetY, balloon.side);
+    this.forEachEnemyMinionInRadius(
+      balloon.side,
+      targetX,
+      targetY,
+      blastRadius,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.removed || other.side === balloon.side) return;
+        this.dealMinionDamage(balloon, other, damage, 'explosion');
+        if (other.hp <= 0) this.killMinionByRef(other, balloon.side, { goldScalar: 0.76 });
+      }
+    );
+    const dx = enemyTowerX - targetX;
+    const dy = enemyTowerY - targetY;
+    if (dx * dx + dy * dy <= (blastRadius + 44) * (blastRadius + 44)) {
+      this.applyMinionTowerDamage(balloon, enemySideName, damage * BALLOON_BOMB_TOWER_DAMAGE_MULT, enemyTowerX, enemyTowerY);
+    }
+  }
+
   tickMinions(dt, precomputedTargetBuckets = null, precomputedCarrierCounts = null) {
     const targetBuckets = precomputedTargetBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const carrierCounts = precomputedCarrierCounts || this.buildCandleCarrierCounts();
@@ -3181,7 +3331,26 @@ class GameRoom {
       if (!Number.isFinite(m.candleBurnTtl)) m.candleBurnTtl = 0;
       if (!Number.isFinite(m.candleBurnTick)) m.candleBurnTick = 0;
       if (!Number.isFinite(m.hitFlashTtl)) m.hitFlashTtl = 0;
+      if (!Number.isFinite(m.balloonHitCircleIndex)) m.balloonHitCircleIndex = -1;
+      if (!Number.isFinite(m.balloonHitCircleTtl)) m.balloonHitCircleTtl = 0;
+      if (!Number.isFinite(m.balloonThrowTtl)) m.balloonThrowTtl = 0;
+      if (!Number.isFinite(m.balloonThrowMaxTtl) || m.balloonThrowMaxTtl <= 0) m.balloonThrowMaxTtl = 0.22;
+      if (!Number.isFinite(m.balloonBombTtl)) m.balloonBombTtl = 0;
+      if (!Number.isFinite(m.balloonBombMaxTtl) || m.balloonBombMaxTtl <= 0) m.balloonBombMaxTtl = 0.52;
+      if (!Number.isFinite(m.balloonBombCd)) m.balloonBombCd = 0;
+      m.balloonThrowTtl = Math.max(0, m.balloonThrowTtl - dt);
+      m.balloonBombTtl = Math.max(0, m.balloonBombTtl - dt);
+      if (m.balloonThrowTtl === 0) {
+        m.balloonThrowToX = null;
+        m.balloonThrowToY = null;
+      }
+      if (m.balloonBombTtl === 0) {
+        m.balloonBombToX = null;
+        m.balloonBombToY = null;
+      }
       m.hitFlashTtl = Math.max(0, m.hitFlashTtl - dt);
+      m.balloonHitCircleTtl = Math.max(0, m.balloonHitCircleTtl - dt);
+      if (m.balloonHitCircleTtl <= 0) m.balloonHitCircleIndex = -1;
       if (!Number.isFinite(m.reviveShieldTtl)) m.reviveShieldTtl = 0;
       if (!Number.isFinite(m.reviveShieldMaxTtl) || m.reviveShieldMaxTtl <= 0) m.reviveShieldMaxTtl = NECRO_REVIVE_SHIELD_SECONDS;
       if (!Number.isFinite(m.reviveShieldHp)) m.reviveShieldHp = 0;
@@ -3211,6 +3380,12 @@ class GameRoom {
         } else {
           m.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER;
         }
+      }
+      if (m.balloon) {
+        const sideState = m.side === 'right' ? this.right : this.left;
+        m.balloonLevel = Math.max(1, Number(sideState?.balloonLevel) || Number(m.balloonLevel) || 1);
+        m.flying = true;
+        m.balloonBombCd = Math.max(0, (Number(m.balloonBombCd) || 0) - dt);
       }
       if (m.gunFlashTtl > 0) m.gunFlashTtl = Math.max(0, m.gunFlashTtl - dt);
       if ((Number(m.executiveOrderBreakTtl) || 0) > 0) {
@@ -3362,9 +3537,12 @@ class GameRoom {
       if (m.flying) {
         if (!Number.isFinite(m.flyBaseY)) m.flyBaseY = m.y;
         if (!Number.isFinite(m.flyPhase)) m.flyPhase = Math.random() * Math.PI * 2;
-        m.flyPhase += dt * (1.45 + Math.min(1.1, m.speed / 130));
-        const amp = 12 + m.r * 0.22;
-        m.y = clamp(m.flyBaseY + Math.sin(m.flyPhase) * amp, TOWER_Y - 220, TOWER_Y + 150);
+        const isBalloon = Boolean(m.balloon);
+        m.flyPhase += dt * (isBalloon ? (0.82 + Math.min(0.5, m.speed / 220)) : (1.45 + Math.min(1.1, m.speed / 130)));
+        const amp = isBalloon ? (8 + m.r * 0.14) : (12 + m.r * 0.22);
+        const minY = isBalloon ? BALLOON_TOP_MIN_Y : (TOWER_Y - 220);
+        const maxY = isBalloon ? BALLOON_TOP_MAX_Y : (TOWER_Y + 150);
+        m.y = clamp(m.flyBaseY + Math.sin(m.flyPhase) * amp, minY, maxY);
       }
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
@@ -3551,11 +3729,13 @@ class GameRoom {
         ? STONE_GOLEM_SMASH_RADIUS
         : (m.shieldBearer
           ? (SHIELD_PUSH_RANGE + m.r * 0.4)
+          : (m.balloon
+              ? 430
           : (m.dragon
               ? 170
               : (m.gunner
                   ? (m.gunRange || 220)
-                  : m.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0) + MINION_TARGET_RADIUS_PAD)));
+                  : m.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0) + MINION_TARGET_RADIUS_PAD))));
       const scan = Math.max(1, Math.ceil(maxReach / MINION_TARGET_BUCKET_W));
       const centerCell = Math.floor((Number.isFinite(m.x) ? m.x : 0) / MINION_TARGET_BUCKET_W);
       const enemyBuckets = targetBuckets[enemySideName];
@@ -3571,16 +3751,64 @@ class GameRoom {
             ? STONE_GOLEM_SMASH_RADIUS
             : (m.shieldBearer
             ? Math.max(58, m.r + other.r + 22)
+            : (m.balloon
+                ? 430
             : (m.dragon
                 ? 170
                 : (m.gunner
                     ? (m.gunRange || 220)
-                    : m.r + other.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0))));
+                    : m.r + other.r + 24 + (m.digger ? 14 : 0) + (m.hero ? 24 : 0)))));
           if (d2 < bestSq && d2 < reach * reach) {
             target = other;
             bestSq = d2;
           }
         }
+      }
+
+      if (m.balloon) {
+        const towerTargetY = TOWER_Y - 26;
+        const towerInRange = Math.abs(m.x - enemyX) <= 252;
+        if ((Number(m.balloonBombCd) || 0) === 0) {
+          if (target) {
+            this.balloonDropBomb(m, enemySideName, target.x, target.y, targetBuckets, MINION_TARGET_BUCKET_W);
+            m.balloonBombCd = Math.max(
+              1.2,
+              (BALLOON_BOMB_BASE_INTERVAL + Math.random() * BALLOON_BOMB_INTERVAL_JITTER)
+                * Math.max(0.72, 1 - (Math.max(1, Number(m.balloonLevel) || 1) - 1) * 0.07)
+            );
+            m.atkCd = Math.max(m.atkCd, 0.22);
+          } else if (towerInRange) {
+            this.balloonDropBomb(m, enemySideName, enemyX, towerTargetY, targetBuckets, MINION_TARGET_BUCKET_W);
+            m.balloonBombCd = Math.max(
+              1.2,
+              (BALLOON_BOMB_BASE_INTERVAL + Math.random() * BALLOON_BOMB_INTERVAL_JITTER)
+                * Math.max(0.72, 1 - (Math.max(1, Number(m.balloonLevel) || 1) - 1) * 0.07)
+            );
+            m.atkCd = Math.max(m.atkCd, 0.22);
+          }
+        }
+
+        if (target) {
+          const holdDist = Math.max(84, m.r + target.r + 44);
+          if (Math.abs(target.x - m.x) > holdDist) m.x += dir * m.speed * dt;
+          if (m.atkCd === 0) {
+            this.balloonThrowAtMinion(m, target);
+            m.atkCd = 0.82;
+          }
+        } else if (towerInRange) {
+          if (m.atkCd === 0) {
+            this.balloonThrowAtTower(m, enemySideName, enemyX, towerTargetY);
+            m.atkCd = 0.92;
+          }
+        } else {
+          m.x += dir * m.speed * dt;
+        }
+
+        if (m.flying) {
+          const desiredY = clamp(TOWER_Y - 362 + (m.side === 'left' ? -12 : 12), BALLOON_TOP_MIN_Y + 10, BALLOON_TOP_MAX_Y - 10);
+          m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 1.7);
+        }
+        continue;
       }
 
       if (!m.shieldBearer && candleInReach && enemyCandle && (!target || candleDistSq <= bestSq * 0.8464)) {
@@ -3661,7 +3889,7 @@ class GameRoom {
             m.atkCd = 0.8;
           }
         }
-      } else if (Math.abs(m.x - enemyX) < m.r + 20 + (m.flying ? 34 : 0) + (m.dragon ? 50 : 0) + (m.gunner ? Math.max(0, (m.gunRange || 0) - 40) : 0) + (m.rider ? 14 : 0) + (m.digger ? 8 : 0) + (m.hero ? 24 : 0) + (m.shieldBearer ? 26 : 0) + (m.stoneGolem ? 58 : 0)) {
+      } else if (Math.abs(m.x - enemyX) < m.r + 20 + (m.flying ? 34 : 0) + (m.dragon ? 50 : 0) + (m.balloon ? 228 : 0) + (m.gunner ? Math.max(0, (m.gunRange || 0) - 40) : 0) + (m.rider ? 14 : 0) + (m.digger ? 8 : 0) + (m.hero ? 24 : 0) + (m.shieldBearer ? 26 : 0) + (m.stoneGolem ? 58 : 0)) {
         if (m.stoneGolem) {
           if (m.atkCd === 0) {
             this.stoneGolemSmash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
@@ -4101,6 +4329,14 @@ class GameRoom {
   statPresidentEvery(side) {
     const civicTech = Math.floor((side.economyLevel + side.resourceLevel + side.powerLevel) / 6);
     const baseEvery = Math.max(36, 54 - civicTech);
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
+  }
+
+  statBalloonEvery(side) {
+    if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
+    const level = Math.max(1, Number(side?.balloonLevel) || 1);
+    const airTech = Math.floor((side.spawnLevel + side.powerLevel + side.specialRateLevel + side.economyLevel) / 8);
+    const baseEvery = Math.max(8, 18 - level * 2 - airTech);
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -4973,6 +5209,8 @@ class GameRoom {
       hero: Boolean(minion.hero),
       president: Boolean(minion.president),
       dragon: Boolean(minion.dragon),
+      balloon: Boolean(minion.balloon),
+      balloonLevel: Math.max(0, Math.round(Number(minion.balloonLevel) || 0)),
       flying: Boolean(minion.flying),
       necrominion: Boolean(minion.necrominion),
       failedSpecialType: typeof minion.failedSpecialType === 'string' ? minion.failedSpecialType : null,
@@ -5122,6 +5360,8 @@ class GameRoom {
       candleBurnTtl: 0,
       candleBurnTick: 0,
       hitFlashTtl: 0,
+      balloonHitCircleIndex: -1,
+      balloonHitCircleTtl: 0,
       gunnerSkyCannonCd: 0,
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
@@ -5323,6 +5563,8 @@ class GameRoom {
       reviveShieldTtl: 0,
       reviveShieldMaxTtl: NECRO_REVIVE_SHIELD_SECONDS,
       hitFlashTtl: 0,
+      balloonHitCircleIndex: -1,
+      balloonHitCircleTtl: 0,
       digPhase: null,
       digBaseY: null,
       monk: false,
@@ -5555,6 +5797,7 @@ class GameRoom {
     const monkEvery = this.statMonkEvery(side);
     const heroEvery = this.statHeroEvery(side);
     const presidentEvery = this.statPresidentEvery(side);
+    const balloonEvery = this.statBalloonEvery(side);
     const superEvery = this.statSuperEvery(side);
 
     if (naturalSpawn) {
@@ -5571,6 +5814,7 @@ class GameRoom {
         // Natural hero training only unlocks after this side's tower has been damaged once.
         hero: side.towerDamagedOnce && side.spawnCount % heroEvery === 0,
         president: side.spawnCount % presidentEvery === 0,
+        balloon: Number.isFinite(balloonEvery) && side.spawnCount % balloonEvery === 0,
         super: Number.isFinite(superEvery) && side.spawnCount % superEvery === 0,
       };
       for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
@@ -5614,6 +5858,7 @@ class GameRoom {
     const isStoneGolem = spawnType === 'stonegolem';
     const isHero = spawnType === 'hero';
     const isPresident = spawnType === 'president';
+    const isBalloon = spawnType === 'balloon';
     const isSuper = spawnType === 'super';
     const explosive = false;
     let radius = 16;
@@ -5724,6 +5969,17 @@ class GameRoom {
       spawnY = TOWER_Y + 34 + (Math.random() * 18 - 9);
     }
 
+    if (isBalloon) {
+      const balloonTech = Math.max(1, Number(side.balloonLevel) || 1);
+      hp *= 1.72 + balloonTech * 0.34;
+      dmg *= 0.62 + Math.min(0.28, balloonTech * 0.08);
+      speed *= 0.76;
+      radius = Math.max(32, radius * 2);
+      tier = Math.min(3, tier + 1);
+      visualPower += 10 + balloonTech * 2;
+      spawnY = 58 + (Math.random() * 46);
+    }
+
     if (isDragon) {
       const dragonBoost = Math.max(1, side.dragonLevel);
       hp *= 1.9 + dragonBoost * 0.32;
@@ -5755,9 +6011,20 @@ class GameRoom {
       summoned: false,
       necroRevived: false,
       dragon: isDragon,
-      flying: isDragon,
-      flyBaseY: isDragon ? spawnY : null,
-      flyPhase: isDragon ? Math.random() * Math.PI * 2 : null,
+      balloon: isBalloon,
+      flying: isDragon || isBalloon,
+      flyBaseY: (isDragon || isBalloon) ? spawnY : null,
+      flyPhase: (isDragon || isBalloon) ? Math.random() * Math.PI * 2 : null,
+      balloonLevel: isBalloon ? Math.max(1, Number(side.balloonLevel) || 1) : 0,
+      balloonThrowTtl: 0,
+      balloonThrowMaxTtl: 0.22,
+      balloonThrowToX: null,
+      balloonThrowToY: null,
+      balloonBombCd: isBalloon ? (BALLOON_BOMB_BASE_INTERVAL * 0.6 + Math.random() * BALLOON_BOMB_INTERVAL_JITTER) : 0,
+      balloonBombTtl: 0,
+      balloonBombMaxTtl: 0.52,
+      balloonBombToX: null,
+      balloonBombToY: null,
       dragonBreathTtl: 0,
       dragonBreathToX: null,
       dragonBreathToY: null,
@@ -5805,6 +6072,8 @@ class GameRoom {
       reviveShieldTtl: 0,
       reviveShieldMaxTtl: NECRO_REVIVE_SHIELD_SECONDS,
       hitFlashTtl: 0,
+      balloonHitCircleIndex: -1,
+      balloonHitCircleTtl: 0,
       digPhase: isDigger ? Math.random() * Math.PI * 2 : null,
       digBaseY: isDigger ? spawnY : null,
       monk: isMonk,
@@ -6101,6 +6370,13 @@ class GameRoom {
 
     if (type === 'superMinionLevel') {
       this.spawnMinion(sideName, { forceType: 'super', countSpawn: false });
+      return;
+    }
+
+    if (type === 'balloonLevel') {
+      this.spawnMinion(sideName, { forceType: 'balloon', countSpawn: false });
+      this.queueHitSfx('powerup', towerX + dir * 28, towerY - 72, sideName);
+      this.queueHitSfx('explosion', towerX + dir * 58, towerY - 126, sideName);
       return;
     }
 

@@ -63,6 +63,7 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'bountyLevel', code: 'KG', base: 1 },
   { type: 'powerLevel', code: 'PW', base: 1 },
   { type: 'specialRateLevel', code: 'SR', base: 1 },
+  { type: 'balloonLevel', code: 'BA', base: 0 },
   { type: 'dragonLevel', code: 'DR', base: 0 },
   { type: 'dragonSuperBreathLevel', code: 'SB', base: 0 },
   { type: 'shieldDarkMetalLevel', code: 'DM', base: 0 },
@@ -85,6 +86,7 @@ const UPGRADE_CATEGORY_BY_TYPE = {
   bountyLevel: 'economy',
   powerLevel: 'power',
   specialRateLevel: 'special',
+  balloonLevel: 'special',
   dragonLevel: 'special',
   dragonSuperBreathLevel: 'special',
   shieldDarkMetalLevel: 'special',
@@ -181,6 +183,7 @@ const ROW_TO_SPECIAL_TYPE = {
   hero: 'hero',
   president: 'president',
   dragon: 'dragon',
+  balloon: 'balloon',
   super: 'super',
 };
 
@@ -194,6 +197,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
+  balloon: 0.05,
   super: 0.3,
 };
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
@@ -209,6 +213,7 @@ const FAILED_SPECIAL_HAT_STYLES = {
   monk: { code: 'MK', cap: '#486345', brim: '#c5f2b5' },
   hero: { code: 'HR', cap: '#6a4f2d', brim: '#ffe2a0' },
   president: { code: 'PR', cap: '#6f4632', brim: '#f1c7a2' },
+  balloon: { code: 'BA', cap: '#546f78', brim: '#c7e7ee' },
   super: { code: 'SU', cap: '#7f7537', brim: '#fff2aa' },
 };
 
@@ -3854,6 +3859,7 @@ export class GameRenderer {
   isMilitiaFoodMinion(minion) {
     if (!minion || !this.isThemedEmpires()) return false;
     if (minion.side !== 'left' && minion.side !== 'right') return false;
+    if (minion.balloon) return false;
     if (minion.dragon || minion.digger || minion.gunner || minion.necrominion) return false;
     if (minion.explosive || minion.hero || minion.monk || minion.shieldBearer) return false;
     if (minion.stoneGolem || minion.president || minion.rider) return false;
@@ -4205,6 +4211,96 @@ export class GameRenderer {
     }
   }
 
+  strokeDebugCircle(x, y, r, color) {
+    const radius = Number(r);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius) || radius <= 0) return;
+    this.ctx.strokeStyle = color;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, radius, 0, Math.PI * 2);
+    this.ctx.stroke();
+  }
+
+  strokeDebugRect(x, y, w, h, color) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return;
+    if (w <= 0 || h <= 0) return;
+    this.ctx.strokeStyle = color;
+    this.ctx.strokeRect(x, y, w, h);
+  }
+
+  drawColliderDebugOverlay(snapshot, world) {
+    if (!snapshot?.debug?.colliderOverlay || !world) return;
+    const { ctx } = this;
+    const towers = [
+      { x: Number(world.towerLeftX), side: 'left' },
+      { x: Number(world.towerRightX), side: 'right' },
+    ];
+    const towerY = Number(world.towerY) - 28;
+
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([5, 4]);
+
+    for (const tower of towers) {
+      this.strokeDebugCircle(
+        tower.x,
+        towerY,
+        62,
+        tower.side === 'left' ? '#65c9ff' : '#ffb48e'
+      );
+    }
+
+    const minions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
+    for (const minion of minions) {
+      const side = minion?.side === 'right' ? 'right' : 'left';
+      this.strokeDebugCircle(
+        Number(minion?.x),
+        Number(minion?.y),
+        Number(minion?.r),
+        side === 'left' ? '#56d0ff' : '#ffa477'
+      );
+    }
+
+    const arrows = Array.isArray(snapshot.arrows) ? snapshot.arrows : [];
+    for (const arrow of arrows) this.strokeDebugCircle(Number(arrow?.x), Number(arrow?.y), Number(arrow?.r), '#ffe083');
+
+    const resources = Array.isArray(snapshot.resources) ? snapshot.resources : [];
+    for (const res of resources) this.strokeDebugCircle(Number(res?.x), Number(res?.y), Number(res?.r), '#8fff9f');
+
+    const shotPowers = Array.isArray(snapshot.shotPowers) ? snapshot.shotPowers : [];
+    for (const power of shotPowers) this.strokeDebugCircle(Number(power?.x), Number(power?.y), Number(power?.r), '#d7adff');
+
+    const cannonBalls = Array.isArray(snapshot.cannonBalls) ? snapshot.cannonBalls : [];
+    for (const ball of cannonBalls) this.strokeDebugCircle(Number(ball?.x), Number(ball?.y), Number(ball?.r), '#ffd08a');
+
+    const candles = Array.isArray(snapshot.candles) ? snapshot.candles : [];
+    for (const candle of candles) {
+      const cartHalfW = Math.max(8, Number(candle?.cartHalfW) || 0);
+      const x = Number(candle?.x) - cartHalfW;
+      const y = Number(candle?.y) - 18;
+      this.strokeDebugRect(x, y, cartHalfW * 2, 36, '#f8f5aa');
+    }
+
+    const cards = Array.isArray(snapshot.upgradeCards) ? snapshot.upgradeCards : [];
+    for (const card of cards) {
+      const x = Number(card?.x) - Number(card?.w) * 0.5;
+      const y = Number(card?.y) - Number(card?.h) * 0.5;
+      this.strokeDebugRect(x, y, Number(card?.w), Number(card?.h), '#9de9ff');
+    }
+
+    const candleScorches = Array.isArray(snapshot.candleScorches) ? snapshot.candleScorches : [];
+    for (const scorch of candleScorches) {
+      this.strokeDebugCircle(Number(scorch?.x), Number(scorch?.y), Number(scorch?.r), '#ffd05f');
+    }
+
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Collider Debug', 12, 20);
+    ctx.restore();
+  }
+
   draw(snapshot, world) {
     if (!snapshot || !world) return;
 
@@ -4264,6 +4360,11 @@ export class GameRenderer {
     }
     this.drawComboBanner('left', world.towerLeftX, world.towerY - 230, snapshot.left);
     this.drawComboBanner('right', world.towerRightX, world.towerY - 230, snapshot.right);
+    const allMinions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
+    const balloonMinions = allMinions.filter((m) => m && m.balloon);
+    const nonBalloonMinions = allMinions.filter((m) => m && !m.balloon);
+    // Balloons are intentionally painted first so the upgrade panel/cards remain readable above them.
+    for (const minion of balloonMinions) this.drawMinionSprite(minion);
     this.drawUpgradeChargeBar('left', 42, 220, 16, 270, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
     this.drawUpgradeChargeBar('right', w - 58, 220, 16, 270, snapshot.right.upgradeCharge, snapshot.right.upgradeChargeMax);
 
@@ -4283,7 +4384,7 @@ export class GameRenderer {
     } else if (snapshot.candleScorch) {
       this.drawCandleScorch(snapshot.candleScorch);
     }
-    for (const minion of snapshot.minions) this.drawMinionSprite(minion);
+    for (const minion of nonBalloonMinions) this.drawMinionSprite(minion);
     this.drawMilitiaFoodAttackOverlays(snapshot.minions);
     this.drawExecutiveOrderEffects(snapshot.minions);
     if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
@@ -4319,6 +4420,7 @@ export class GameRenderer {
       const rightStrength = launchStrengthFromPull('right', pull.pullX, pull.pullY);
       this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength);
     }
+    this.drawColliderDebugOverlay(snapshot, world);
 
     const gameOverCinematicActive = this.isGameOverCinematicActive(now);
     if (gameOverCinematicActive) this.drawTowerCollapseCinematic(world, now);
@@ -4649,8 +4751,18 @@ export class GameRenderer {
       presidentSetup: Boolean(ghost.president),
       presidentAuraRadius: 180,
       dragon: Boolean(ghost.dragon),
+      balloon: Boolean(ghost.balloon),
+      balloonLevel: Math.max(0, Number(ghost.balloonLevel) || 0),
       flying: Boolean(ghost.flying),
       flyPhase: Number.isFinite(ghost.flyPhase) ? ghost.flyPhase : 0.8,
+      balloonThrowTtl: 0,
+      balloonThrowMaxTtl: 0.22,
+      balloonThrowToX: null,
+      balloonThrowToY: null,
+      balloonBombTtl: 0,
+      balloonBombMaxTtl: 0.52,
+      balloonBombToX: null,
+      balloonBombToY: null,
       dragonBreathTtl: 0,
       dragonBreathToX: null,
       dragonBreathToY: null,
@@ -5497,6 +5609,25 @@ export class GameRenderer {
         ctx.fill();
         break;
       }
+      case 'balloonLevel': {
+        ctx.beginPath();
+        ctx.arc(0, -0.16 * s, 0.46 * s, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-0.16 * s, 0.18 * s);
+        ctx.lineTo(0.16 * s, 0.18 * s);
+        ctx.lineTo(0.1 * s, 0.58 * s);
+        ctx.lineTo(-0.1 * s, 0.58 * s);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-0.22 * s, 0.08 * s);
+        ctx.lineTo(-0.1 * s, 0.22 * s);
+        ctx.moveTo(0.22 * s, 0.08 * s);
+        ctx.lineTo(0.1 * s, 0.22 * s);
+        ctx.stroke();
+        break;
+      }
       case 'dragonLevel': {
         ctx.beginPath();
         ctx.moveTo(-0.64 * s, 0.32 * s);
@@ -5672,7 +5803,7 @@ export class GameRenderer {
       const superLevel = Math.max(0, Number(sideState?.superMinionLevel) || 0);
       chance += Math.max(0, superLevel - 1) * 0.018;
     }
-    return Math.max(0.08, Math.min(0.92, chance));
+    return Math.max(0, Math.min(0.92, chance));
   }
 
   candleSpawnChance(sideState) {
@@ -5715,6 +5846,7 @@ export class GameRenderer {
     const resource = Math.max(1, Number(s.resourceLevel) || 1);
     const power = Math.max(1, Number(s.powerLevel) || 1);
     const eco = Math.max(0, Number(s.economyLevel) || 0);
+    const balloon = Math.max(0, Number(s.balloonLevel) || 0);
     const dragon = Math.max(0, Number(s.dragonLevel) || 0);
     const sup = Math.max(0, Number(s.superMinionLevel) || 0);
     const mythicPressure = Math.floor((power + eco) / 6);
@@ -5735,6 +5867,11 @@ export class GameRenderer {
       return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
     }
     if (type === 'president') return this.scaledSpecialEveryForUi(Math.max(36, 54 - Math.floor((eco + resource + power) / 6)), matchTimeSec);
+    if (type === 'balloon') {
+      if (balloon <= 0) return Infinity;
+      const airTech = Math.floor((spawn + power + Math.max(1, Number(s.specialRateLevel) || 1) + eco) / 8);
+      return this.scaledSpecialEveryForUi(Math.max(8, 18 - balloon * 2 - airTech), matchTimeSec);
+    }
     if (type === 'dragon') return dragon <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(34, 68 - dragon * 5 - mythicPressure * 2), matchTimeSec);
     if (type === 'super') return sup <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(28, 58 - sup * 4), matchTimeSec);
     return Infinity;
@@ -5760,6 +5897,7 @@ export class GameRenderer {
       shield: 0,
       hero: 0,
       president: 0,
+      balloon: 0,
       dragon: 0,
       super: 0,
       candle: 0,
@@ -5814,6 +5952,10 @@ export class GameRenderer {
       }
       if (m.president) {
         sideCounts.president += 1;
+        continue;
+      }
+      if (m.balloon) {
+        sideCounts.balloon += 1;
         continue;
       }
       if (m.stoneGolem) continue;
@@ -5886,6 +6028,10 @@ export class GameRenderer {
           activeCountByType.president += 1;
           continue;
         }
+        if (m.balloon) {
+          activeCountByType.balloon += 1;
+          continue;
+        }
         if (m.stoneGolem) continue;
         activeCountByType.militia += 1;
       }
@@ -5907,6 +6053,7 @@ export class GameRenderer {
       shield: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       hero: Math.max(1, Number(sideState?.powerLevel) || 1),
       president: Math.max(1, Number(sideState?.resourceLevel) || 1),
+      balloon: Math.max(0, Number(sideState?.balloonLevel) || 0),
       dragon: Math.max(0, Number(sideState?.dragonLevel) || 0),
       super: Math.max(0, Number(sideState?.superMinionLevel) || 0),
       candle: candleActive ? 1 : 0,
@@ -5921,6 +6068,7 @@ export class GameRenderer {
       { type: 'shield', label: unitLabel('shield', this.themeMode), color: '#b0d7ff', unlockHint: '' },
       { type: 'hero', label: unitLabel('hero', this.themeMode), color: '#ffe2a0', unlockHint: 'after first hit' },
       { type: 'president', label: unitLabel('president', this.themeMode), color: '#f1c7a2', unlockHint: '' },
+      { type: 'balloon', label: unitLabel('balloon', this.themeMode), color: '#bee6f4', unlockHint: 'need BA1' },
       { type: 'dragon', label: unitLabel('dragon', this.themeMode), color: '#ff9c7b', unlockHint: 'need DR1' },
       { type: 'super', label: unitLabel('super', this.themeMode), color: '#fff2aa', unlockHint: 'need SU1' },
       { type: 'candle', label: unitLabel('candle', this.themeMode), color: '#ffd7a2', unlockHint: '' },
@@ -7489,9 +7637,72 @@ export class GameRenderer {
     return Math.max(0, Math.min(1, ttl / MINION_HIT_FLASH_TTL));
   }
 
+  balloonCollisionCircles(minion) {
+    if (!minion || !minion.balloon) return null;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const r = Math.max(16, Number(minion.r) || 16);
+    const topY = y - r * 0.24;
+    const basketY = y + r * 0.98;
+    return [
+      { x: x - r * 0.23, y: topY, r: r * 0.25 },
+      { x: x + r * 0.23, y: topY, r: r * 0.25 },
+      { x, y: basketY, r: r * 0.34 },
+    ];
+  }
+
+  drawBalloonHitFlash(minion) {
+    if (!minion || !minion.balloon) return;
+    const ttl = Math.max(0, Number(minion.balloonHitCircleTtl) || 0);
+    const fallbackTtl = Math.max(0, Number(minion.hitFlashTtl) || 0);
+    const activeTtl = ttl > 0 ? ttl : fallbackTtl;
+    if (activeTtl <= 0) return;
+
+    const circles = this.balloonCollisionCircles(minion);
+    if (!Array.isArray(circles) || !circles.length) return;
+
+    const sideName = minion?.side === 'right' ? 'right' : 'left';
+    const hitCore = sideName === 'right' ? '#ffdede' : '#e6f4ff';
+    const hitMid = sideName === 'right' ? '#ff8f8f' : '#72bcff';
+    const hitStroke = sideName === 'right' ? '#ff6d6d' : '#4da7ff';
+    const life = Math.max(0, Math.min(1, activeTtl / MINION_HIT_FLASH_TTL));
+    const rawHitIndex = Number(minion.balloonHitCircleIndex);
+    const desiredIndex = Number.isFinite(rawHitIndex) && rawHitIndex >= 0
+      ? Math.max(0, Math.min(circles.length - 1, Math.round(rawHitIndex)))
+      : 2;
+    const circle = circles[desiredIndex] || circles[2] || circles[0];
+    if (!circle) return;
+
+    const { ctx } = this;
+    const cx = Number(circle.x) || 0;
+    const cy = Number(circle.y) || 0;
+    const cr = Math.max(4, Number(circle.r) || 4);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.28 + life * 0.42;
+    const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, cr * (2.5 + life * 0.6));
+    glow.addColorStop(0, hitCore);
+    glow.addColorStop(0.56, hitMid);
+    glow.addColorStop(1, this.withAlpha(hitMid, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, cr * (2.5 + life * 0.6), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.26 + life * 0.34;
+    ctx.strokeStyle = this.withAlpha(hitStroke, 0.92);
+    ctx.lineWidth = 1.35 + life * 1.8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, cr * (1.45 + life * 0.32), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawMinionHitFlashes(minions) {
     if (!Array.isArray(minions) || !minions.length) return;
     for (const minion of minions) {
+      if (minion?.balloon) continue;
       const life = this.minionHitFlashLife(minion);
       if (life <= 0) continue;
       this.drawMinionHitFlash(minion, life);
@@ -9359,6 +9570,469 @@ export class GameRenderer {
     this.drawHealthBarNotches(hpX, hpY, hpW, 5, minion.maxHp);
   }
 
+  drawBalloonSprite(minion, options = {}) {
+    if (!minion) return;
+    const showHud = options.showHud !== false;
+    const allowEffects = options.allowEffects !== false;
+    const cacheRender = options.cacheRender === true;
+    const { ctx } = this;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const r = Math.max(32, Number(minion.r) || 32);
+    const topScale = 0.5; // Half dimensions (about 1/4 area) per request.
+    const dir = minion.side === 'right' ? -1 : 1;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const themed = this.isThemedEmpires();
+    const balloonLevel = Math.max(1, Number(minion.balloonLevel) || 1);
+    const upgraded = balloonLevel > 1;
+    const t = performance.now() * 0.001;
+    const crewAnim = Math.sin(t * 7.2 + (Number(minion.id) || 0) * 0.41);
+    const swingA = Math.sin(t * 6.8 + (Number(minion.id) || 0) * 0.87);
+    const swingB = Math.sin(t * 7.9 + (Number(minion.id) || 0) * 0.58 + 1.7);
+    const bodyY = y + r * 0.98;
+    const throwLife = Math.max(
+      0,
+      Math.min(1, (Number(minion.balloonThrowTtl) || 0) / Math.max(0.01, Number(minion.balloonThrowMaxTtl) || 0.22))
+    );
+    const bombLife = Math.max(
+      0,
+      Math.min(1, (Number(minion.balloonBombTtl) || 0) / Math.max(0.01, Number(minion.balloonBombMaxTtl) || 0.52))
+    );
+
+    const shellA = themed
+      ? (sideName === 'left' ? '#d8a666' : '#c8ddeb')
+      : '#d9a76f';
+    const shellB = themed
+      ? (sideName === 'left' ? '#b97243' : '#6b8ca9')
+      : '#a95f3d';
+    const shellEdge = themed
+      ? (sideName === 'left' ? '#7a4524' : '#2f4f66')
+      : '#744124';
+    const basketFill = themed
+      ? (sideName === 'left' ? '#8c5e37' : '#607f93')
+      : '#7e6543';
+    const basketStroke = themed
+      ? (sideName === 'left' ? '#f0d4ac' : '#d8edf8')
+      : '#e9d2ab';
+
+    ctx.save();
+
+    const topRx = r * 1.22 * topScale;
+    const topRy = r * 0.96 * topScale;
+    const topY = y - r * 0.24;
+    const shellGrad = ctx.createLinearGradient(x, topY - topRy, x, topY + topRy * 0.75);
+    shellGrad.addColorStop(0, shellA);
+    shellGrad.addColorStop(1, shellB);
+    ctx.fillStyle = shellGrad;
+    ctx.beginPath();
+    ctx.ellipse(x, topY, topRx, topRy, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = shellEdge;
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    // Classic hot-air stripe/segments so normal mode reads as an actual balloon.
+    ctx.strokeStyle = this.withAlpha('#f5ebd2', themed ? 0.34 : 0.58);
+    ctx.lineWidth = 1.2;
+    for (let i = -2; i <= 2; i += 1) {
+      const lx = x + i * (topRx * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(lx, topY - topRy * 0.9);
+      ctx.lineTo(lx, topY + topRy * 0.82);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = this.withAlpha(shellEdge, 0.34);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(x, topY - topRy * 0.08, topRx * 0.92, topRy * 0.52, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Burner + cables.
+    ctx.fillStyle = '#f6bc55';
+    ctx.beginPath();
+    ctx.ellipse(x, bodyY - r * 0.28, r * 0.1, r * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (upgraded && !cacheRender) {
+      const flame = 0.6 + Math.sin(t * 11.4 + (Number(minion.id) || 0) * 0.5) * 0.4;
+      ctx.fillStyle = this.withAlpha('#ffd06b', 0.45 + flame * 0.4);
+      ctx.beginPath();
+      ctx.moveTo(x, bodyY - r * 0.22);
+      ctx.lineTo(x - r * 0.06, bodyY - r * (0.22 + flame * 0.22));
+      ctx.lineTo(x + r * 0.06, bodyY - r * (0.22 + flame * 0.22));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = '#d5d5d5aa';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x - topRx * 0.82, topY + topRy * 0.78);
+    ctx.lineTo(x - r * 0.34, bodyY - r * 0.12);
+    ctx.moveTo(x + topRx * 0.82, topY + topRy * 0.78);
+    ctx.lineTo(x + r * 0.34, bodyY - r * 0.12);
+    ctx.moveTo(x - topRx * 0.24, topY + topRy * 0.84);
+    ctx.lineTo(x - r * 0.1, bodyY - r * 0.16);
+    ctx.moveTo(x + topRx * 0.24, topY + topRy * 0.84);
+    ctx.lineTo(x + r * 0.1, bodyY - r * 0.16);
+    ctx.stroke();
+
+    if (!themed) {
+      // Classic wicker basket for normal mode.
+      ctx.fillStyle = basketFill;
+      ctx.fillRect(x - r * 0.42, bodyY - r * 0.22, r * 0.84, r * 0.48);
+      ctx.strokeStyle = basketStroke;
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(x - r * 0.42, bodyY - r * 0.22, r * 0.84, r * 0.48);
+      ctx.strokeStyle = this.withAlpha('#f8edcf', 0.4);
+      ctx.lineWidth = 1;
+      for (let i = -2; i <= 2; i += 1) {
+        const wx = x + i * r * 0.14;
+        ctx.beginPath();
+        ctx.moveTo(wx, bodyY - r * 0.21);
+        ctx.lineTo(wx, bodyY + r * 0.25);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.4, bodyY - r * 0.02);
+      ctx.lineTo(x + r * 0.4, bodyY - r * 0.02);
+      ctx.moveTo(x - r * 0.4, bodyY + r * 0.11);
+      ctx.lineTo(x + r * 0.4, bodyY + r * 0.11);
+      ctx.stroke();
+    } else if (sideName === 'left') {
+      // Countertop bread maker silhouette: tall body, top lid window, front control pad.
+      const bodyX = x - r * 0.5;
+      const bodyYTop = bodyY - r * 0.36;
+      const bodyW = r;
+      const bodyH = r * 0.76;
+      const loafPop = upgraded ? Math.max(0, Math.sin(t * 8 + (Number(minion.id) || 0) * 0.31)) : 0;
+
+      // Main body.
+      ctx.fillStyle = '#e0dfdc';
+      ctx.fillRect(bodyX, bodyYTop, bodyW, bodyH);
+      ctx.fillStyle = '#c9c8c5';
+      ctx.fillRect(bodyX + r * 0.03, bodyYTop + r * 0.04, bodyW - r * 0.06, bodyH - r * 0.1);
+      ctx.strokeStyle = '#8f8f8d';
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(bodyX, bodyYTop, bodyW, bodyH);
+
+      // Lid cap.
+      ctx.fillStyle = '#f1f0ee';
+      ctx.beginPath();
+      ctx.ellipse(x, bodyYTop + r * 0.02, r * 0.48, r * 0.085, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#aaaaa8';
+      ctx.stroke();
+      ctx.strokeStyle = '#9c9b98';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.28, bodyYTop + r * 0.02);
+      ctx.lineTo(x + r * 0.28, bodyYTop + r * 0.02);
+      ctx.stroke();
+      // Carry handle on lid.
+      ctx.strokeStyle = '#8d8c89';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.08, bodyYTop - r * 0.05);
+      ctx.quadraticCurveTo(x, bodyYTop - r * 0.09, x + r * 0.08, bodyYTop - r * 0.05);
+      ctx.stroke();
+
+      // Viewing window on top.
+      ctx.fillStyle = '#2a3038';
+      ctx.beginPath();
+      ctx.ellipse(x, bodyYTop + r * 0.02, r * 0.2, r * 0.04, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#5a626d';
+      ctx.beginPath();
+      ctx.ellipse(x - r * 0.06, bodyYTop + r * 0.015, r * 0.055, r * 0.018, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Front panel.
+      const panelX = x - r * 0.22;
+      const panelY = bodyYTop + r * 0.36;
+      const panelW = r * 0.44;
+      const panelH = r * 0.2;
+      ctx.fillStyle = '#3a4148';
+      ctx.fillRect(panelX, panelY, panelW, panelH);
+      ctx.fillStyle = '#96c4e2';
+      ctx.fillRect(panelX + r * 0.03, panelY + r * 0.03, panelW - r * 0.06, r * 0.06);
+      ctx.fillStyle = '#cfd4da';
+      ctx.beginPath();
+      ctx.arc(panelX + r * 0.09, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
+      ctx.arc(panelX + r * 0.17, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
+      ctx.arc(panelX + r * 0.25, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e8e7e3';
+      ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('BREAD', x, panelY + r * 0.16);
+
+      // Side vents + feet.
+      ctx.strokeStyle = '#a9a7a4';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i += 1) {
+        const vy = bodyYTop + r * (0.18 + i * 0.09);
+        ctx.beginPath();
+        ctx.moveTo(bodyX + r * 0.06, vy);
+        ctx.lineTo(bodyX + r * 0.16, vy);
+        ctx.moveTo(bodyX + bodyW - r * 0.16, vy);
+        ctx.lineTo(bodyX + bodyW - r * 0.06, vy);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#868583';
+      ctx.fillRect(bodyX + r * 0.08, bodyYTop + bodyH, r * 0.1, r * 0.03);
+      ctx.fillRect(bodyX + bodyW - r * 0.18, bodyYTop + bodyH, r * 0.1, r * 0.03);
+
+      if (upgraded && !cacheRender) {
+        // Toasts popping and warm steam.
+        const popY = bodyYTop - loafPop * r * 0.14;
+        ctx.fillStyle = '#e8b782';
+        ctx.fillRect(x - r * 0.19, popY, r * 0.12, r * 0.08);
+        ctx.fillRect(x + r * 0.07, popY + r * 0.01, r * 0.12, r * 0.08);
+        ctx.strokeStyle = '#9d6432';
+        ctx.strokeRect(x - r * 0.19, popY, r * 0.12, r * 0.08);
+        ctx.strokeRect(x + r * 0.07, popY + r * 0.01, r * 0.12, r * 0.08);
+        ctx.strokeStyle = this.withAlpha('#e9e1d1', 0.72);
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i += 1) {
+          const sx = x - r * 0.15 + i * r * 0.14;
+          const sway = Math.sin(t * 3 + i + (Number(minion.id) || 0) * 0.2) * r * 0.03;
+          ctx.beginPath();
+          ctx.moveTo(sx, bodyYTop - r * 0.01);
+          ctx.quadraticCurveTo(sx + sway, bodyYTop - r * 0.14, sx + sway * 0.6, bodyYTop - r * 0.24);
+          ctx.stroke();
+        }
+      }
+    } else {
+      // Countertop rice cooker silhouette: rounded pot, hinged lid, side handles, front panel.
+      const cookerCx = x;
+      const cookerCy = bodyY + r * 0.03;
+      const cookerRx = r * 0.5;
+      const cookerRy = r * 0.28;
+      const lidPulse = upgraded ? Math.max(0, Math.sin(t * 6.4 + (Number(minion.id) || 0) * 0.24)) * r * 0.02 : 0;
+
+      // Pot body.
+      ctx.fillStyle = '#f1f2f3';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx, cookerCy, cookerRx, cookerRy, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d7dbdf';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx, cookerCy + r * 0.03, cookerRx * 0.9, cookerRy * 0.72, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#9da4ab';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(cookerCx, cookerCy, cookerRx, cookerRy, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Lid and knob.
+      ctx.fillStyle = '#fafbfc';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx, cookerCy - r * 0.24 - lidPulse, cookerRx * 0.82, cookerRy * 0.34, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#b6bcc3';
+      ctx.stroke();
+      ctx.fillStyle = '#8d949c';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx, cookerCy - r * 0.31 - lidPulse, r * 0.06, r * 0.03, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Lid hinge back.
+      ctx.fillStyle = '#b1b8bf';
+      ctx.fillRect(cookerCx - r * 0.08, cookerCy - r * 0.25 - lidPulse, r * 0.16, r * 0.03);
+
+      // Side handles.
+      ctx.fillStyle = '#7c848d';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx - cookerRx * 0.96, cookerCy - r * 0.03, r * 0.055, r * 0.09, 0, 0, Math.PI * 2);
+      ctx.ellipse(cookerCx + cookerRx * 0.96, cookerCy - r * 0.03, r * 0.055, r * 0.09, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Front control panel with indicator.
+      const pX = cookerCx - r * 0.2;
+      const pY = cookerCy + r * 0.02;
+      const pW = r * 0.4;
+      const pH = r * 0.16;
+      ctx.fillStyle = '#323840';
+      ctx.fillRect(pX, pY, pW, pH);
+      ctx.fillStyle = '#8ec3e6';
+      ctx.fillRect(pX + r * 0.03, pY + r * 0.03, pW - r * 0.06, r * 0.04);
+      ctx.fillStyle = upgraded ? '#57e17f' : '#d85454';
+      ctx.beginPath();
+      ctx.arc(cookerCx + r * 0.11, pY + r * 0.105, r * 0.022, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#bfc5cc';
+      ctx.fillRect(cookerCx - r * 0.12, pY + r * 0.08, r * 0.12, r * 0.04);
+      ctx.fillStyle = '#eef1f4';
+      ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('RICE', cookerCx, pY + r * 0.16);
+
+      // Steam vent lines.
+      ctx.strokeStyle = '#aab3bb';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cookerCx + r * 0.26, cookerCy - r * 0.28 - lidPulse);
+      ctx.lineTo(cookerCx + r * 0.36, cookerCy - r * 0.34 - lidPulse);
+      ctx.moveTo(cookerCx + r * 0.34, cookerCy - r * 0.24 - lidPulse);
+      ctx.lineTo(cookerCx + r * 0.45, cookerCy - r * 0.3 - lidPulse);
+      ctx.stroke();
+      // Rice paddle on side so silhouette reads like a kitchen cooker.
+      ctx.strokeStyle = '#9aa3ab';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cookerCx - cookerRx * 1.08, cookerCy - r * 0.06);
+      ctx.lineTo(cookerCx - cookerRx * 1.2, cookerCy - r * 0.24);
+      ctx.stroke();
+      ctx.fillStyle = '#cfd8df';
+      ctx.beginPath();
+      ctx.ellipse(cookerCx - cookerRx * 1.22, cookerCy - r * 0.26, r * 0.04, r * 0.02, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (upgraded && !cacheRender) {
+        // Active steam pulses + rice fluff hints.
+        for (let i = 0; i < 4; i += 1) {
+          const alpha = 0.24 + 0.2 * (1 - i / 4);
+          const puffY = cookerCy - r * (0.32 + i * 0.1) - (Math.sin(t * 2.7 + i + (Number(minion.id) || 0) * 0.13) + 1) * r * 0.03;
+          const puffX = cookerCx + r * (0.42 + Math.sin(t * 2.9 + i) * 0.03);
+          ctx.fillStyle = this.withAlpha('#f1fbff', alpha);
+          ctx.beginPath();
+          ctx.ellipse(puffX, puffY, r * (0.06 + i * 0.015), r * (0.04 + i * 0.01), 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = this.withAlpha('#f8fdff', 0.8);
+        ctx.beginPath();
+        ctx.ellipse(cookerCx - r * 0.08, cookerCy - r * 0.24, r * 0.035, r * 0.025, 0.2, 0, Math.PI * 2);
+        ctx.ellipse(cookerCx, cookerCy - r * 0.23, r * 0.035, r * 0.025, -0.15, 0, Math.PI * 2);
+        ctx.ellipse(cookerCx + r * 0.08, cookerCy - r * 0.245, r * 0.035, r * 0.025, 0.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Crew sprites are kept only for unthemed balloons.
+    const crewY = bodyY - r * 0.08;
+    if (!themed) {
+      const leftCrewX = x - r * 0.2;
+      const rightCrewX = x + r * 0.18;
+      ctx.fillStyle = '#f2d8bc';
+      ctx.beginPath();
+      ctx.arc(leftCrewX, crewY - r * 0.1, r * 0.1, 0, Math.PI * 2);
+      ctx.arc(rightCrewX, crewY - r * 0.12, r * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#2f3948';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(leftCrewX, crewY - r * 0.01);
+      ctx.lineTo(leftCrewX, crewY + r * 0.12);
+      ctx.moveTo(rightCrewX, crewY - r * 0.01);
+      ctx.lineTo(rightCrewX, crewY + r * 0.12);
+      ctx.stroke();
+      ctx.strokeStyle = '#d9e8f5';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(leftCrewX, crewY + r * 0.03);
+      ctx.lineTo(leftCrewX + r * 0.24, crewY - r * 0.12 + swingA * r * 0.03);
+      ctx.moveTo(rightCrewX, crewY + r * 0.03);
+      ctx.lineTo(rightCrewX - r * 0.24, crewY - r * 0.14 + swingB * r * 0.03);
+      ctx.stroke();
+
+      if (Math.abs(crewAnim) > 0.64) {
+        ctx.fillStyle = this.withAlpha('#ffdcb3', 0.5);
+        ctx.beginPath();
+        ctx.arc(x, crewY - r * 0.28, r * 0.18, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Throw FX from a crew member.
+    if (allowEffects && throwLife > 0.001 && Number.isFinite(minion.balloonThrowToX) && Number.isFinite(minion.balloonThrowToY)) {
+      const fromX = x + dir * r * 0.25;
+      const fromY = bodyY - r * 0.06;
+      const toX = Number(minion.balloonThrowToX);
+      const toY = Number(minion.balloonThrowToY);
+      const flight = 1 - throwLife;
+      const arcLift = Math.max(22, r * 0.85);
+      const midX = fromX + (toX - fromX) * 0.5;
+      const midY = Math.min(fromY, toY) - arcLift;
+      const px = (1 - flight) * (1 - flight) * fromX + 2 * (1 - flight) * flight * midX + flight * flight * toX;
+      const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
+      ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#f0d2a6' : '#e1f2ff', 0.45 + throwLife * 0.4);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.quadraticCurveTo(midX, midY, toX, toY);
+      ctx.stroke();
+      if (sideName === 'left') {
+        // Bread chunk.
+        ctx.fillStyle = '#d89a59';
+        ctx.beginPath();
+        ctx.ellipse(px, py, r * 0.08, r * 0.055, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#8a562b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px - r * 0.025, py - r * 0.01);
+        ctx.lineTo(px + r * 0.01, py + r * 0.015);
+        ctx.stroke();
+      } else {
+        // Rice ball.
+        ctx.fillStyle = '#edf8ff';
+        ctx.beginPath();
+        ctx.arc(px, py, r * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#213644';
+        ctx.fillRect(px - r * 0.018, py + r * 0.016, r * 0.036, r * 0.022);
+      }
+    }
+
+    // Bomb drop FX.
+    if (allowEffects && bombLife > 0.001 && Number.isFinite(minion.balloonBombToX) && Number.isFinite(minion.balloonBombToY)) {
+      const toX = Number(minion.balloonBombToX);
+      const toY = Number(minion.balloonBombToY);
+      const fromX = x - dir * r * 0.08;
+      const fromY = bodyY + r * 0.18;
+      const drop = 1 - bombLife;
+      const px = fromX + (toX - fromX) * drop;
+      const py = fromY + (toY - fromY) * drop;
+      ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#f0c18f' : '#d8f0ff', 0.35 + bombLife * 0.35);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+      if (sideName === 'left') {
+        // Bread-roll bomb.
+        ctx.fillStyle = '#bb733c';
+        ctx.beginPath();
+        ctx.ellipse(px, py, r * 0.1, r * 0.075, 0.22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#7f4724';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(px - r * 0.01, py, r * 0.032, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        // Rice-ball bomb.
+        ctx.fillStyle = '#f5fbff';
+        ctx.beginPath();
+        ctx.arc(px, py, r * 0.09, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1f3646';
+        ctx.fillRect(px - r * 0.028, py + r * 0.01, r * 0.056, r * 0.034);
+      }
+      ctx.strokeStyle = this.withAlpha('#fff4c8', 0.25 + bombLife * 0.45);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(toX, toY, r * 0.35 * (1 + (1 - bombLife) * 0.75), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+    if (!cacheRender) this.drawBalloonHitFlash(minion);
+
+    this.drawFailedSpecialHat(minion, x, y, r, 1);
+    if (showHud) this.drawStandardMinionHud(minion, x, y, r, 1, {});
+  }
+
   drawNecroRevivedOverlay(minion) {
     if (!minion || !minion.necroRevived) return;
     const { ctx } = this;
@@ -9401,6 +10075,11 @@ export class GameRenderer {
   drawMinionSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
     const cacheRender = options.cacheRender === true;
+    if (minion.balloon) {
+      this.drawBalloonSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
+      return;
+    }
     if (minion.dragon) {
       this.drawDragonSprite(minion, options);
       if (!cacheRender) this.drawNecroRevivedOverlay(minion);

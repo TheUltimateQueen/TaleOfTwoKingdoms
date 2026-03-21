@@ -159,6 +159,7 @@
                   <option value="monk">Monk</option>
                   <option value="hero">Hero</option>
                   <option value="president">President</option>
+                  <option value="balloon">Balloon</option>
                   <option value="super">Super</option>
                 </select>
               </label>
@@ -169,6 +170,10 @@
                 <input id="testStartingGoldInput" type="number" step="1" placeholder="leave blank to keep current" />
               </label>
             </div>
+            <label class="test-toggle">
+              <input id="testColliderDebugInput" type="checkbox" />
+              <span>Collider Debug Overlay (all entities)</span>
+            </label>
 
             <div class="row">
               <button id="testOffBtn" type="button">Testing Off</button>
@@ -180,6 +185,11 @@
             <div class="test-group">
               <p class="test-group-title">Special Unit Upgrades</p>
               <div class="test-special-grid">
+                <label class="test-check-card">
+                  <input data-test-special-upgrade="balloonLevel" type="checkbox" />
+                  <span class="test-check-title">Balloon Unlock</span>
+                  <span class="test-check-meta">Unlocks balloon special spawns and aerial bombs.</span>
+                </label>
                 <label class="test-check-card">
                   <input data-test-special-upgrade="dragonSuperBreathLevel" type="checkbox" />
                   <span class="test-check-title">Dragon Super Breath</span>

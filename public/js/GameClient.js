@@ -52,6 +52,7 @@ const BASE_TEAM_COLORS = {
   right: { ...TEAM_COLORS.right },
 };
 const TEST_SPECIAL_UPGRADE_KEYS = [
+  'balloonLevel',
   'dragonSuperBreathLevel',
   'shieldDarkMetalLevel',
   'monkHealCircleLevel',
@@ -62,6 +63,7 @@ const TEST_SPECIAL_UPGRADE_KEYS = [
   'presidentExecutiveOrderLevel',
 ];
 const TEST_UPGRADE_MAX = {
+  balloonLevel: 4,
   volleyLevel: 4,
   dragonSuperBreathLevel: 1,
   shieldDarkMetalLevel: 1,
@@ -72,7 +74,7 @@ const TEST_UPGRADE_MAX = {
   gunnerSkyCannonLevel: 1,
   presidentExecutiveOrderLevel: 1,
 };
-const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'hero', 'president', 'super']);
+const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'hero', 'president', 'balloon', 'super']);
 const TEST_SPECIAL_LABELS = {
   dragon: 'Dragon',
   shield: 'Shield',
@@ -83,6 +85,7 @@ const TEST_SPECIAL_LABELS = {
   monk: 'Monk',
   hero: 'Hero',
   president: 'President',
+  balloon: 'Balloon',
   super: 'Super',
 };
 const POST_UPGRADE_CODES = {
@@ -95,6 +98,7 @@ const POST_UPGRADE_CODES = {
   bountyLevel: 'KG',
   powerLevel: 'PW',
   specialRateLevel: 'SR',
+  balloonLevel: 'BA',
   dragonLevel: 'DR',
   dragonSuperBreathLevel: 'SB',
   shieldDarkMetalLevel: 'DM',
@@ -116,6 +120,7 @@ const POST_UPGRADE_ICONS = {
   bountyLevel: '🎯',
   powerLevel: '⚡',
   specialRateLevel: '✨',
+  balloonLevel: '🎈',
   dragonLevel: '🐉',
   dragonSuperBreathLevel: '🔥',
   shieldDarkMetalLevel: '🧱',
@@ -342,6 +347,7 @@ export class GameClient {
     this.testForceSpecialTypeInput = document.getElementById('testForceSpecialTypeInput');
     this.testForceSpecialMinAliveInput = document.getElementById('testForceSpecialMinAliveInput');
     this.testStartingGoldInput = document.getElementById('testStartingGoldInput');
+    this.testColliderDebugInput = document.getElementById('testColliderDebugInput');
     this.testOffBtn = document.getElementById('testOffBtn');
     this.testSpecialsBtn = document.getElementById('testSpecialsBtn');
     this.testResetBtn = document.getElementById('testResetBtn');
@@ -1769,6 +1775,7 @@ export class GameClient {
       bountyLevel: 1,
       powerLevel: 1,
       specialRateLevel: 1,
+      balloonLevel: 0,
       dragonLevel: 0,
       superMinionLevel: 0,
       dragonSuperBreathLevel: 0,
@@ -1786,6 +1793,7 @@ export class GameClient {
       forceSpecialType: null,
       forceSpecialMinAlive: 1,
       startingGold: null,
+      colliderDebug: false,
       upgrades,
     };
   }
@@ -1801,6 +1809,7 @@ export class GameClient {
         : null,
       forceSpecialMinAlive: Math.max(1, Math.floor(clampNumber(cfg.forceSpecialMinAlive, 1, 12, 1))),
       startingGold: null,
+      colliderDebug: Boolean(cfg.colliderDebug),
       upgrades: {},
     };
     const startingGoldRaw = cfg.startingGold;
@@ -1846,6 +1855,7 @@ export class GameClient {
     if (this.testForceSpecialTypeInput) this.testForceSpecialTypeInput.value = cfg.forceSpecialType || '';
     if (this.testForceSpecialMinAliveInput) this.testForceSpecialMinAliveInput.value = String(cfg.forceSpecialMinAlive || 1);
     if (this.testStartingGoldInput) this.testStartingGoldInput.value = Number.isFinite(cfg.startingGold) ? String(cfg.startingGold) : '';
+    if (this.testColliderDebugInput) this.testColliderDebugInput.checked = Boolean(cfg.colliderDebug);
     const specialByKey = new Map(this.testSpecialUpgradeInputs.map((el) => [el?.dataset?.testSpecialUpgrade, el]));
     for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
       const input = specialByKey.get(key);
@@ -1863,6 +1873,7 @@ export class GameClient {
       forceSpecialType: this.testForceSpecialTypeInput?.value || null,
       forceSpecialMinAlive: this.testForceSpecialMinAliveInput?.value,
       startingGold: this.testStartingGoldInput?.value ?? '',
+      colliderDebug: Boolean(this.testColliderDebugInput?.checked),
       upgrades: { ...base.upgrades },
     };
     for (const input of this.testSpecialUpgradeInputs) {
@@ -1886,7 +1897,8 @@ export class GameClient {
     const testState = cfg.enabled ? 'TEST ON' : 'TEST OFF';
     const liveState = (this.hostAuthoritative && this.localRoom) ? 'LIVE' : 'SAVED';
     const goldLabel = Number.isFinite(cfg.startingGold) ? `Start UPG ${cfg.startingGold}` : 'Start UPG unchanged';
-    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | ${goldLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
+    const colliderLabel = cfg.colliderDebug ? 'Colliders ON' : 'Colliders OFF';
+    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | ${goldLabel} | ${colliderLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
     if (this.testSettingsSummary) {
       this.testSettingsSummary.textContent = cfg.enabled
         ? 'Secret Test Settings - Testing ON'
@@ -1938,6 +1950,7 @@ export class GameClient {
       this.testForceSpecialTypeInput,
       this.testForceSpecialMinAliveInput,
       this.testStartingGoldInput,
+      this.testColliderDebugInput,
       ...this.testSpecialUpgradeInputs,
     ];
     for (const input of allInputs) {
