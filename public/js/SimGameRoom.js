@@ -154,6 +154,7 @@ const SHIELD_HEAD_HIT_RADIUS_MULT = 0.44;
 const SHIELD_GUARD_POSE_RAISE_SPEED = 4.4;
 const SHIELD_GUARD_POSE_LOWER_SPEED = 6.2;
 const SHIELD_GUARD_POSE_BODY_VULN_THRESHOLD = 0.18;
+const SHIELD_GUARD_POSE_HEAD_COVER_THRESHOLD = 0.45;
 const STONE_GOLEM_HALF_HP_THRESHOLD = 0.5;
 const STONE_GOLEM_HP_MULT = 15;
 const STONE_GOLEM_DAMAGE_MULT = 0.8;
@@ -1836,11 +1837,13 @@ class GameRoom {
     return {
       dir,
       pose,
-      x: (Number(minion.x) || 0) + dir * (baseR * (0.82 - pose * 0.62)),
-      y: (Number(minion.y) || 0) + baseR * (0.06 - pose * 0.96),
-      rx: (baseR * (0.84 - pose * 0.22) + 10) * pushScale,
-      ry: (baseR * (1.18 + pose * 0.24) + 10) * pushScale,
-      topOpenY: (Number(minion.y) || 0) - baseR * (0.76 + pose * 0.32),
+      // Keep the raised shield slightly in front of the body so it can cover the head lane.
+      x: (Number(minion.x) || 0) + dir * (baseR * (0.82 - pose * 0.48)),
+      y: (Number(minion.y) || 0) + baseR * (0.06 - pose * 1.02),
+      rx: (baseR * (0.84 - pose * 0.18) + 10) * pushScale,
+      ry: (baseR * (1.18 + pose * 0.32) + 10) * pushScale,
+      // Top opening narrows as guard pose rises so overhead shots meet the raised shield.
+      topOpenY: (Number(minion.y) || 0) - baseR * (0.76 + pose * 2.05),
     };
   }
 
@@ -1883,31 +1886,70 @@ class GameRoom {
     return nx * nx + ny * ny <= r * r;
   }
 
-  arrowInsideShieldBearerShield(arrow, minion) {
+  segmentIntersectsEllipse(x1, y1, x2, y2, cx, cy, rx, ry) {
+    const safeRx = Math.max(0.0001, Math.abs(rx) || 0.0001);
+    const safeRy = Math.max(0.0001, Math.abs(ry) || 0.0001);
+    return this.segmentIntersectsCircle(
+      (x1 - cx) / safeRx,
+      (y1 - cy) / safeRy,
+      (x2 - cx) / safeRx,
+      (y2 - cy) / safeRy,
+      0,
+      0,
+      1
+    );
+  }
+
+  arrowInsideShieldBearerShield(arrow, minion, prevX = null, prevY = null) {
     if (!arrow || !minion || !minion.shieldBearer) return false;
     if (arrow.side === minion.side) return false;
-    // Head should always remain hittable; shield never blocks head zone.
-    const head = this.shieldBearerHeadCircle(minion, arrow);
-    if (head) {
-      const ax = Number(arrow.x) || 0;
-      const ay = Number(arrow.y) || 0;
-      const dxHead = ax - head.x;
-      const dyHead = ay - head.y;
-      if (dxHead * dxHead + dyHead * dyHead <= head.r * head.r) return false;
-    }
     const shield = this.shieldBearerShieldShape(minion);
     if (!shield) return false;
+    const arrowX = Number(arrow.x) || 0;
+    const arrowY = Number(arrow.y) || 0;
+    const fromX = Number.isFinite(prevX) ? prevX : arrowX;
+    const fromY = Number.isFinite(prevY) ? prevY : arrowY;
+    const pose = shield.pose;
 
-    // Shield only blocks from the forward side and leaves a top opening.
-    const relativeFront = ((Number(arrow.x) || 0) - (Number(minion.x) || 0)) * shield.dir;
-    if (relativeFront < -Math.max(6, (Number(minion.r) || 0) * 0.42)) return false;
-    if ((Number(arrow.y) || 0) < shield.topOpenY) return false;
+    // Keep low guard skill expression: head remains open until the guard is really raised.
+    if (pose < SHIELD_GUARD_POSE_HEAD_COVER_THRESHOLD) {
+      const head = this.shieldBearerHeadCircle(minion, arrow);
+      if (head) {
+        const dxHead = arrowX - head.x;
+        const dyHead = arrowY - head.y;
+        const directHead = dxHead * dxHead + dyHead * dyHead <= head.r * head.r;
+        const sweptHead = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, head.x, head.y, head.r);
+        if (directHead || sweptHead) return false;
+      }
+    }
+
+    // Shield only blocks from the forward side and keeps a variable top opening.
+    const minionX = Number(minion.x) || 0;
+    const minionR = Math.max(18, Number(minion.r) || 20);
+    const relativeFrontNow = (arrowX - minionX) * shield.dir;
+    const relativeFrontPrev = (fromX - minionX) * shield.dir;
+    if (Math.max(relativeFrontNow, relativeFrontPrev) < -Math.max(6, (Number(minion.r) || 0) * 0.42)) return false;
+    if (pose < SHIELD_GUARD_POSE_HEAD_COVER_THRESHOLD && Math.min(arrowY, fromY) < shield.topOpenY) return false;
+
+    // When guard is visibly raised, frontal head-lane shots should still count as shield blocks.
+    if (pose >= SHIELD_GUARD_POSE_HEAD_COVER_THRESHOLD) {
+      const head = this.shieldBearerHeadCircle(minion, arrow);
+      if (head) {
+        const dxHead = arrowX - head.x;
+        const dyHead = arrowY - head.y;
+        const directHead = dxHead * dxHead + dyHead * dyHead <= head.r * head.r;
+        const sweptHead = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, head.x, head.y, head.r);
+        const frontal = Math.max(relativeFrontNow, relativeFrontPrev) >= -Math.max(6, minionR * 0.22);
+        if (frontal && (directHead || sweptHead)) return true;
+      }
+    }
 
     const hitRx = Math.max(1, shield.rx + (Number(arrow.r) || 0) * 0.9);
     const hitRy = Math.max(1, shield.ry + (Number(arrow.r) || 0) * 0.9);
-    const nx = ((Number(arrow.x) || 0) - shield.x) / hitRx;
-    const ny = ((Number(arrow.y) || 0) - shield.y) / hitRy;
-    return nx * nx + ny * ny <= 1;
+    const nx = (arrowX - shield.x) / hitRx;
+    const ny = (arrowY - shield.y) / hitRy;
+    if (nx * nx + ny * ny <= 1) return true;
+    return this.segmentIntersectsEllipse(fromX, fromY, arrowX, arrowY, shield.x, shield.y, hitRx, hitRy);
   }
 
   arrowHitsShieldBearerVulnerableZone(arrow, minion, prevX = null, prevY = null) {
@@ -1932,16 +1974,14 @@ class GameRoom {
       }
     }
 
-    if (pose >= SHIELD_GUARD_POSE_BODY_VULN_THRESHOLD) {
-      const bodyX = (Number(minion.x) || 0) + dir * (r * (0.04 - pose * 0.12));
-      const bodyY = (Number(minion.y) || 0) - r * (0.54 + pose * 0.08);
-      const bodyR = r * (0.62 + pose * 0.2) + (Number(arrow.r) || 0) * 0.76;
-      const dxBody = arrowX - bodyX;
-      const dyBody = arrowY - bodyY;
-      const directBody = dxBody * dxBody + dyBody * dyBody <= bodyR * bodyR;
-      const sweptBody = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, bodyX, bodyY, bodyR);
-      if (directBody || sweptBody) return 'body';
-    }
+    const bodyX = (Number(minion.x) || 0) + dir * (r * (0.04 - pose * 0.12));
+    const bodyY = (Number(minion.y) || 0) - r * (0.68 + pose * 0.04);
+    const bodyR = r * (0.76 + pose * 0.22) + (Number(arrow.r) || 0) * 0.82;
+    const dxBody = arrowX - bodyX;
+    const dyBody = arrowY - bodyY;
+    const directBody = dxBody * dxBody + dyBody * dyBody <= bodyR * bodyR;
+    const sweptBody = this.segmentIntersectsCircle(fromX, fromY, arrowX, arrowY, bodyX, bodyY, bodyR);
+    if (directBody || sweptBody) return 'body';
 
     const backX = (Number(minion.x) || 0) - dir * (r * 0.56);
     const backY = Number(minion.y) || 0;
@@ -2734,14 +2774,14 @@ class GameRoom {
           if (!minion || minion.removed || minion.side === a.side) continue;
           let shieldVulnerableHit = null;
           if (minion.shieldBearer) {
-            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion, prevX, prevY);
-            if (!shieldVulnerableHit && this.arrowInsideShieldBearerShield(a, minion)) {
+            if (this.arrowInsideShieldBearerShield(a, minion, prevX, prevY)) {
               this.markArrowMiss(a);
               this.queueLine('BLOCKED', a.x, a.y - 12, minion.side);
               this.queueHitSfx('blocked', a.x, a.y, minion.side);
               consumed = true;
               continue;
             }
+            shieldVulnerableHit = this.arrowHitsShieldBearerVulnerableZone(a, minion, prevX, prevY);
             if (!shieldVulnerableHit) continue;
           } else {
             const hitR = minion.r + a.r;
@@ -2752,10 +2792,6 @@ class GameRoom {
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
           const shieldHeadshot = Boolean(minion.shieldBearer && shieldVulnerableHit === 'head');
-          if (minion.shieldBearer) {
-            if (shieldVulnerableHit === 'head') this.setShieldGuardPoseTarget(minion, 1);
-            else if (shieldVulnerableHit === 'body' || shieldVulnerableHit === 'back') this.setShieldGuardPoseTarget(minion, 0);
-          }
           if (shieldHeadshot) damage *= SHIELD_HEADSHOT_DAMAGE_MULT;
           else if (minion.shieldBearer && shieldVulnerableHit === 'body') damage *= SHIELD_BODYSHOT_DAMAGE_MULT;
           const core = this.dragonHeartCore(minion);
@@ -3184,21 +3220,9 @@ class GameRoom {
         if (!Number.isFinite(m.shieldPushTtl)) m.shieldPushTtl = 0;
         m.shieldPushTtl = Math.max(0, m.shieldPushTtl - dt);
         if (!Number.isFinite(m.shieldPushScale) || m.shieldPushScale < 1) m.shieldPushScale = SHIELD_PUSH_SCALE;
-        if (!Number.isFinite(m.shieldGuardPose)) m.shieldGuardPose = 0;
-        if (!Number.isFinite(m.shieldGuardTarget)) m.shieldGuardTarget = 0;
-        const poseCurrent = clamp(Number(m.shieldGuardPose) || 0, 0, 1);
-        const poseTarget = clamp(Number(m.shieldGuardTarget) || 0, 0, 1);
-        const poseDelta = poseTarget - poseCurrent;
-        if (Math.abs(poseDelta) <= 0.0001) {
-          m.shieldGuardTarget = poseTarget;
-          m.shieldGuardPose = poseTarget;
-        } else {
-          const poseRate = poseDelta > 0 ? SHIELD_GUARD_POSE_RAISE_SPEED : SHIELD_GUARD_POSE_LOWER_SPEED;
-          const poseStep = poseRate * dt;
-          m.shieldGuardPose = Math.abs(poseDelta) <= poseStep
-            ? poseTarget
-            : (poseCurrent + Math.sign(poseDelta) * poseStep);
-        }
+        // Keep shield position static per user request.
+        m.shieldGuardTarget = 0;
+        m.shieldGuardPose = 0;
         if (!Number.isFinite(m.shieldDarkMetalCd)) {
           m.shieldDarkMetalCd = SHIELD_DARK_METAL_INTERVAL + Math.random() * SHIELD_DARK_METAL_COOLDOWN_JITTER;
         }

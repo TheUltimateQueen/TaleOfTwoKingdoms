@@ -1105,7 +1105,7 @@ export class GameRenderer {
         const bodyHalfW = 8 * scale;
         const shieldFrontX = 13 * dir * scale;
         const shieldFrontY = 3 * scale;
-        const shieldUpX = 0;
+        const shieldUpX = 4.2 * dir * scale;
         const shieldUpY = shieldHeadY - 18 * scale;
         const shieldCx = shieldFrontX + (shieldUpX - shieldFrontX) * shieldGuardPose;
         const shieldCy = shieldFrontY + (shieldUpY - shieldFrontY) * shieldGuardPose;
@@ -1167,6 +1167,31 @@ export class GameRenderer {
           ctx.fill();
         }
         ctx.restore();
+        // Deliberate hit-zone contrast: head, body, and shield lanes are readable in combat.
+        {
+          const bodyCx = dir * (baseR * (0.04 - shieldGuardPose * 0.12));
+          const bodyCy = -baseR * (0.68 + shieldGuardPose * 0.04);
+          const bodyR = baseR * (0.76 + shieldGuardPose * 0.22);
+          ctx.save();
+          ctx.globalAlpha = 0.72;
+          ctx.setLineDash([2.4 * scale, 1.8 * scale]);
+          ctx.strokeStyle = shieldDarkMetalActive ? '#f0bb65' : '#ffd487';
+          ctx.lineWidth = 1.05;
+          ctx.beginPath();
+          ctx.arc(0, shieldHeadY, shieldHeadR + 1.2 * scale, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = shieldDarkMetalActive ? '#8cc8e8' : '#99c7e9';
+          ctx.beginPath();
+          ctx.arc(bodyCx, bodyCy, bodyR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = shieldDarkMetalActive ? '#e8f1ff' : '#d8eafd';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.ellipse(shieldCx, shieldCy, shieldW * 0.56, shieldH * 0.5, shieldRot, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
       } else if (specialType === 'president') {
         ctx.fillStyle = '#4b7298';
         ctx.fillRect(-9 * scale, 2 * scale, 18 * scale, 10 * scale);
@@ -1598,7 +1623,7 @@ export class GameRenderer {
       const bodyHalfW = 8.2 * scale;
       const shieldFrontX = 13 * dir * scale;
       const shieldFrontY = 3 * scale;
-      const shieldUpX = 0;
+      const shieldUpX = 4.2 * dir * scale;
       const shieldUpY = shieldHeadY - 18 * scale;
       const shieldCx = shieldFrontX + (shieldUpX - shieldFrontX) * shieldGuardPose;
       const shieldCy = shieldFrontY + (shieldUpY - shieldFrontY) * shieldGuardPose;
@@ -1666,6 +1691,31 @@ export class GameRenderer {
         ctx.stroke();
       }
       ctx.restore();
+      // Deliberate hit-zone contrast: head, body, and shield lanes are readable in combat.
+      {
+        const bodyCx = dir * (baseR * (0.04 - shieldGuardPose * 0.12));
+        const bodyCy = -baseR * (0.68 + shieldGuardPose * 0.04);
+        const bodyR = baseR * (0.76 + shieldGuardPose * 0.22);
+        ctx.save();
+        ctx.globalAlpha = 0.72;
+        ctx.setLineDash([2.4 * scale, 1.8 * scale]);
+        ctx.strokeStyle = shieldDarkMetalActive ? '#e9b05f' : '#f5ccd6';
+        ctx.lineWidth = 1.05;
+        ctx.beginPath();
+        ctx.arc(0, shieldHeadY, shieldHeadR + 1.2 * scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = shieldDarkMetalActive ? '#84b9dd' : '#d7aab5';
+        ctx.beginPath();
+        ctx.arc(bodyCx, bodyCy, bodyR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = shieldDarkMetalActive ? '#edf4ff' : '#f8dde5';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.ellipse(shieldCx, shieldCy, shieldW * 0.56, shieldH * 0.5, shieldRot, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
     } else if (specialType === 'president') {
       // Court-official silhouette with robe, table, fan and command baton.
       ctx.fillStyle = '#7a4754';
@@ -2345,6 +2395,45 @@ export class GameRenderer {
         ctx.restore();
       }
 
+      ctx.restore();
+    }
+
+    if (specialType === 'shield' && !cacheRender && usedCachedBody) {
+      // Keep shield-bearer collision zones legible even when body sprite is cache-rendered.
+      const zoneHeadR = Math.max(3, baseR * 0.44);
+      const zoneHeadX = drawX - dir * (baseR * 0.06);
+      const zoneHeadY = drawY - baseR * 2;
+      const zoneBodyX = drawX + dir * (baseR * (0.04 - shieldGuardPose * 0.12));
+      const zoneBodyY = drawY - baseR * (0.68 + shieldGuardPose * 0.04);
+      const zoneBodyR = baseR * (0.76 + shieldGuardPose * 0.22);
+      const zoneFrontX = drawX + dir * (baseR * 0.92);
+      const zoneFrontY = drawY + baseR * 0.21;
+      const zoneUpX = drawX + dir * (baseR * 0.3);
+      const zoneUpY = drawY - baseR * 3.29;
+      const zoneShieldX = zoneFrontX + (zoneUpX - zoneFrontX) * shieldGuardPose;
+      const zoneShieldY = zoneFrontY + (zoneUpY - zoneFrontY) * shieldGuardPose;
+      const zoneShieldW = baseR * 0.87;
+      const zoneShieldH = baseR * 2.16;
+      const zoneShieldTiltRad = Math.PI / 12;
+      const zoneShieldRot = -((Math.PI * 0.5) - zoneShieldTiltRad) * dir * shieldGuardPose;
+      ctx.save();
+      ctx.globalAlpha = shieldDarkMetalActive ? 0.8 : 0.72;
+      ctx.setLineDash([3.2 * scale, 2.1 * scale]);
+      ctx.strokeStyle = shieldDarkMetalActive ? '#f0bb65' : '#f3ccd6';
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.arc(zoneHeadX, zoneHeadY, zoneHeadR + 1.1 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = shieldDarkMetalActive ? '#8cc8e8' : '#e3f4ff';
+      ctx.beginPath();
+      ctx.arc(zoneBodyX, zoneBodyY, zoneBodyR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = shieldDarkMetalActive ? '#edf4ff' : '#f8dde5';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(zoneShieldX, zoneShieldY, zoneShieldW * 0.56, zoneShieldH * 0.5, zoneShieldRot, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -7595,6 +7684,41 @@ export class GameRenderer {
       });
       if (drewCached) {
         this.drawThemedSpecialLook(minion, 'shield', { cacheRender, upgraded: upgraded || darkMetalActive });
+        const guideShieldScale = 1 + pushLife * 0.45;
+        const guideShieldW = (baseR * 0.6 + 6) * guideShieldScale;
+        const guideShieldH = (baseR * 1.45 + 14) * guideShieldScale;
+        const guideShieldFrontX = x + dir * (baseR * 0.88);
+        const guideShieldFrontY = y + baseR * 0.06;
+        const guideShieldUpX = x + dir * (baseR * 0.28);
+        const guideShieldUpY = y - baseR * 2.86;
+        const guideShieldX = guideShieldFrontX + (guideShieldUpX - guideShieldFrontX) * shieldGuardPose;
+        const guideShieldY = guideShieldFrontY + (guideShieldUpY - guideShieldFrontY) * shieldGuardPose;
+        const guideShieldTiltRad = Math.PI / 12;
+        const guideShieldRot = -((Math.PI * 0.5) - guideShieldTiltRad) * dir * shieldGuardPose;
+        const guideHeadX = x - dir * (baseR * 0.06);
+        const guideHeadY = y - baseR * 2;
+        const guideBodyX = x + dir * (baseR * (0.04 - shieldGuardPose * 0.12));
+        const guideBodyY = y - baseR * (0.68 + shieldGuardPose * 0.04);
+        const guideBodyR = baseR * (0.76 + shieldGuardPose * 0.22);
+        ctx.save();
+        ctx.globalAlpha = darkMetalActive ? 0.8 : 0.74;
+        ctx.setLineDash([4, 2.4]);
+        ctx.strokeStyle = darkMetalActive ? '#f0c173' : '#ffd37f';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(guideHeadX, guideHeadY, headR + 1.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = darkMetalActive ? '#98d2ef' : '#9bcdf0';
+        ctx.beginPath();
+        ctx.arc(guideBodyX, guideBodyY, guideBodyR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = darkMetalActive ? '#eef5ff' : '#e4f1ff';
+        ctx.lineWidth = 1.75;
+        ctx.beginPath();
+        ctx.ellipse(guideShieldX, guideShieldY, guideShieldW * 0.62, guideShieldH * 0.52, guideShieldRot, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
         if (showHud) {
           ctx.fillStyle = darkMetalActive ? '#d0d7e5' : '#d9ecff';
           ctx.font = 'bold 11px sans-serif';
@@ -7610,7 +7734,7 @@ export class GameRenderer {
     const shieldH = (baseR * 1.45 + 14) * shieldScale;
     const shieldFrontX = x + dir * (baseR * 0.88);
     const shieldFrontY = y + baseR * 0.06;
-    const shieldUpX = x;
+    const shieldUpX = x + dir * (baseR * 0.28);
     const shieldUpY = y - baseR * 2.86;
     const shieldX = shieldFrontX + (shieldUpX - shieldFrontX) * shieldGuardPose;
     const shieldY = shieldFrontY + (shieldUpY - shieldFrontY) * shieldGuardPose;
@@ -7729,7 +7853,31 @@ export class GameRenderer {
     }
     ctx.restore();
 
-    // Head is drawn above the shield top so players can target it.
+    // Clarify collision lanes on sprite: head ring, body ring, shield ring.
+    const bodyHitX = x + dir * (baseR * (0.04 - shieldGuardPose * 0.12));
+    const bodyHitY = y - baseR * (0.68 + shieldGuardPose * 0.04);
+    const bodyHitR = baseR * (0.76 + shieldGuardPose * 0.22);
+    ctx.save();
+    ctx.globalAlpha = darkMetalActive ? 0.8 : 0.74;
+    ctx.setLineDash([4, 2.4]);
+    ctx.strokeStyle = darkMetalActive ? '#f0c173' : '#ffd37f';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR + 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = darkMetalActive ? '#98d2ef' : '#9bcdf0';
+    ctx.beginPath();
+    ctx.arc(bodyHitX, bodyHitY, bodyHitR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = darkMetalActive ? '#eef5ff' : '#e4f1ff';
+    ctx.lineWidth = 1.75;
+    ctx.beginPath();
+    ctx.ellipse(shieldX, shieldY, shieldW * 0.62, shieldH * 0.52, shieldRot, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Face remains visible, but raised guard now sits farther forward and can cover the head lane.
     ctx.fillStyle = '#efcfb1';
     ctx.beginPath();
     ctx.arc(headX, headY, headR, 0, Math.PI * 2);
