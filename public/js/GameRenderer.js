@@ -4632,6 +4632,9 @@ export class GameRenderer {
         : ['#f1c58b', '#d59755', '#ba7742', '#7f4c2b'];
       const speed = heavy ? 420 : 320;
       const life = heavy ? 0.84 : 0.68;
+      const lift = heavy ? 30 : 26;
+      const sizeBase = heavy ? 2.9 : 2.5;
+      const sizeJitter = heavy ? 4.8 : 3.4;
       for (let i = 0; i < burstCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = speed * (0.5 + Math.random() * 0.72);
@@ -4639,10 +4642,10 @@ export class GameRenderer {
           px + (Math.random() * 12 - 6),
           py + (Math.random() * 8 - 4),
           Math.cos(ang) * mag,
-          Math.sin(ang) * mag - (riceSide ? 24 : 28),
+          Math.sin(ang) * mag - lift,
           life * (0.72 + Math.random() * 0.34),
           life,
-          (riceSide ? 2.2 : 2.8) + Math.random() * (heavy ? 4.8 : 3.4),
+          sizeBase + Math.random() * sizeJitter,
           colors[Math.floor(Math.random() * colors.length)],
           heavy ? 560 : 500
         );
@@ -9972,26 +9975,28 @@ export class GameRenderer {
       const midY = Math.min(fromY, toY) - arcLift;
       const px = (1 - flight) * (1 - flight) * fromX + 2 * (1 - flight) * flight * midX + flight * flight * toX;
       const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
+      const throwSize = r * 0.16;
       if (sideName === 'left') {
         // Bread chunk.
         ctx.fillStyle = '#d89a59';
         ctx.beginPath();
-        ctx.ellipse(px, py, r * 0.16, r * 0.11, -0.15, 0, Math.PI * 2);
+        ctx.ellipse(px, py, throwSize, throwSize * 0.69, -0.15, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#8a562b';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(px - r * 0.05, py - r * 0.02);
-        ctx.lineTo(px + r * 0.02, py + r * 0.03);
+        ctx.moveTo(px - throwSize * 0.31, py - throwSize * 0.14);
+        ctx.lineTo(px + throwSize * 0.13, py + throwSize * 0.2);
         ctx.stroke();
       } else {
         // Rice ball.
+        const riceThrowR = throwSize * 0.95;
         ctx.fillStyle = '#edf8ff';
         ctx.beginPath();
-        ctx.arc(px, py, r * 0.12, 0, Math.PI * 2);
+        ctx.arc(px, py, riceThrowR, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#213644';
-        ctx.fillRect(px - r * 0.036, py + r * 0.032, r * 0.072, r * 0.044);
+        ctx.fillRect(px - riceThrowR * 0.3, py + riceThrowR * 0.26, riceThrowR * 0.6, riceThrowR * 0.34);
       }
     }
 
@@ -10014,12 +10019,14 @@ export class GameRenderer {
       const px = fromX + (toX - fromX) * drop;
       const py = fromY + (toY - fromY) * drop;
       const bombScale = upgraded ? 6.2 : 5.2;
+      const bombFootprintW = r * 0.23 * bombScale;
+      const bombFootprintH = r * 0.164 * bombScale;
       ctx.save();
       if (impactHold) ctx.globalAlpha = 0.8 - drop * 0.44;
       if (sideName === 'left') {
         // Bread loaf bomb.
-        const loafRx = r * 0.115 * bombScale;
-        const loafRy = r * 0.082 * bombScale;
+        const loafRx = bombFootprintW * 0.5;
+        const loafRy = bombFootprintH * 0.5;
         ctx.fillStyle = '#bd7744';
         ctx.beginPath();
         ctx.ellipse(px, py, loafRx, loafRy, 0.22, 0, Math.PI * 2);
@@ -10053,7 +10060,8 @@ export class GameRenderer {
         }
       } else {
         // Sticky rice-ball bomb.
-        const riceR = r * 0.076 * bombScale;
+        // Keep rice payload footprint aligned with bread payload size.
+        const riceR = bombFootprintW / 3.26;
         ctx.fillStyle = '#f8fdff';
         ctx.beginPath();
         ctx.arc(px - riceR * 0.75, py + riceR * 0.18, riceR * 0.88, 0, Math.PI * 2);
@@ -10115,8 +10123,9 @@ export class GameRenderer {
           const dist = burstReach * (0.35 + hash(seedBase + i * 4.91) * 0.72);
           const bx = toX + Math.cos(a) * dist;
           const by = toY + Math.sin(a) * dist * (0.62 + hash(seedBase + i * 2.23) * 0.36);
+          const chunkSize = r * (0.095 + hash(seedBase + i * 5.12) * 0.14) * (0.55 + impactBurst * 0.75);
           if (sideName === 'left') {
-            const rx = r * (0.1 + hash(seedBase + i * 5.12) * 0.16) * (0.55 + impactBurst * 0.75);
+            const rx = chunkSize;
             const ry = rx * (0.58 + hash(seedBase + i * 1.61) * 0.36);
             ctx.fillStyle = this.withAlpha('#d79b61', 0.25 + impactBurst * 0.6);
             ctx.beginPath();
@@ -10129,7 +10138,7 @@ export class GameRenderer {
             ctx.lineTo(bx + rx * 0.5, by + ry * 0.24);
             ctx.stroke();
           } else {
-            const rr = r * (0.085 + hash(seedBase + i * 6.03) * 0.12) * (0.55 + impactBurst * 0.75);
+            const rr = chunkSize * 0.88;
             ctx.fillStyle = this.withAlpha('#f3fcff', 0.24 + impactBurst * 0.62);
             ctx.beginPath();
             ctx.arc(bx, by, rr, 0, Math.PI * 2);

@@ -3297,7 +3297,8 @@ class GameRoom {
     const level = Math.max(1, Number(balloon.balloonLevel) || 1);
     const upgraded = level > 1;
     const impactX = bombOrigin.x;
-    const impactY = Math.max(targetY, TOWER_Y - 26);
+    const safeTargetY = Number.isFinite(targetY) ? Number(targetY) : (TOWER_Y - 26);
+    const impactY = Math.max(safeTargetY, TOWER_Y - 26);
     const blastRadius = upgraded
       ? (BALLOON_BOMB_BASE_RADIUS * BALLOON_HEAVY_BOMB_RADIUS_MULT + Math.min(36, (level - 2) * 10))
       : (BALLOON_BOMB_BASE_RADIUS + Math.min(24, (level - 1) * 6));
@@ -3342,7 +3343,7 @@ class GameRoom {
     const enemyTowerY = TOWER_Y - 24;
     this.queueHitSfx('foodburst', impactX, impactY, balloon.side, {
       foodType: balloon.side === 'left' ? 'bread' : 'rice',
-      heavy: blastRadius >= BALLOON_BOMB_BASE_RADIUS * BALLOON_HEAVY_BOMB_RADIUS_MULT * 0.9,
+      heavy: (Number(balloon.balloonLevel) || 1) > 1,
     });
     this.forEachEnemyMinionInRadius(
       balloon.side,
@@ -3869,6 +3870,27 @@ class GameRoom {
       if (m.balloon) {
         const towerTargetY = TOWER_Y - 26;
         const towerInRange = Math.abs(m.x - enemyX) <= 252;
+        const isGroundEnemy = (other) => Boolean(other) && !other.removed && !other.flying && !other.balloon;
+        let preferredGroundTarget = null;
+        let preferredGroundSq = Infinity;
+        this.forEachEnemyMinionInRadius(
+          m.side,
+          m.x,
+          m.y,
+          430,
+          targetBuckets,
+          MINION_TARGET_BUCKET_W,
+          (other) => {
+            if (!isGroundEnemy(other)) return;
+            const dx = other.x - m.x;
+            const dy = other.y - m.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= preferredGroundSq) return;
+            preferredGroundSq = d2;
+            preferredGroundTarget = other;
+          }
+        );
+        if (preferredGroundTarget) target = preferredGroundTarget;
         if ((Number(m.balloonBombCd) || 0) === 0) {
           if (target) {
             this.balloonDropBomb(m, enemySideName, target.x, target.y, targetBuckets, MINION_TARGET_BUCKET_W);
@@ -3882,8 +3904,24 @@ class GameRoom {
         }
 
         if (target) {
-          const holdDist = Math.max(84, m.r + target.r + 44);
-          if (Math.abs(target.x - m.x) > holdDist) m.x += dir * m.speed * dt;
+          const targetIsBalloon = Boolean(target.balloon);
+          const targetIsGround = isGroundEnemy(target);
+          const dxToTarget = (Number(target.x) || 0) - (Number(m.x) || 0);
+          if (targetIsGround) {
+            // Ground targets: keep moving until directly above them.
+            const alignPad = Math.max(10, (Number(target.r) || 14) * 0.38);
+            if (Math.abs(dxToTarget) > alignPad) {
+              const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
+              m.x += clamp(dxToTarget, -moveStep, moveStep);
+            }
+          } else if (!targetIsBalloon) {
+            // Other air units can still be approached to avoid complete stalls.
+            const holdDist = Math.max(84, m.r + target.r + 44);
+            if (Math.abs(dxToTarget) > holdDist) {
+              const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
+              m.x += clamp(dxToTarget, -moveStep, moveStep);
+            }
+          }
           if (m.atkCd === 0) {
             this.balloonThrowAtMinion(m, target);
             m.atkCd = 0.82;
@@ -3898,7 +3936,7 @@ class GameRoom {
         }
 
         if (m.flying) {
-          const desiredY = clamp(TOWER_Y - 362 + (m.side === 'left' ? -12 : 12), BALLOON_TOP_MIN_Y + 10, BALLOON_TOP_MAX_Y - 10);
+          const desiredY = clamp(TOWER_Y - 362, BALLOON_TOP_MIN_Y + 10, BALLOON_TOP_MAX_Y - 10);
           m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 1.7);
         }
         continue;
@@ -5343,6 +5381,12 @@ class GameRoom {
       minion.removed = true;
       this.minions.splice(index, 1);
       return;
+    }
+
+    // If a balloon already dropped a bomb, ensure it still detonates even if the
+    // carrier dies before the bomb timer reaches zero.
+    if (minion.balloon && minion.balloonBombImpactPending) {
+      this.resolveBalloonBombImpact(minion);
     }
 
     this.awardMinionKillGold(killerSide, goldScalar);
