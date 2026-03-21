@@ -900,7 +900,7 @@ button:hover {
   grid-template-columns: minmax(0, 1fr) 350px;
   gap: 10px;
   overflow: visible;
-  align-items: start;
+  align-items: stretch;
 }
 
 .post-chart-stack {
@@ -985,15 +985,16 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: clamp(250px, calc(100dvh - 260px), 760px);
+  max-height: none;
+  height: 100%;
   overflow: hidden;
   padding-right: 2px;
-  align-self: start;
+  align-self: stretch;
 }
 
 .post-side-block {
   min-height: 0;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   border-radius: 14px;
   border: 1px solid #8caed35a;
   background:
@@ -1012,7 +1013,8 @@ button:hover {
 
 #postUpgradeTimeline {
   min-height: 0;
-  max-height: clamp(180px, calc(100dvh - 420px), 560px);
+  max-height: none;
+  flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
