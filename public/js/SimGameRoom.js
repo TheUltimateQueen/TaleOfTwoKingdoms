@@ -88,6 +88,7 @@ const DRAGON_SUPER_BREATH_HALF_ANGLE = Math.PI * 0.24;
 const DRAGON_SUPER_BREATH_MINION_DAMAGE_MULT = 2.05;
 const DRAGON_SUPER_BREATH_TOWER_DAMAGE_MULT = 1.48;
 const DRAGON_SUPER_BREATH_LIFT = 34;
+const DRAGON_SUPER_BREATH_RISE_TIME = 0.25;
 const DRAGON_SUPER_BREATH_DURATION = 2;
 const DRAGON_SUPER_BREATH_TICK = 0.2;
 const DRAGON_SUPER_BREATH_CHANNEL_DAMAGE_MULT = 0.28;
@@ -2437,7 +2438,7 @@ class GameRoom {
     for (const m of holders) {
       m.candleCarrier = false;
       m.candleCarrierSide = null;
-      this.igniteMinion(m, 2.4, hitSide);
+      m.atkCd = Math.max(Number(m.atkCd) || 0, 0.22);
     }
 
     this.candleScorches.push({
@@ -2559,13 +2560,19 @@ class GameRoom {
       }
       scorch.smokeShieldTtl = Math.max(0, (Number(scorch.smokeShieldTtl) || 0) - dt);
       const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
-      const allyDps = Number.isFinite(scorch.allyDps) ? Math.max(0, scorch.allyDps) : CANDLE_SCORCH_DPS_ALLY;
       const enemyDps = Number.isFinite(scorch.enemyDps) ? Math.max(0, scorch.enemyDps) : CANDLE_SCORCH_DPS_ENEMY;
       const scorchSide = scorch.side === 'right' ? 'right' : (scorch.side === 'left' ? 'left' : null);
-      this.forEachMinionInRadius(scorch.x, scorch.y, scorch.r, minionBuckets, MINION_TARGET_BUCKET_W, (minion) => {
-        const dps = minion.side === candleSide ? allyDps : enemyDps;
-        if (dps > 0) this.dealDamageToMinion(minion, dps * dt, scorchSide, 'unit');
-      });
+      this.forEachEnemyMinionInRadius(
+        candleSide,
+        scorch.x,
+        scorch.y,
+        scorch.r,
+        minionBuckets,
+        MINION_TARGET_BUCKET_W,
+        (minion) => {
+          if (enemyDps > 0) this.dealDamageToMinion(minion, enemyDps * dt, scorchSide, 'unit');
+        }
+      );
       if (scorch.towerSide === 'left' || scorch.towerSide === 'right') {
         scorch.towerBurnTick = (Number(scorch.towerBurnTick) || 0) - dt;
         if (scorch.towerBurnTick <= 0) {
@@ -2795,7 +2802,7 @@ class GameRoom {
             // Dragons can only be damaged through their heart core.
             const core = this.dragonHeartCore(minion);
             if (!core) continue;
-            const hitR = core.r + a.r;
+            const hitR = core.r * 1.69 + a.r;
             if (dist2(a, core) > hitR * hitR) continue;
             dragonHeartshot = true;
           } else {
@@ -2842,6 +2849,9 @@ class GameRoom {
           }
 
           this.dealDamageToMinion(minion, damage, a.side, 'arrow');
+          if (dragonHeartshot) {
+            minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL * 1.85);
+          }
           minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
           if (shieldHeadshot && minion.hp > 0) {
             const retreatDir = minion.side === 'left' ? -1 : 1;
@@ -4184,20 +4194,16 @@ class GameRoom {
     const toX = clamp(mouthX + dir * (126 + dragon.r * 1.5), TOWER_X_LEFT + 44, TOWER_X_RIGHT - 44);
     const toY = clamp(mouthY + 184 + dragon.r * 0.8, TOWER_Y - 34, TOWER_Y + 212);
 
-    if (Number.isFinite(dragon.flyBaseY)) {
-      dragon.flyBaseY = clamp(dragon.flyBaseY - DRAGON_SUPER_BREATH_LIFT * 1.25, TOWER_Y - 238, TOWER_Y + 130);
-    }
-
-    dragon.dragonSuperBreathTtl = DRAGON_SUPER_BREATH_DURATION;
+    dragon.dragonSuperBreathRiseTtl = DRAGON_SUPER_BREATH_RISE_TIME;
+    dragon.dragonSuperBreathTtl = 0;
     dragon.dragonSuperBreathPulseCd = 0;
     dragon.dragonSuperBreathToX = toX;
     dragon.dragonSuperBreathToY = toY;
     dragon.dragonSuperBreathScorchDone = false;
-    dragon.dragonBreathTtl = Math.max(Number(dragon.dragonBreathTtl) || 0, 0.34);
+    dragon.dragonBreathTtl = 0;
     dragon.dragonBreathToX = toX;
     dragon.dragonBreathToY = toY;
 
-    this.queueHitSfx('dragonfire', mouthX, mouthY, dragon.side);
     this.queueHitSfx('powerup', toX, toY - 14, dragon.side);
     this.queueLine('SUPER BREATH!', dragon.x, dragon.y - dragon.r - 22, dragon.side);
   }
@@ -4271,11 +4277,36 @@ class GameRoom {
 
   tickDragonSuperBreathChannel(dragon, dt, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!dragon || !dragon.dragon) return false;
-    if (!Number.isFinite(dragon.dragonSuperBreathTtl) || dragon.dragonSuperBreathTtl <= 0) return false;
+    if (!Number.isFinite(dragon.dragonSuperBreathRiseTtl)) dragon.dragonSuperBreathRiseTtl = 0;
+    if (!Number.isFinite(dragon.dragonSuperBreathTtl)) dragon.dragonSuperBreathTtl = 0;
+    if (dragon.dragonSuperBreathRiseTtl <= 0 && dragon.dragonSuperBreathTtl <= 0) return false;
     if (!Number.isFinite(dragon.dragonSuperBreathPulseCd)) dragon.dragonSuperBreathPulseCd = 0;
 
-    dragon.dragonSuperBreathTtl = Math.max(0, dragon.dragonSuperBreathTtl - dt);
-    dragon.dragonSuperBreathPulseCd -= dt;
+    let channelDt = Math.max(0, Number(dt) || 0);
+    if (dragon.dragonSuperBreathRiseTtl > 0 && channelDt > 0) {
+      const riseBefore = dragon.dragonSuperBreathRiseTtl;
+      const riseStep = Math.min(riseBefore, channelDt);
+      const riseAfter = Math.max(0, riseBefore - riseStep);
+      dragon.dragonSuperBreathRiseTtl = riseAfter;
+      channelDt -= riseStep;
+
+      if (Number.isFinite(dragon.flyBaseY)) {
+        const liftProgress = riseStep / Math.max(0.001, DRAGON_SUPER_BREATH_RISE_TIME);
+        const riseLift = DRAGON_SUPER_BREATH_LIFT * 1.25 * liftProgress;
+        dragon.flyBaseY = clamp(dragon.flyBaseY - riseLift, TOWER_Y - 238, TOWER_Y + 130);
+      }
+
+      if (riseAfter === 0 && dragon.dragonSuperBreathTtl <= 0) {
+        dragon.dragonSuperBreathTtl = DRAGON_SUPER_BREATH_DURATION;
+        dragon.dragonSuperBreathPulseCd = 0;
+      }
+    }
+
+    if (dragon.dragonSuperBreathRiseTtl > 0) return true;
+    if (dragon.dragonSuperBreathTtl <= 0) return false;
+
+    dragon.dragonSuperBreathTtl = Math.max(0, dragon.dragonSuperBreathTtl - channelDt);
+    dragon.dragonSuperBreathPulseCd -= channelDt;
     dragon.dragonBreathTtl = Math.max(Number(dragon.dragonBreathTtl) || 0, 0.28);
     if (Number.isFinite(dragon.dragonSuperBreathToX)) dragon.dragonBreathToX = dragon.dragonSuperBreathToX;
     if (Number.isFinite(dragon.dragonSuperBreathToY)) dragon.dragonBreathToY = dragon.dragonSuperBreathToY;
@@ -4308,7 +4339,7 @@ class GameRoom {
         towerBurnTick: 0,
       });
     }
-    return dragon.dragonSuperBreathTtl > 0;
+    return dragon.dragonSuperBreathRiseTtl > 0 || dragon.dragonSuperBreathTtl > 0;
   }
 
   gunnerShot(gunner, target, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
@@ -5129,6 +5160,7 @@ class GameRoom {
       revived.dragonBreathToX = null;
       revived.dragonBreathToY = null;
       revived.dragonSuperBreathCd = DRAGON_SUPER_BREATH_INTERVAL * 0.5;
+      revived.dragonSuperBreathRiseTtl = 0;
       revived.dragonSuperBreathTtl = 0;
       revived.dragonSuperBreathPulseCd = 0;
       revived.dragonSuperBreathToX = null;
@@ -5332,6 +5364,7 @@ class GameRoom {
       gunnerSkyCannonAimY: null,
       gunnerSkyCannonQueue: null,
       dragonSuperBreathCd: 0,
+      dragonSuperBreathRiseTtl: 0,
       dragonSuperBreathTtl: 0,
       dragonSuperBreathPulseCd: 0,
       dragonSuperBreathToX: null,
@@ -5811,6 +5844,7 @@ class GameRoom {
       gunnerSkyCannonAimY: null,
       gunnerSkyCannonQueue: null,
       dragonSuperBreathCd: isDragon ? (DRAGON_SUPER_BREATH_INTERVAL + Math.random() * DRAGON_SUPER_BREATH_COOLDOWN_JITTER) : 0,
+      dragonSuperBreathRiseTtl: 0,
       dragonSuperBreathTtl: 0,
       dragonSuperBreathPulseCd: 0,
       dragonSuperBreathToX: null,

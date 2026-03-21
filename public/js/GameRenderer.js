@@ -557,26 +557,9 @@ export class GameRenderer {
     const dir = sideName === 'left' ? 1 : -1;
     const scale = Math.max(0.85, Math.min(1.75, baseR / 14));
     const upgraded = options.upgraded === true;
-    const pulseSeed = (Number(minion.id) || 0) * 0.19;
-    const pulse = 0.78 + Math.sin(performance.now() * 0.005 + pulseSeed) * 0.22;
-    const warmAura = sideName === 'left';
 
     ctx.save();
     ctx.translate(x, y);
-
-    if (upgraded) {
-      const auraColA = warmAura ? '#ffd79a' : '#e7f7ff';
-      const auraColB = warmAura ? '#d68d54' : '#8ec3da';
-      const auraR = baseR * (1.6 + pulse * 0.4);
-      const aura = ctx.createRadialGradient(0, -baseR * 0.22, 2, 0, -baseR * 0.22, auraR);
-      aura.addColorStop(0, this.withAlpha(auraColA, 0.24 + pulse * 0.16));
-      aura.addColorStop(0.55, this.withAlpha(auraColB, 0.14 + pulse * 0.14));
-      aura.addColorStop(1, this.withAlpha(auraColB, 0));
-      ctx.fillStyle = aura;
-      ctx.beginPath();
-      ctx.arc(0, -baseR * 0.22, auraR, 0, Math.PI * 2);
-      ctx.fill();
-    }
 
     if (specialType === 'gunner') {
       if (sideName === 'left') {
@@ -845,8 +828,6 @@ export class GameRenderer {
     const sideAccentSoft = westSide ? '#e3f1ff' : '#fce7ec';
     const sideAccentMain = westSide ? '#8fbfe3' : '#dca2af';
     const sideAccentDark = westSide ? '#4a7399' : '#8b5662';
-    const trim = sideAccentSoft;
-    const trimDark = sideAccentDark;
     const hpScale = Math.max(0.95, Math.min(1.85, scale * 1.06));
     const labelY = y - (baseR * (european ? 1.95 : 2.05));
     const labelColor = sideAccentSoft;
@@ -972,18 +953,6 @@ export class GameRenderer {
         });
       });
       if (drewCached) usedCachedBody = true;
-    }
-
-    if (upgraded && !cacheRender && !lowFx) {
-      const auraR = baseR * (1.65 + Math.sin(performance.now() * 0.005 + (Number(minion.id) || 0) * 0.17) * 0.2);
-      const aura = ctx.createRadialGradient(drawX, drawY - baseR * 0.22, 2, drawX, drawY - baseR * 0.22, auraR);
-      aura.addColorStop(0, this.withAlpha(trim, 0.32));
-      aura.addColorStop(0.62, this.withAlpha(trimDark, 0.19));
-      aura.addColorStop(1, this.withAlpha(trimDark, 0));
-      ctx.fillStyle = aura;
-      ctx.beginPath();
-      ctx.arc(drawX, drawY - baseR * 0.22, auraR, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     if (!usedCachedBody) {
@@ -7173,38 +7142,44 @@ export class GameRenderer {
       const cx = Number(core?.x) || x;
       const cy = Number(core?.y) || y;
       const cr = Math.max(5, Number(core?.r) || (r * 0.24));
+      const ttl = Math.max(0, Number(minion?.hitFlashTtl) || 0);
+      const heartBoost = Math.max(0, (ttl - MINION_HIT_FLASH_TTL) / Math.max(0.01, MINION_HIT_FLASH_TTL));
+      const burst = Math.min(1.25, heartBoost);
+      const sizeMul = 1 + burst * 0.8;
+      const alphaBoost = burst * 0.16;
 
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.32 + life * 0.42;
-      const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, cr * (2.2 + life * 0.45));
+      ctx.globalAlpha = 0.32 + life * 0.42 + alphaBoost;
+      const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, cr * (2.2 + life * 0.45) * sizeMul);
       glow.addColorStop(0, hitCore);
       glow.addColorStop(0.5, hitMid);
       glow.addColorStop(1, this.withAlpha(hitMid, 0));
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(cx, cy, cr * (2.2 + life * 0.45), 0, Math.PI * 2);
+      ctx.arc(cx, cy, cr * (2.2 + life * 0.45) * sizeMul, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.globalAlpha = 0.34 + life * 0.38;
+      ctx.globalAlpha = 0.34 + life * 0.38 + alphaBoost * 0.8;
       ctx.strokeStyle = this.withAlpha(hitStroke, 0.92);
       ctx.lineWidth = 1.5 + life * 2.2;
       ctx.beginPath();
-      ctx.arc(cx, cy, cr * (1.48 + life * 0.38), 0, Math.PI * 2);
+      ctx.arc(cx, cy, cr * (1.48 + life * 0.38) * (1 + burst * 0.65), 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.globalAlpha = 0.28 + life * 0.24;
+      ctx.globalAlpha = 0.28 + life * 0.24 + alphaBoost * 0.7;
       ctx.strokeStyle = this.withAlpha(sidePalette.primary, 0.94);
       ctx.lineWidth = 1.15 + life * 1.4;
+      const crossR = cr * (2.2 + burst * 0.8);
       ctx.beginPath();
-      ctx.moveTo(cx - cr * 2.2, cy);
-      ctx.lineTo(cx - cr * 1.2, cy);
-      ctx.moveTo(cx + cr * 1.2, cy);
-      ctx.lineTo(cx + cr * 2.2, cy);
-      ctx.moveTo(cx, cy - cr * 2.2);
-      ctx.lineTo(cx, cy - cr * 1.2);
-      ctx.moveTo(cx, cy + cr * 1.2);
-      ctx.lineTo(cx, cy + cr * 2.2);
+      ctx.moveTo(cx - crossR, cy);
+      ctx.lineTo(cx - cr * (1.2 + burst * 0.25), cy);
+      ctx.moveTo(cx + cr * (1.2 + burst * 0.25), cy);
+      ctx.lineTo(cx + crossR, cy);
+      ctx.moveTo(cx, cy - crossR);
+      ctx.lineTo(cx, cy - cr * (1.2 + burst * 0.25));
+      ctx.moveTo(cx, cy + cr * (1.2 + burst * 0.25));
+      ctx.lineTo(cx, cy + crossR);
       ctx.stroke();
       ctx.restore();
       return;
@@ -7492,15 +7467,6 @@ export class GameRenderer {
     ctx.ellipse(x, y + bodyR + 3, bodyR * 0.86, 5.8, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const auraR = bodyR + (minion.super ? 13 : 9);
-    const aura = ctx.createRadialGradient(x, y - 2, 2, x, y - 2, auraR);
-    aura.addColorStop(0, '#7df6bf44');
-    aura.addColorStop(1, '#1b2d2d00');
-    ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.arc(x, y - 2, auraR, 0, Math.PI * 2);
-    ctx.fill();
-
     if (shieldLife > 0) {
       ctx.strokeStyle = this.withAlpha('#a3f4ff', 0.28 + shieldLife * 0.52);
       ctx.lineWidth = 1.8 + shieldLife * 1.8;
@@ -7729,17 +7695,6 @@ export class GameRenderer {
         return;
       }
     }
-    const dramaPulse = 0.65 + Math.abs(swing) * 0.55;
-
-    const aura = ctx.createRadialGradient(x, y - bodyR * 0.2, bodyR * 0.6, x, y - bodyR * 0.2, bodyR * (2.2 + dramaPulse * 0.35));
-    aura.addColorStop(0, sideName === 'left' ? 'rgba(147, 214, 255, 0.24)' : 'rgba(255, 154, 154, 0.24)');
-    aura.addColorStop(0.5, sideName === 'left' ? 'rgba(116, 194, 255, 0.14)' : 'rgba(255, 128, 128, 0.13)');
-    aura.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.arc(x, y - bodyR * 0.2, bodyR * (2.2 + dramaPulse * 0.35), 0, Math.PI * 2);
-    ctx.fill();
-
     ctx.fillStyle = '#0000002a';
     ctx.beginPath();
     ctx.ellipse(x, y + bodyR + 5, bodyR * 0.94, 6.2, 0, 0, Math.PI * 2);
@@ -8012,10 +7967,8 @@ export class GameRenderer {
       ))
       : 0;
     if (!cacheRender) {
-      const auraRadius = Math.max(0, Number(minion.presidentAuraRadius) || 0);
-      const auraBucket = Math.max(0, Math.min(8, Math.round(auraRadius / 30)));
       const signBucket = Math.max(0, Math.min(4, Math.round(signLife * 4)));
-      const cacheKey = `president:${sideName}:${minion.super ? 1 : 0}:${setup ? 1 : 0}:${upgraded ? 1 : 0}:${auraBucket}:${signBucket}`;
+      const cacheKey = `president:${sideName}:${minion.super ? 1 : 0}:${setup ? 1 : 0}:${upgraded ? 1 : 0}:${signBucket}`;
       const cacheWidth = Math.ceil((setup ? (upgraded ? 244 : 220) : (upgraded ? 156 : 140)) * scale);
       const cacheHeight = Math.ceil((setup ? (upgraded ? 182 : 170) : (upgraded ? 146 : 136)) * scale);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -8023,7 +7976,6 @@ export class GameRenderer {
           ...minion,
           x: w / 2,
           y: h / 2,
-          presidentAuraRadius: auraBucket * 30,
           presidentExecutiveOrderSignTtl: (signBucket / 4) * (Number(minion.presidentExecutiveOrderSignMaxTtl) || 0.9),
         };
         this.drawPresidentSprite(proxy, { showHud: false, cacheRender: true });
@@ -8084,15 +8036,6 @@ export class GameRenderer {
     ctx.beginPath();
     ctx.ellipse(x, y + bodyR + 4, bodyR * 0.9, 6, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    if (setup) {
-      const auraR = Math.max(36, Math.min(72, (minion.presidentAuraRadius || 180) * 0.28));
-      ctx.strokeStyle = '#ffe2a266';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, y + 3, auraR, 0, Math.PI * 2);
-      ctx.stroke();
-    }
 
     ctx.save();
     ctx.translate(x, y);
