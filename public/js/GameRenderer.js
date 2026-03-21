@@ -4253,6 +4253,20 @@ export class GameRenderer {
     const minions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
     for (const minion of minions) {
       const side = minion?.side === 'right' ? 'right' : 'left';
+      if (minion?.balloon) {
+        const circles = this.balloonCollisionCircles(minion);
+        if (Array.isArray(circles) && circles.length) {
+          for (const circle of circles) {
+            this.strokeDebugCircle(
+              Number(circle?.x),
+              Number(circle?.y),
+              Number(circle?.r),
+              side === 'left' ? '#56d0ff' : '#ffa477'
+            );
+          }
+          continue;
+        }
+      }
       this.strokeDebugCircle(
         Number(minion?.x),
         Number(minion?.y),
@@ -7643,11 +7657,10 @@ export class GameRenderer {
     const y = Number(minion.y) || 0;
     const r = Math.max(16, Number(minion.r) || 16);
     const topY = y - r * 0.24;
-    const basketY = y + r * 0.98;
+    const basketY = y + r;
     return [
-      { x: x - r * 0.23, y: topY, r: r * 0.25 },
-      { x: x + r * 0.23, y: topY, r: r * 0.25 },
-      { x, y: basketY, r: r * 0.34 },
+      { x, y: topY, r: r * 0.5 },
+      { x, y: basketY, r: r * 0.34 * 1.32 },
     ];
   }
 
@@ -7667,10 +7680,11 @@ export class GameRenderer {
     const hitStroke = sideName === 'right' ? '#ff6d6d' : '#4da7ff';
     const life = Math.max(0, Math.min(1, activeTtl / MINION_HIT_FLASH_TTL));
     const rawHitIndex = Number(minion.balloonHitCircleIndex);
+    const fallbackIndex = Math.max(0, circles.length - 1);
     const desiredIndex = Number.isFinite(rawHitIndex) && rawHitIndex >= 0
       ? Math.max(0, Math.min(circles.length - 1, Math.round(rawHitIndex)))
-      : 2;
-    const circle = circles[desiredIndex] || circles[2] || circles[0];
+      : fallbackIndex;
+    const circle = circles[desiredIndex] || circles[fallbackIndex] || circles[0];
     if (!circle) return;
 
     const { ctx } = this;

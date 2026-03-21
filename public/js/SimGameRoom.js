@@ -1097,7 +1097,7 @@ class GameRoom {
       reviveShieldMaxTtl: roundTo(m.reviveShieldMaxTtl, 2),
       hitFlashTtl: roundTo(m.hitFlashTtl, 3),
       balloonHitCircleIndex: Number.isFinite(m.balloonHitCircleIndex)
-        ? clamp(Math.round(m.balloonHitCircleIndex), -1, 2)
+        ? clamp(Math.round(m.balloonHitCircleIndex), -1, 1)
         : -1,
       balloonHitCircleTtl: roundTo(m.balloonHitCircleTtl, 3),
       hero: Boolean(m.hero),
@@ -1951,11 +1951,10 @@ class GameRoom {
     const y = Number(minion.y) || 0;
     const r = Math.max(16, Number(minion.r) || 16);
     const topY = y - r * 0.24;
-    const basketY = y + r * 0.98;
+    const basketY = y + r;
     return [
-      { x: x - r * 0.23, y: topY, r: r * 0.25 },
-      { x: x + r * 0.23, y: topY, r: r * 0.25 },
-      { x, y: basketY, r: r * 0.34 },
+      { x, y: topY, r: r * 0.5 },
+      { x, y: basketY, r: r * 0.34 * 1.32 },
     ];
   }
 
@@ -2952,7 +2951,7 @@ class GameRoom {
           }
           minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
           if (minion.balloon && balloonHitCircleIndex >= 0) {
-            minion.balloonHitCircleIndex = clamp(Math.round(balloonHitCircleIndex), 0, 2);
+            minion.balloonHitCircleIndex = clamp(Math.round(balloonHitCircleIndex), 0, 1);
             minion.balloonHitCircleTtl = Math.max(Number(minion.balloonHitCircleTtl) || 0, MINION_HIT_FLASH_TTL);
           }
           if (shieldHeadshot && minion.hp > 0) {
