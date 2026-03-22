@@ -8,6 +8,8 @@ const QRCode = require('qrcode');
 const { PORT } = require('./constants');
 const AUDIO_FILE_RE = /\.(m4a|mp3|wav|ogg)$/i;
 const CONTROLLER_STATE_EMIT_MS = 66;
+const ROOM_CREATE_COOLDOWN_MS = 800;
+const MAX_ACTIVE_ROOMS = 120;
 const THEME_MODE_THEMED = 'themed';
 const THEME_MODE_UNTHEMED = 'unthemed';
 
@@ -41,6 +43,37 @@ function isDefaultPlayerName(name) {
 
 function createRoomId() {
   return Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+function safePayload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value;
+}
+
+function normalizeRoomId(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function normalizeJoinOrigin(value) {
+  if (typeof value !== 'string') return '';
+  const raw = value.trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    url.hash = '';
+    url.search = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function buildJoinUrl(origin, roomId) {
+  const safeOrigin = normalizeJoinOrigin(origin);
+  if (!safeOrigin) return `?controller=1&room=${roomId}`;
+  const base = safeOrigin.endsWith('/') ? safeOrigin.slice(0, -1) : safeOrigin;
+  return `${base}?controller=1&room=${roomId}`;
 }
 
 function getLanUrls(port) {
@@ -223,8 +256,10 @@ class ServerRoom {
 
   removeSocket(socketId) {
     let changed = false;
+    let removedDisplay = false;
     if (this.display && this.display.id === socketId) {
       this.display = null;
+      removedDisplay = true;
       changed = true;
     }
     this.rematchVotes.delete(socketId);
@@ -245,6 +280,7 @@ class ServerRoom {
 
     return {
       changed,
+      removedDisplay,
       empty: this.players.left.length === 0 && this.players.right.length === 0 && !this.display,
     };
   }
@@ -262,6 +298,45 @@ class GameServer {
     this.app.use(express.static(path.join(process.cwd(), 'public')));
 
     this.setupSocketHandlers();
+  }
+
+  roomByDisplaySocketId(socketId) {
+    for (const room of this.rooms.values()) {
+      if (room.display?.id === socketId) return room;
+    }
+    return null;
+  }
+
+  closeRoom(room, reason = 'Room closed.') {
+    if (!room) return;
+    this.io.to(room.id).emit('room_closed', { message: reason });
+    const roomSet = this.io?.sockets?.adapter?.rooms?.get(room.id);
+    if (roomSet) {
+      for (const id of Array.from(roomSet.values())) {
+        this.io.sockets.sockets.get(id)?.leave(room.id);
+      }
+    }
+    this.rooms.delete(room.id);
+  }
+
+  async emitRoomCreated(socket, room, origin) {
+    const joinUrl = buildJoinUrl(origin, room.id);
+    let qrDataUrl = null;
+    try {
+      qrDataUrl = await QRCode.toDataURL(joinUrl, { width: 300, margin: 1 });
+    } catch {
+      qrDataUrl = null;
+    }
+
+    socket.emit('room_created', {
+      roomId: room.id,
+      joinUrl,
+      qrDataUrl,
+      mode: room.mode,
+      themeMode: room.themeMode,
+      requiredPlayers: room.requiredPlayers(),
+      hostAuthoritative: Boolean(room.hostAuthoritative),
+    });
   }
 
   setupApiRoutes() {
@@ -298,46 +373,53 @@ class GameServer {
 
   setupSocketHandlers() {
     this.io.on('connection', (socket) => {
-      socket.on('create_room', async ({ name, origin, mode, themeMode }) => {
+      let lastRoomCreateAtMs = 0;
+
+      socket.on('create_room', async (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const nowMs = Date.now();
+        if (nowMs - lastRoomCreateAtMs < ROOM_CREATE_COOLDOWN_MS) {
+          socket.emit('room_create_error', { message: 'Please wait a moment before creating another room.' });
+          return;
+        }
+        lastRoomCreateAtMs = nowMs;
+
+        const existingRoom = this.roomByDisplaySocketId(socket.id);
+        if (existingRoom) {
+          socket.join(existingRoom.id);
+          await this.emitRoomCreated(socket, existingRoom, payload.origin);
+          this.broadcastRoom(existingRoom, { forceController: true });
+          return;
+        }
+
+        if (this.rooms.size >= MAX_ACTIVE_ROOMS) {
+          socket.emit('room_create_error', { message: 'Server is at room capacity. Please try again shortly.' });
+          return;
+        }
+
         let id = createRoomId();
         while (this.rooms.has(id)) id = createRoomId();
 
-        const roomMode = mode === '2v2' ? '2v2' : '1v1';
-        const roomThemeMode = normalizeThemeMode(themeMode || THEME_MODE_THEMED);
+        const roomMode = payload.mode === '2v2' ? '2v2' : '1v1';
+        const roomThemeMode = normalizeThemeMode(payload.themeMode || THEME_MODE_THEMED);
         const room = new ServerRoom(id, { mode: roomMode, themeMode: roomThemeMode });
-        room.attachDisplay(socket.id, name || 'Fuel Screen');
+        room.attachDisplay(socket.id, payload.name || 'Fuel Screen');
 
         this.rooms.set(id, room);
         socket.join(id);
-
-        const joinUrl = `${origin || ''}?controller=1&room=${id}`;
-        let qrDataUrl = null;
-        try {
-          qrDataUrl = await QRCode.toDataURL(joinUrl, { width: 300, margin: 1 });
-        } catch {
-          qrDataUrl = null;
-        }
-
-        socket.emit('room_created', {
-          roomId: id,
-          joinUrl,
-          qrDataUrl,
-          mode: room.mode,
-          themeMode: room.themeMode,
-          requiredPlayers: room.requiredPlayers(),
-          hostAuthoritative: Boolean(room.hostAuthoritative),
-        });
+        await this.emitRoomCreated(socket, room, payload.origin);
         this.broadcastRoom(room, { forceController: true });
       });
 
-      socket.on('join_room', ({ roomId, name }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('join_room', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) {
           socket.emit('join_error', { message: 'Room not found.' });
           return;
         }
 
-        const join = room.addPlayer(socket.id, name);
+        const join = room.addPlayer(socket.id, payload.name);
         if (!join) {
           socket.emit('join_error', { message: 'Room is full.' });
           return;
@@ -355,8 +437,9 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
-      socket.on('set_room_mode', ({ roomId, mode }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('set_room_mode', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) {
           socket.emit('room_mode_error', { message: 'Room not found.' });
           return;
@@ -365,7 +448,7 @@ class GameServer {
           socket.emit('room_mode_error', { message: 'Only the host display can change room size.' });
           return;
         }
-        const result = room.setMode(mode);
+        const result = room.setMode(payload.mode);
         if (!result?.ok) {
           socket.emit('room_mode_error', { message: result?.message || 'Unable to change room size.' });
           return;
@@ -378,8 +461,9 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
-      socket.on('set_room_theme', ({ roomId, themeMode }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('set_room_theme', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) {
           socket.emit('room_theme_error', { message: 'Room not found.' });
           return;
@@ -388,7 +472,7 @@ class GameServer {
           socket.emit('room_theme_error', { message: 'Only the host display can change theme.' });
           return;
         }
-        const result = room.setThemeMode(themeMode);
+        const result = room.setThemeMode(payload.themeMode);
         if (!result?.ok) {
           socket.emit('room_theme_error', { message: result?.message || 'Unable to change theme.' });
           return;
@@ -397,8 +481,9 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
-      socket.on('restart_room', ({ roomId }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('restart_room', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) {
           socket.emit('room_restart_error', { message: 'Room not found.' });
           return;
@@ -414,8 +499,9 @@ class GameServer {
         }
       });
 
-      socket.on('controller_rematch', ({ roomId, wantsRematch }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('controller_rematch', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) {
           socket.emit('controller_rematch_error', { message: 'Room not found.' });
           return;
@@ -429,7 +515,7 @@ class GameServer {
           socket.emit('controller_rematch_error', { message: 'Rematch is only available after match end.' });
           return;
         }
-        const voteResult = room.setRematchVote(socket.id, wantsRematch !== false);
+        const voteResult = room.setRematchVote(socket.id, payload.wantsRematch !== false);
         if (!voteResult?.ok) {
           socket.emit('controller_rematch_error', { message: voteResult?.message || 'Unable to record rematch vote.' });
           return;
@@ -439,8 +525,9 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
-      socket.on('control_pull', ({ roomId, x, y }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('control_pull', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room) return;
         if (room.hostAuthoritative) {
           const player = room.playerBySocket(socket.id);
@@ -448,52 +535,53 @@ class GameServer {
           this.io.to(room.display.id).emit('host_control_pull', {
             side: player.side,
             slot: player.slot,
-            x,
-            y,
+            x: payload.x,
+            y: payload.y,
           });
           return;
         }
       });
 
-      socket.on('host_state', ({ roomId, snapshot, controllerFrame, sfxEvents, damageEvents, lineEvents }) => {
-        const room = this.rooms.get((roomId || '').toUpperCase());
+      socket.on('host_state', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
         if (!room || !room.hostAuthoritative) return;
         if (!room.display || room.display.id !== socket.id) return;
         const nowMs = Date.now();
         const wasGameOver = Boolean(room.gameOver);
-        const frameThemeMode = normalizeThemeMode(controllerFrame?.themeMode || snapshot?.themeMode || room.themeMode);
+        const frameThemeMode = normalizeThemeMode(payload.controllerFrame?.themeMode || payload.snapshot?.themeMode || room.themeMode);
         if (room.themeMode !== frameThemeMode) room.themeMode = frameThemeMode;
-        if (controllerFrame) {
-          controllerFrame.themeMode = frameThemeMode;
-          room.lastControllerFrame = controllerFrame;
-          room.gameOver = Boolean(controllerFrame.gameOver);
-          room.winner = controllerFrame.winner || null;
+        if (payload.controllerFrame && typeof payload.controllerFrame === 'object') {
+          payload.controllerFrame.themeMode = frameThemeMode;
+          room.lastControllerFrame = payload.controllerFrame;
+          room.gameOver = Boolean(payload.controllerFrame.gameOver);
+          room.winner = payload.controllerFrame.winner || null;
         }
-        if (snapshot) {
-          snapshot.themeMode = frameThemeMode;
-          room.lastHostState = snapshot;
-          room.gameOver = Boolean(snapshot.gameOver);
-          room.winner = snapshot.winner || null;
-          this.emitStateToDisplays(room, snapshot, { excludeDisplay: true });
+        if (payload.snapshot && typeof payload.snapshot === 'object') {
+          payload.snapshot.themeMode = frameThemeMode;
+          room.lastHostState = payload.snapshot;
+          room.gameOver = Boolean(payload.snapshot.gameOver);
+          room.winner = payload.snapshot.winner || null;
+          this.emitStateToDisplays(room, payload.snapshot, { excludeDisplay: true });
         } else {
           room.lastHostState = null;
         }
         if (wasGameOver && !room.gameOver) room.clearRematchVotes();
         if (!room.gameOver && room.rematchVotes.size) room.clearRematchVotes();
-        this.emitControllerStates(room, room.lastControllerFrame || snapshot, false, nowMs);
-        if (Array.isArray(sfxEvents) && sfxEvents.length) this.emitEventToDisplays(room, 'hit_sfx', sfxEvents, { excludeDisplay: true });
-        if (Array.isArray(damageEvents) && damageEvents.length) this.emitEventToDisplays(room, 'damage_text', damageEvents, { excludeDisplay: true });
-        if (Array.isArray(lineEvents) && lineEvents.length) this.emitEventToDisplays(room, 'hero_line', lineEvents, { excludeDisplay: true });
+        this.emitControllerStates(room, room.lastControllerFrame || payload.snapshot, false, nowMs);
+        if (Array.isArray(payload.sfxEvents) && payload.sfxEvents.length) this.emitEventToDisplays(room, 'hit_sfx', payload.sfxEvents, { excludeDisplay: true });
+        if (Array.isArray(payload.damageEvents) && payload.damageEvents.length) this.emitEventToDisplays(room, 'damage_text', payload.damageEvents, { excludeDisplay: true });
+        if (Array.isArray(payload.lineEvents) && payload.lineEvents.length) this.emitEventToDisplays(room, 'hero_line', payload.lineEvents, { excludeDisplay: true });
       });
 
       socket.on('disconnect', () => {
         for (const [roomId, room] of this.rooms.entries()) {
-          const { changed, empty } = room.removeSocket(socket.id);
+          const { changed, removedDisplay, empty } = room.removeSocket(socket.id);
           if (!changed) continue;
 
-          if (empty) {
-            this.rooms.delete(roomId);
-          } else {
+          if (empty) this.rooms.delete(roomId);
+          else if (removedDisplay) this.closeRoom(room, 'Host disconnected. This room has closed. Please join a new room.');
+          else {
             this.io.to(room.id).emit('player_left');
             const autoResult = this.autoResolveControllerRematch(room);
             if (!autoResult?.ok) this.broadcastRoom(room, { forceController: true });

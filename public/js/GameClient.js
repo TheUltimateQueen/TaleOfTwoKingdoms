@@ -218,6 +218,16 @@ function comboStatus(sideState) {
   return `x${tier} (${streak}/10)`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
+    if (ch === '&') return '&amp;';
+    if (ch === '<') return '&lt;';
+    if (ch === '>') return '&gt;';
+    if (ch === '"') return '&quot;';
+    return '&#39;';
+  });
+}
+
 function killGoldMultiplier(sideState) {
   const level = Math.max(1, sideState?.bountyLevel || 1);
   return (1 + (level - 1) * 0.2).toFixed(2);
@@ -465,6 +475,16 @@ export class GameClient {
       if (!this.isController) this.setDisplayMode('lobby');
     });
 
+    this.socket.on('room_create_error', ({ message } = {}) => {
+      const text = message || 'Unable to create room right now.';
+      if (this.isController) {
+        this.controllerMsg.textContent = text;
+        return;
+      }
+      if (this.state.roomId && this.lobbyMsg) this.lobbyMsg.textContent = text;
+      else if (this.menuMsg) this.menuMsg.textContent = text;
+    });
+
     this.socket.on('room_mode_updated', ({ mode, requiredPlayers, themeMode }) => {
       if (this.isController) return;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
@@ -577,6 +597,39 @@ export class GameClient {
     this.socket.on('player_left', () => {
       if (this.isController) this.controllerMsg.textContent = 'Other player disconnected. Waiting for reconnection...';
       else this.centerHud.textContent = 'Controller disconnected. Waiting for players...';
+      this.renderLobbyPhonePreviews();
+    });
+
+    this.socket.on('room_closed', ({ message } = {}) => {
+      const text = message || 'Room closed.';
+      this.stopHostAuthorityLoop();
+      this.localKeyboardTestActive = false;
+      this.localPressedKeys.clear();
+      this.hostAuthoritative = false;
+      this.localRoom = null;
+      this.remoteDisplayCount = 0;
+      this.state.roomId = null;
+      this.state.snapshot = null;
+      this.state.world = null;
+      this.resetGameOverPresentation();
+      this.setPostGamePanel(false);
+
+      if (this.isController) {
+        this.state.side = null;
+        this.state.slot = 0;
+        this.controllerMsg.textContent = text;
+        this.setControllerMode(false);
+        return;
+      }
+
+      if (this.roomCodeEl) this.roomCodeEl.textContent = '----';
+      if (this.qrImage) this.qrImage.removeAttribute('src');
+      if (this.joinLink) {
+        this.joinLink.removeAttribute('href');
+        this.joinLink.textContent = '';
+      }
+      this.setDisplayMode('lobby');
+      if (this.lobbyMsg) this.lobbyMsg.textContent = text;
       this.renderLobbyPhonePreviews();
     });
 
@@ -1563,11 +1616,17 @@ export class GameClient {
       const eventTimeText = this.formatPostTime(event.t || 0);
       const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
       const title = `${sideLong} ${label} (Level ${level}) at ${eventTimeText}`;
+      const safeTitle = escapeHtml(title);
+      const safeIcon = escapeHtml(icon);
+      const safeSide = escapeHtml(side);
+      const safeLabel = escapeHtml(label);
+      const safeCode = escapeHtml(code);
+      const safeEventTimeText = escapeHtml(eventTimeText);
       return `
-        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" title="${title}">
-          <span class="post-upgrade-icon" style="color:${sideColor}">${icon}</span>
-          <span class="post-upgrade-label"><span class="post-upgrade-side">${side}</span> ${label} Lv ${level}</span>
-          <span class="post-upgrade-time">${code} ${eventTimeText}</span>
+        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" title="${safeTitle}">
+          <span class="post-upgrade-icon" style="color:${sideColor}">${safeIcon}</span>
+          <span class="post-upgrade-label"><span class="post-upgrade-side">${safeSide}</span> ${safeLabel} Lv ${level}</span>
+          <span class="post-upgrade-time">${safeCode} ${safeEventTimeText}</span>
         </article>
       `;
     }).join('');
