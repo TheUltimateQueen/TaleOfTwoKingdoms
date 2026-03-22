@@ -133,6 +133,51 @@ const POST_UPGRADE_ICONS = {
   superMinionLevel: '⭐',
 };
 const POST_UPGRADE_FEED_MAX_EVENTS = 40;
+const POST_GAME_BREAD_PUNS = [
+  'Bread won. Rice is now in loaf spirits.',
+  'Dough it again: Bread rises to the top.',
+  'Bread victory! Rice just could not crust the process.',
+  'Bread takes it. That finish was toast-worthy.',
+  'Another one for Bread. Rice got out-kneaded.',
+  'Bread wins by a crumb-fortable margin.',
+  'Bread clutched it. Rice was left in crumbs.',
+  'Bread empire rises. Rice got baked under pressure.',
+  'Bread secures the bag-uette and the crown.',
+  'Bread wins. Rice could not handle the heat in the oven.',
+];
+const POST_GAME_RICE_PUNS = [
+  'Rice wins. Bread is feeling a little crumby.',
+  'Rice cooked today. Bread got steamed out.',
+  'Rice victory! Bread was toast by the end.',
+  'Rice takes the grain finale in style.',
+  'Rice served a hot finish. Bread got overcooked.',
+  'Rice wins big. Bread could not loaf around forever.',
+  'Rice takes the bowl and bread takes the L.',
+  'Rice clutched it. Bread was left to cool.',
+  'Rice empire reigns. Bread got rolled flat.',
+  'Rice wins. Bread could not butter up the scoreboard.',
+];
+
+function hashString(value) {
+  const text = `${value || ''}`;
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash * 31) + text.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+
+function postGamePunTitle(winner, themeMode, seed = '') {
+  if (normalizeThemeMode(themeMode) !== THEME_MODE_THEMED) return null;
+  const puns = winner === 'left'
+    ? POST_GAME_BREAD_PUNS
+    : winner === 'right'
+      ? POST_GAME_RICE_PUNS
+      : null;
+  if (!puns || !puns.length) return null;
+  const index = Math.abs(hashString(`${winner}|${seed}`)) % puns.length;
+  return puns[index];
+}
 
 function compactUpgradeFeedEvents(events, maxEvents = POST_UPGRADE_FEED_MAX_EVENTS) {
   const source = Array.isArray(events) ? events : [];
@@ -1811,7 +1856,13 @@ export class GameClient {
     this.postGameReportData = report;
 
     const winnerLabel = sideVictoryLabel(snapshot.winner, this.state.themeMode);
-    if (this.postGameTitle) this.postGameTitle.textContent = `${winnerLabel} Victory Report`;
+    const punTitle = postGamePunTitle(snapshot.winner, this.state.themeMode, reportKey);
+    if (this.postGameTitle) {
+      this.postGameTitle.textContent = punTitle || `${winnerLabel} Victory Report`;
+      this.postGameTitle.classList.remove('team-west', 'team-east');
+      if (snapshot.winner === 'left') this.postGameTitle.classList.add('team-west');
+      else if (snapshot.winner === 'right') this.postGameTitle.classList.add('team-east');
+    }
     if (this.postGameStats) {
       const leftAcc = arrowAccuracy(snapshot.left);
       const rightAcc = arrowAccuracy(snapshot.right);
