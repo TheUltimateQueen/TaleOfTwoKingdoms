@@ -6134,7 +6134,7 @@ class GameRoom {
 
     if (isBalloon) {
       const balloonTech = balloonSpawnLevel;
-      hp *= 1.72 + balloonTech * 0.34;
+      hp *= (1.72 + balloonTech * 0.34) * 2;
       dmg *= 0.62 + Math.min(0.28, balloonTech * 0.08);
       speed *= 0.76;
       radius = Math.max(32, radius * 2);
