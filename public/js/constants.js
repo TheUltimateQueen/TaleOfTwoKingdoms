@@ -46,6 +46,41 @@ export const UPGRADE_HINTS = {
   superMinionLevel: '+super spawn rate',
 };
 
+const STAGED_UPGRADE_COPY = {
+  balloonLevel: {
+    unlockLabel: 'Unlock Balloon',
+    upgradedLabel: 'Balloon+',
+    unlockHint: 'BA1 unlocks sky balloons',
+    upgradedHint: '+balloon hp/dmg/spawn rate',
+  },
+  dragonLevel: {
+    unlockLabel: 'Unlock Dragon',
+    upgradedLabel: 'Dragon+',
+    unlockHint: 'DR1 unlocks dragons',
+    upgradedHint: '+dragon spawn rate',
+  },
+  superMinionLevel: {
+    unlockLabel: 'Unlock Super',
+    upgradedLabel: 'Super+',
+    unlockHint: 'SU1 unlocks super minions',
+    upgradedHint: '+super spawn rate',
+  },
+};
+
+export function upgradeLabelForLevel(type, level = null) {
+  const staged = STAGED_UPGRADE_COPY[type];
+  if (!staged) return UPGRADE_LABELS[type] || 'Upgrade';
+  const value = Math.max(0, Number(level) || 0);
+  return value <= 0 ? staged.unlockLabel : staged.upgradedLabel;
+}
+
+export function upgradeHintForLevel(type, level = null) {
+  const staged = STAGED_UPGRADE_COPY[type];
+  if (!staged) return UPGRADE_HINTS[type] || 'upgrade effect';
+  const value = Math.max(0, Number(level) || 0);
+  return value <= 0 ? staged.unlockHint : staged.upgradedHint;
+}
+
 export const SHOT_POWER_LABELS = {
   multiShot: 'Multi',
   ultraShot: 'Ultra',

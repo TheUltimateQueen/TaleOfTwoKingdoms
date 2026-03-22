@@ -2,8 +2,8 @@ import {
   SHOT_INTERVAL,
   SHOT_POWER_LABELS,
   TEAM_COLORS,
-  UPGRADE_HINTS,
-  UPGRADE_LABELS,
+  upgradeHintForLevel,
+  upgradeLabelForLevel,
 } from './constants.js';
 import {
   DEFAULT_THEME_MODE,
@@ -4371,7 +4371,10 @@ export class GameRenderer {
     if (Array.isArray(snapshot.cannonBalls)) {
       for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
     }
-    for (const card of snapshot.upgradeCards) this.drawUpgradeCard(card);
+    for (const card of snapshot.upgradeCards) {
+      const sideState = card?.side === 'right' ? snapshot?.right : snapshot?.left;
+      this.drawUpgradeCard(card, sideState);
+    }
     if (Array.isArray(snapshot.candleScorches)) {
       for (let i = 0; i < snapshot.candleScorches.length; i += 1) {
         if (this.fxQuality === 'low' && i % 2 === 1) continue;
@@ -6908,7 +6911,7 @@ export class GameRenderer {
     }
   }
 
-  drawUpgradeCard(card) {
+  drawUpgradeCard(card, sideState = null) {
     const { ctx } = this;
     const category = upgradeCategory(card.type);
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
@@ -6954,11 +6957,12 @@ export class GameRenderer {
 
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
-    const titleText = fitCardText(UPGRADE_LABELS[card.type] || 'Upgrade', Math.max(20, card.w - 22));
+    const cardLevel = Math.max(0, Number(sideState?.[card.type]) || 0);
+    const titleText = fitCardText(upgradeLabelForLevel(card.type, cardLevel), Math.max(20, card.w - 22));
     ctx.fillText(titleText, textX, card.y - 5);
     ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    const hintText = fitCardText(UPGRADE_HINTS[card.type] || 'upgrade effect', Math.max(18, card.w - 24));
+    const hintText = fitCardText(upgradeHintForLevel(card.type, cardLevel), Math.max(18, card.w - 24));
     ctx.fillText(hintText, textX, card.y + 4);
     ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';

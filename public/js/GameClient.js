@@ -1,7 +1,7 @@
 import { GameRenderer } from './GameRenderer.js';
 import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
-import { SHOT_POWER_LABELS, TEAM_COLORS, UPGRADE_LABELS } from './constants.js';
+import { SHOT_POWER_LABELS, TEAM_COLORS, upgradeLabelForLevel } from './constants.js';
 import { GameRoom as SimGameRoom } from './SimGameRoom.js';
 import {
   DEFAULT_THEME_MODE,
@@ -1607,12 +1607,13 @@ export class GameClient {
     this.postUpgradeTimeline.innerHTML = upgrades.map((event) => {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
-      const label = UPGRADE_LABELS[event.type] || event.type;
+      const level = Math.max(0, Number(event.level) || 0);
+      const priorLevel = Math.max(0, level - 1);
+      const label = upgradeLabelForLevel(event.type, priorLevel);
       const side = sideShortName(event.side, this.state.themeMode);
       const sideLong = sideDisplayName(event.side, this.state.themeMode);
       const sideColor = event.side === 'right' ? '#ffb4b4' : '#a9d7ff';
       const sideClass = event.side === 'right' ? 'side-east' : 'side-west';
-      const level = Math.max(0, Number(event.level) || 0);
       const eventTimeText = this.formatPostTime(event.t || 0);
       const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
       const title = `${sideLong} ${label} (Level ${level}) at ${eventTimeText}`;
