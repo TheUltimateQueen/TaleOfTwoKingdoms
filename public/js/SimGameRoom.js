@@ -154,6 +154,9 @@ const BALLOON_HEAVY_BOMB_INTERVAL_MIN = 2;
 const BALLOON_HEAVY_BOMB_INTERVAL_MAX = 4;
 const BALLOON_TOP_MIN_Y = 26;
 const BALLOON_TOP_MAX_Y = 188;
+const BALLOON_LOW_HP_MAX_Y = TOWER_Y + 120;
+const BALLOON_HEALTH_DROP_MAX = Math.max(0, BALLOON_LOW_HP_MAX_Y - BALLOON_TOP_MAX_Y);
+const DRAGON_CANDLE_DAMAGE_MULT = 0.11; // 1/20th of previous 2.2x dragon-vs-candle wax damage.
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
 const NECRO_EXPERT_REVIVE_HP_FRACTION = 0.125;
@@ -2550,7 +2553,7 @@ class GameRoom {
     const baseDamage = Math.max(1, Number(minion.dmg) || 8);
     let waxLoss = baseDamage * 0.44;
     if (minion.hero) waxLoss *= 2.8;
-    else if (minion.dragon) waxLoss *= 2.2;
+    else if (minion.dragon) waxLoss *= DRAGON_CANDLE_DAMAGE_MULT;
     else if (minion.gunner) waxLoss *= 1.7;
     else if (minion.rider) waxLoss *= 1.42;
     else if (minion.digger) waxLoss *= 0.92;
@@ -3446,6 +3449,21 @@ class GameRoom {
     };
   }
 
+  balloonHealthDropOffset(balloon) {
+    if (!balloon) return 0;
+    const maxHp = Math.max(1, Number(balloon.maxHp) || 1);
+    const hp = clamp(Number(balloon.hp) || 0, 0, maxHp);
+    const missingHpPct = 1 - hp / maxHp;
+    return BALLOON_HEALTH_DROP_MAX * missingHpPct;
+  }
+
+  balloonFlightBand(balloon) {
+    const drop = this.balloonHealthDropOffset(balloon);
+    const minY = BALLOON_TOP_MIN_Y;
+    const maxY = Math.min(BALLOON_LOW_HP_MAX_Y, BALLOON_TOP_MAX_Y + drop);
+    return { minY, maxY, drop };
+  }
+
   tickMinions(dt, precomputedTargetBuckets = null, precomputedCarrierCounts = null) {
     const targetBuckets = precomputedTargetBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const carrierCounts = precomputedCarrierCounts || this.buildCandleCarrierCounts();
@@ -3683,8 +3701,9 @@ class GameRoom {
         const isBalloon = Boolean(m.balloon);
         m.flyPhase += dt * (isBalloon ? (0.82 + Math.min(0.5, m.speed / 220)) : (1.45 + Math.min(1.1, m.speed / 130)));
         const amp = isBalloon ? (8 + m.r * 0.14) : (12 + m.r * 0.22);
-        const minY = isBalloon ? BALLOON_TOP_MIN_Y : (TOWER_Y - 220);
-        const maxY = isBalloon ? BALLOON_TOP_MAX_Y : (TOWER_Y + 150);
+        const flight = isBalloon ? this.balloonFlightBand(m) : null;
+        const minY = isBalloon ? flight.minY : (TOWER_Y - 220);
+        const maxY = isBalloon ? flight.maxY : (TOWER_Y + 150);
         m.y = clamp(m.flyBaseY + Math.sin(m.flyPhase) * amp, minY, maxY);
       }
       const enemySideName = m.side === 'left' ? 'right' : 'left';
@@ -3990,7 +4009,12 @@ class GameRoom {
         }
 
         if (m.flying) {
-          const desiredY = clamp(TOWER_Y - 362, BALLOON_TOP_MIN_Y + 10, BALLOON_TOP_MAX_Y - 10);
+          const flight = this.balloonFlightBand(m);
+          const desiredY = clamp(
+            (TOWER_Y - 362) + flight.drop,
+            flight.minY + 10,
+            Math.max(flight.minY + 10, flight.maxY - 10)
+          );
           m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 1.7);
         }
         continue;
@@ -4126,7 +4150,15 @@ class GameRoom {
       } else {
         m.x += dir * m.speed * dt;
         if (m.flying) {
-          const desiredY = TOWER_Y - 120;
+          let desiredY = TOWER_Y - 120;
+          if (m.balloon) {
+            const flight = this.balloonFlightBand(m);
+            desiredY = clamp(
+              (TOWER_Y - 120) + flight.drop * 0.55,
+              flight.minY + 10,
+              Math.max(flight.minY + 10, flight.maxY - 10)
+            );
+          }
           m.flyBaseY += (desiredY - m.flyBaseY) * Math.min(1, dt * 2.2);
         }
       }
@@ -4685,14 +4717,7 @@ class GameRoom {
       if (victim.hp <= 0) this.killMinionByRef(victim, dragon.side, { goldScalar: 0.85 });
     }
 
-    const enemyCandle = this.candles?.[enemySideName];
-    if (enemyCandle && !enemyCandle.destroyed && !enemyCandle.delivering) {
-      const dx = enemyCandle.x - toX;
-      const dy = (enemyCandle.y - 8) - toY;
-      if (dx * dx + dy * dy <= DRAGON_SUPER_BREATH_GROUND_SCORCH_RADIUS * DRAGON_SUPER_BREATH_GROUND_SCORCH_RADIUS) {
-        this.hitCandleWithMinion(enemyCandle, dragon);
-      }
-    }
+    // Super breath ground flame should not damage candles.
 
     const enemyX = sideName === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
     const towerY = TOWER_Y - 26;
