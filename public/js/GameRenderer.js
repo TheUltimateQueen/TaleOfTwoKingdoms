@@ -4636,9 +4636,13 @@ export class GameRenderer {
       const riceSide = event?.foodType === 'rice' || pside === 'right';
       const heavy = Boolean(event?.heavy);
       const burstCount = this.scaledParticleCount(heavy ? 44 : 38, 6);
-      const colors = riceSide
-        ? ['#f8fdff', '#dceefe', '#c1d6e7', '#2b3e52']
-        : ['#f1c58b', '#d59755', '#ba7742', '#7f4c2b'];
+      const colors = this.isThemedEmpires()
+        ? (
+          riceSide
+            ? ['#f8fdff', '#dceefe', '#c1d6e7', '#2b3e52']
+            : ['#f1c58b', '#d59755', '#ba7742', '#7f4c2b']
+        )
+        : ['#2f353c', '#4f5864', '#7b858f', '#d0b48a', '#ffbf63'];
       const speed = heavy ? 340 : 320;
       const life = heavy ? 0.72 : 0.68;
       const lift = 26;
@@ -10010,7 +10014,26 @@ export class GameRenderer {
       const px = (1 - flight) * (1 - flight) * fromX + 2 * (1 - flight) * flight * midX + flight * flight * toX;
       const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
       const throwSize = r * 0.16;
-      if (sideName === 'left') {
+      if (!themed) {
+        // Classic mode: launch a rock.
+        const rockR = throwSize * 0.9;
+        ctx.fillStyle = '#7f8895';
+        ctx.beginPath();
+        ctx.arc(px, py, rockR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = this.withAlpha('#adb5bf', 0.55);
+        ctx.beginPath();
+        ctx.arc(px - rockR * 0.24, py - rockR * 0.22, rockR * 0.46, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#4c5460';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px - rockR * 0.42, py - rockR * 0.04);
+        ctx.lineTo(px + rockR * 0.3, py + rockR * 0.18);
+        ctx.moveTo(px - rockR * 0.12, py - rockR * 0.4);
+        ctx.lineTo(px + rockR * 0.22, py - rockR * 0.08);
+        ctx.stroke();
+      } else if (sideName === 'left') {
         // Bread chunk.
         ctx.fillStyle = '#d89a59';
         ctx.beginPath();
@@ -10057,7 +10080,37 @@ export class GameRenderer {
       const bombFootprintH = r * 0.164 * bombScale;
       ctx.save();
       if (impactHold) ctx.globalAlpha = 0.8 - drop * 0.44;
-      if (sideName === 'left') {
+      if (!themed) {
+        // Classic mode: dropped iron bomb.
+        const bombR = Math.max(bombFootprintH * 0.55, bombFootprintW * 0.2);
+        ctx.fillStyle = '#2f3640';
+        ctx.beginPath();
+        ctx.arc(px, py, bombR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#6a737f';
+        ctx.beginPath();
+        ctx.arc(px - bombR * 0.24, py - bombR * 0.2, bombR * 0.48, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#1b222b';
+        ctx.lineWidth = upgraded ? 2.2 : 1.2;
+        ctx.beginPath();
+        ctx.arc(px, py, bombR, 0, Math.PI * 2);
+        ctx.stroke();
+        const fuseX = px + dir * bombR * 0.2;
+        const fuseY = py - bombR * 0.9;
+        ctx.strokeStyle = '#8a6a43';
+        ctx.lineWidth = upgraded ? 1.9 : 1.3;
+        ctx.beginPath();
+        ctx.moveTo(fuseX, fuseY + bombR * 0.35);
+        ctx.lineTo(fuseX + dir * bombR * 0.56, fuseY - bombR * 0.16);
+        ctx.stroke();
+        if (!impactHold) {
+          ctx.fillStyle = this.withAlpha('#ffcb74', 0.88);
+          ctx.beginPath();
+          ctx.arc(fuseX + dir * bombR * 0.62, fuseY - bombR * 0.2, bombR * 0.17, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (sideName === 'left') {
         // Bread loaf bomb.
         const loafRx = bombFootprintW * 0.5;
         const loafRy = bombFootprintH * 0.5;
@@ -10137,7 +10190,10 @@ export class GameRenderer {
         : r * impactBase * (0.78 + impactPreview * 0.95);
       if (impactHold) {
         const ringPieces = upgraded ? 10 : 7;
-        ctx.strokeStyle = this.withAlpha(sideName === 'left' ? '#ffd9a6' : '#e4f6ff', 0.18 + impactPreview * 0.44);
+        ctx.strokeStyle = this.withAlpha(
+          themed ? (sideName === 'left' ? '#ffd9a6' : '#e4f6ff') : '#ffd393',
+          0.18 + impactPreview * 0.44
+        );
         ctx.lineWidth = (upgraded ? 4 : 2.8) * (0.78 + impactPreview * 0.32);
         for (let i = 0; i < ringPieces; i += 1) {
           if (((i + ((Number(minion.id) || 0) % 3)) % 3) === 0) continue;
@@ -10163,7 +10219,19 @@ export class GameRenderer {
           const bx = toX + Math.cos(a) * dist;
           const by = toY + Math.sin(a) * dist * (0.62 + hash(seedBase + i * 2.23) * 0.36);
           const chunkSize = r * (0.095 + hash(seedBase + i * 5.12) * 0.14) * (0.55 + impactBurst * 0.75);
-          if (sideName === 'left') {
+          if (!themed) {
+            const rr = chunkSize * (0.78 + hash(seedBase + i * 1.61) * 0.34);
+            ctx.fillStyle = this.withAlpha('#6f7885', 0.24 + impactBurst * 0.62);
+            ctx.beginPath();
+            ctx.ellipse(bx, by, rr, rr * 0.76, a * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = this.withAlpha('#2a313a', 0.2 + impactBurst * 0.45);
+            ctx.lineWidth = Math.max(1, rr * 0.16);
+            ctx.beginPath();
+            ctx.moveTo(bx - rr * 0.44, by - rr * 0.12);
+            ctx.lineTo(bx + rr * 0.4, by + rr * 0.19);
+            ctx.stroke();
+          } else if (sideName === 'left') {
             const rx = chunkSize;
             const ry = rx * (0.58 + hash(seedBase + i * 1.61) * 0.36);
             ctx.fillStyle = this.withAlpha('#d79b61', 0.25 + impactBurst * 0.6);
