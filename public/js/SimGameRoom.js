@@ -2003,7 +2003,7 @@ class GameRoom {
     const topY = y - r * 0.24;
     const basketY = y + r;
     return [
-      { x, y: topY, r: r * 0.5 },
+      { x, y: topY, r: r * 0.62 },
       { x, y: basketY, r: r * 0.34 * 1.32 },
     ];
   }
@@ -2960,6 +2960,7 @@ class GameRoom {
           this.markArrowHit(a);
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
+          if (minion.balloon && balloonHitCircleIndex === 0) damage *= 2;
           const shieldHeadshot = Boolean(minion.shieldBearer && shieldVulnerableHit === 'head');
           if (shieldHeadshot) damage *= SHIELD_HEADSHOT_DAMAGE_MULT;
           else if (minion.shieldBearer && shieldVulnerableHit === 'body') damage *= SHIELD_BODYSHOT_DAMAGE_MULT;
@@ -4540,7 +4541,8 @@ class GameRoom {
   }
 
   statSpecialSuccessChance(side, type) {
-    const overrideBase = Number(side?.debugSpecialChanceOverrides?.[type]);
+    const rawOverride = side?.debugSpecialChanceOverrides?.[type];
+    const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
       ? overrideBase
       : Number(SPECIAL_SPAWN_BASE_CHANCE[type]);

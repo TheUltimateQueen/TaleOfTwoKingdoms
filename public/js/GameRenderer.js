@@ -238,6 +238,8 @@ const MAX_DEATH_GHOSTS = 110;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
+const HERO_LINE_TIME_SCALE = 0.5;
+const HERO_LINE_MOTION_SCALE = 0.5;
 const MILITIA_FOOD_GAG_TTL = 0.62;
 const MILITIA_FOOD_TRIGGER_MIN_CD = 0.2;
 const MILITIA_FOOD_TRIGGER_DELTA = 0.14;
@@ -5004,9 +5006,9 @@ export class GameRenderer {
     let write = 0;
     for (let i = 0; i < this.heroLines.length; i += 1) {
       const b = this.heroLines[i];
-      b.y += b.vy * dt;
-      b.vy -= 18 * dt;
-      b.life -= dt;
+      b.y += b.vy * dt * HERO_LINE_MOTION_SCALE;
+      b.vy -= 18 * dt * HERO_LINE_MOTION_SCALE;
+      b.life -= dt * HERO_LINE_TIME_SCALE;
       if (b.life <= 0) continue;
       this.heroLines[write] = b;
       write += 1;
@@ -5843,7 +5845,8 @@ export class GameRenderer {
   }
 
   specialSpawnChanceForType(sideState, specialType) {
-    const overrideBase = Number(sideState?.debugSpecialChanceOverrides?.[specialType]);
+    const rawOverride = sideState?.debugSpecialChanceOverrides?.[specialType];
+    const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
       ? overrideBase
       : Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
@@ -7703,7 +7706,7 @@ export class GameRenderer {
     const topY = y - r * 0.24;
     const basketY = y + r;
     return [
-      { x, y: topY, r: r * 0.5 },
+      { x, y: topY, r: r * 0.62 },
       { x, y: basketY, r: r * 0.34 * 1.32 },
     ];
   }
