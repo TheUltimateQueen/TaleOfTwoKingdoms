@@ -3488,9 +3488,11 @@ export class GameRenderer {
   harvestBackdropWorkerCount(sideState) {
     const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
     const bounty = Math.max(1, Number(sideState?.bountyLevel) || 1);
+    const economy = Math.max(0, Number(sideState?.economyLevel) || 0);
     const resourceFarmers = Math.max(0, resource - 1);
     const bountyFarmers = Math.max(0, bounty - 1);
-    return Math.min(12, 2 + resourceFarmers + bountyFarmers);
+    const economyFarmers = economy;
+    return Math.min(12, 2 + resourceFarmers + bountyFarmers + economyFarmers);
   }
 
   drawBackdropHarvester(sideName, x, y, scale = 1, animT = 0) {
@@ -4630,15 +4632,15 @@ export class GameRenderer {
     if (type === 'foodburst') {
       const riceSide = event?.foodType === 'rice' || pside === 'right';
       const heavy = Boolean(event?.heavy);
-      const burstCount = this.scaledParticleCount(heavy ? 54 : 38, 6);
+      const burstCount = this.scaledParticleCount(heavy ? 44 : 38, 6);
       const colors = riceSide
         ? ['#f8fdff', '#dceefe', '#c1d6e7', '#2b3e52']
         : ['#f1c58b', '#d59755', '#ba7742', '#7f4c2b'];
-      const speed = heavy ? 420 : 320;
-      const life = heavy ? 0.84 : 0.68;
-      const lift = heavy ? 30 : 26;
-      const sizeBase = heavy ? 2.9 : 2.5;
-      const sizeJitter = heavy ? 4.8 : 3.4;
+      const speed = heavy ? 340 : 320;
+      const life = heavy ? 0.72 : 0.68;
+      const lift = 26;
+      const sizeBase = heavy ? 2.6 : 2.5;
+      const sizeJitter = heavy ? 3.7 : 3.4;
       for (let i = 0; i < burstCount; i += 1) {
         const ang = Math.random() * Math.PI * 2;
         const mag = speed * (0.5 + Math.random() * 0.72);
@@ -4651,7 +4653,7 @@ export class GameRenderer {
           life,
           sizeBase + Math.random() * sizeJitter,
           colors[Math.floor(Math.random() * colors.length)],
-          heavy ? 560 : 500
+          heavy ? 520 : 500
         );
       }
       return;
@@ -9816,10 +9818,6 @@ export class GameRenderer {
       ctx.arc(panelX + r * 0.17, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
       ctx.arc(panelX + r * 0.25, panelY + r * 0.14, r * 0.028, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#e9f7ff';
-      ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('BREAD', x, panelY + r * 0.16);
 
       // Side vents + feet.
       ctx.strokeStyle = '#5f9ece';
@@ -9917,10 +9915,6 @@ export class GameRenderer {
       ctx.fill();
       ctx.fillStyle = '#f7baba';
       ctx.fillRect(cookerCx - r * 0.12, pY + r * 0.08, r * 0.12, r * 0.04);
-      ctx.fillStyle = '#fff1f1';
-      ctx.font = `${Math.max(7, Math.round(r * 0.12))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('RICE', cookerCx, pY + r * 0.16);
 
       // Steam vent lines.
       ctx.strokeStyle = '#c66e6e';
@@ -10053,7 +10047,7 @@ export class GameRenderer {
         : 0;
       const px = fromX + (toX - fromX) * drop;
       const py = fromY + (toY - fromY) * drop;
-      const bombScale = upgraded ? 6.2 : 5.2;
+      const bombScale = 5.2;
       const bombFootprintW = r * 0.23 * bombScale;
       const bombFootprintH = r * 0.164 * bombScale;
       ctx.save();
@@ -10126,10 +10120,15 @@ export class GameRenderer {
       }
       ctx.restore();
       // Broken impact ring instead of a full damage-circle outline.
-      const impactBase = upgraded ? 2.92 : 2.08;
-      const blastRadius = Math.max(r * impactBase, Number(minion.balloonBombBlastRadius) || 0);
+      const impactBase = 2.08;
+      const gameplayBlastRadius = Math.max(r * impactBase, Number(minion.balloonBombBlastRadius) || 0);
+      // Keep gameplay damage radius unchanged. Visual blast size is capped so upgrades do not massively inflate VFX size.
+      const visualBlastRadius = Math.min(
+        Math.max(r * impactBase, gameplayBlastRadius * 0.34),
+        r * (impactBase * 1.5)
+      );
       const ringR = impactHold
-        ? blastRadius * (0.28 + impactPreview * 0.92)
+        ? visualBlastRadius * (0.28 + impactPreview * 0.92)
         : r * impactBase * (0.78 + impactPreview * 0.95);
       if (impactHold) {
         const ringPieces = upgraded ? 10 : 7;
@@ -10147,7 +10146,7 @@ export class GameRenderer {
 
       if (impactBurst > 0.001) {
         const burstPieces = upgraded ? 18 : 11;
-        const burstReach = blastRadius * (0.22 + impactBurst * 0.52);
+        const burstReach = visualBlastRadius * (0.22 + impactBurst * 0.52);
         const seedBase = (Number(minion.id) || 1) * 0.73;
         const hash = (n) => {
           const raw = Math.sin(n) * 43758.5453123;

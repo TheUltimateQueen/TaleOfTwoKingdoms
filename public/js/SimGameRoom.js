@@ -3337,9 +3337,9 @@ class GameRoom {
     const impactX = bombOrigin.x;
     const safeTargetY = Number.isFinite(targetY) ? Number(targetY) : (TOWER_Y - 26);
     const impactY = Math.max(safeTargetY, TOWER_Y - 26);
-    const blastRadius = upgraded
-      ? (BALLOON_BOMB_BASE_RADIUS * BALLOON_HEAVY_BOMB_RADIUS_MULT + Math.min(36, (level - 2) * 10))
-      : (BALLOON_BOMB_BASE_RADIUS + Math.min(24, (level - 1) * 6));
+    // Keep bomb AoE radius gameplay-stable across upgrades.
+    // Upgrades increase damage/cadence, not blast footprint.
+    const blastRadius = BALLOON_BOMB_BASE_RADIUS;
     const damage = balloon.dmg * GUNNER_SKY_CANNON_MINION_DAMAGE_MULT * BALLOON_BOMB_DAMAGE_VS_CANNON_MULT;
     const towerDamageMult = upgraded ? BALLOON_HEAVY_BOMB_TOWER_DAMAGE_MULT : BALLOON_BOMB_TOWER_DAMAGE_MULT;
     const dropDistance = Math.max(36, impactY - (Number(bombOrigin.y) || impactY));
@@ -3908,30 +3908,25 @@ class GameRoom {
       if (m.balloon) {
         const towerTargetY = TOWER_Y - 26;
         const towerInRange = Math.abs(m.x - enemyX) <= 252;
+        const attackTarget = target;
         const isGroundEnemy = (other) => Boolean(other) && !other.removed && !other.flying && !other.balloon;
-        let preferredGroundTarget = null;
-        let preferredGroundSq = Infinity;
-        this.forEachEnemyMinionInRadius(
-          m.side,
-          m.x,
-          m.y,
-          430,
-          targetBuckets,
-          MINION_TARGET_BUCKET_W,
-          (other) => {
-            if (!isGroundEnemy(other)) return;
+        let closestGroundTarget = null;
+        let closestGroundSq = Infinity;
+        for (const bucket of enemyBuckets.values()) {
+          for (const other of bucket) {
+            if (!isGroundEnemy(other) || other.side === m.side || other.id === m.id) continue;
             const dx = other.x - m.x;
             const dy = other.y - m.y;
             const d2 = dx * dx + dy * dy;
-            if (d2 >= preferredGroundSq) return;
-            preferredGroundSq = d2;
-            preferredGroundTarget = other;
+            if (d2 >= closestGroundSq) continue;
+            closestGroundSq = d2;
+            closestGroundTarget = other;
           }
-        );
-        if (preferredGroundTarget) target = preferredGroundTarget;
+        }
         if ((Number(m.balloonBombCd) || 0) === 0) {
-          if (target) {
-            this.balloonDropBomb(m, enemySideName, target.x, target.y, targetBuckets, MINION_TARGET_BUCKET_W);
+          const bombTarget = attackTarget || closestGroundTarget;
+          if (bombTarget) {
+            this.balloonDropBomb(m, enemySideName, bombTarget.x, bombTarget.y, targetBuckets, MINION_TARGET_BUCKET_W);
             m.balloonBombCd = this.balloonBombCooldown(m);
             m.atkCd = Math.max(m.atkCd, 0.22);
           } else if (towerInRange) {
@@ -3941,27 +3936,19 @@ class GameRoom {
           }
         }
 
-        if (target) {
-          const targetIsBalloon = Boolean(target.balloon);
-          const targetIsGround = isGroundEnemy(target);
-          const dxToTarget = (Number(target.x) || 0) - (Number(m.x) || 0);
-          if (targetIsGround) {
-            // Ground targets: keep moving until directly above them.
-            const alignPad = Math.max(10, (Number(target.r) || 14) * 0.38);
-            if (Math.abs(dxToTarget) > alignPad) {
-              const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
-              m.x += clamp(dxToTarget, -moveStep, moveStep);
-            }
-          } else if (!targetIsBalloon) {
-            // Other air units can still be approached to avoid complete stalls.
-            const holdDist = Math.max(84, m.r + target.r + 44);
-            if (Math.abs(dxToTarget) > holdDist) {
-              const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
-              m.x += clamp(dxToTarget, -moveStep, moveStep);
-            }
+        if (closestGroundTarget) {
+          // Movement priority: stay above the closest enemy ground unit.
+          const dxToGround = (Number(closestGroundTarget.x) || 0) - (Number(m.x) || 0);
+          const alignPad = Math.max(10, (Number(closestGroundTarget.r) || 14) * 0.38);
+          if (Math.abs(dxToGround) > alignPad) {
+            const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
+            m.x += clamp(dxToGround, -moveStep, moveStep);
           }
+        }
+
+        if (attackTarget) {
           if (m.atkCd === 0) {
-            this.balloonThrowAtMinion(m, target);
+            this.balloonThrowAtMinion(m, attackTarget);
             m.atkCd = 0.82;
           }
         } else if (towerInRange) {
@@ -3969,7 +3956,7 @@ class GameRoom {
             this.balloonThrowAtTower(m, enemySideName, enemyX, towerTargetY);
             m.atkCd = 0.92;
           }
-        } else {
+        } else if (!closestGroundTarget) {
           m.x += dir * m.speed * dt;
         }
 
