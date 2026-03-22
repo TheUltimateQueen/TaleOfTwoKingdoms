@@ -523,7 +523,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     presidentExecutiveOrderLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
-    upgradeChargeMax: 140,
+    upgradeChargeMax: 100,
     upgradeAutoPickAt: null,
     archerAimY: archerPulls[0].archerAimY,
     pullX: archerPulls[0].pullX,
@@ -6430,7 +6430,29 @@ class GameRoom {
     return (Number(side?.[type]) || 0) >= cap;
   }
 
+  countSpecialMinionUpgrades(side) {
+    const s = side || {};
+    const types = [
+      'dragonLevel',
+      'dragonSuperBreathLevel',
+      'shieldDarkMetalLevel',
+      'monkHealCircleLevel',
+      'necroExpertSummonerLevel',
+      'riderSuperHorseLevel',
+      'diggerGoldFinderLevel',
+      'gunnerSkyCannonLevel',
+      'presidentExecutiveOrderLevel',
+      'superMinionLevel',
+    ];
+    let count = 0;
+    for (const type of types) {
+      if ((Number(s?.[type]) || 0) > 0) count += 1;
+    }
+    return count;
+  }
+
   isUpgradeUnlocked(side, type) {
+    if (type === 'balloonLevel') return this.countSpecialMinionUpgrades(side) >= 2;
     if (type === 'dragonSuperBreathLevel') return (Number(side?.dragonLevel) || 0) > 0;
     return true;
   }

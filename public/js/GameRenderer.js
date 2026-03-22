@@ -3488,13 +3488,8 @@ export class GameRenderer {
   }
 
   harvestBackdropWorkerCount(sideState) {
-    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
-    const bounty = Math.max(1, Number(sideState?.bountyLevel) || 1);
     const economy = Math.max(0, Number(sideState?.economyLevel) || 0);
-    const resourceFarmers = Math.max(0, resource - 1);
-    const bountyFarmers = Math.max(0, bounty - 1);
-    const economyFarmers = economy;
-    return Math.min(12, 2 + resourceFarmers + bountyFarmers + economyFarmers);
+    return Math.min(12, 2 + economy);
   }
 
   drawBackdropHarvester(sideName, x, y, scale = 1, animT = 0) {
