@@ -5434,7 +5434,7 @@ export class GameRenderer {
     const palette = TEAM_COLORS[side];
     const guideOpacity = Number.isFinite(options.opacity)
       ? Math.max(0, Math.min(1, options.opacity))
-      : 0.6;
+      : 0.45;
     const len = 90 + strength * 180;
     const lineW = 1.5 + strength * 3.5;
     const ex = ox + Math.cos(angle) * len;
