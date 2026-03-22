@@ -6455,7 +6455,12 @@ class GameRoom {
   }
 
   isUpgradeUnlocked(side, type) {
-    if (type === 'balloonLevel') return this.countSpecialMinionUpgrades(side) >= 2;
+    if (type === 'balloonLevel') {
+      const specialCount = this.countSpecialMinionUpgrades(side);
+      const balloonLevel = Math.max(0, Number(side?.balloonLevel) || 0);
+      if (balloonLevel <= 0) return specialCount >= 1;
+      return specialCount >= 3;
+    }
     if (type === 'dragonSuperBreathLevel') return (Number(side?.dragonLevel) || 0) > 0;
     return true;
   }
