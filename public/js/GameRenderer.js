@@ -6128,7 +6128,7 @@ export class GameRenderer {
       { type: 'shield', label: unitLabel('shield', this.themeMode), color: '#b0d7ff', unlockHint: '' },
       { type: 'hero', label: unitLabel('hero', this.themeMode), color: '#ffe2a0', unlockHint: 'after first hit' },
       { type: 'president', label: unitLabel('president', this.themeMode), color: '#f1c7a2', unlockHint: '' },
-      { type: 'balloon', label: unitLabel('balloon', this.themeMode), color: '#bee6f4', unlockHint: 'need BA1' },
+      { type: 'balloon', label: unitLabel('balloon', this.themeMode), color: '#bee6f4', unlockHint: 'need BA1 (upgrades after)' },
       { type: 'dragon', label: unitLabel('dragon', this.themeMode), color: '#ff9c7b', unlockHint: 'need DR1' },
       { type: 'super', label: unitLabel('super', this.themeMode), color: '#fff2aa', unlockHint: 'need SU1' },
       { type: 'candle', label: unitLabel('candle', this.themeMode), color: '#ffd7a2', unlockHint: '' },
