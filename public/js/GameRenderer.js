@@ -197,7 +197,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   hero: 0.1,
   president: 0.41,
   dragon: 0.33,
-  balloon: 0.05,
+  balloon: 0.14,
   super: 0.3,
 };
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
@@ -5841,18 +5841,24 @@ export class GameRenderer {
   }
 
   specialSpawnChanceForType(sideState, specialType) {
-    const base = Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
+    const overrideBase = Number(sideState?.debugSpecialChanceOverrides?.[specialType]);
+    const base = Number.isFinite(overrideBase)
+      ? overrideBase
+      : Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
     if (!Number.isFinite(base)) return null;
     let chance = base + this.specialSpawnRateBonus(sideState);
     if (specialType === 'dragon') {
       const dragonLevel = Math.max(0, Number(sideState?.dragonLevel) || 0);
       chance += Math.max(0, dragonLevel - 1) * 0.014;
     }
+    if (specialType === 'shield' && (Number(sideState?.shieldDarkMetalLevel) || 0) > 0) {
+      chance *= 2;
+    }
     if (specialType === 'super') {
       const superLevel = Math.max(0, Number(sideState?.superMinionLevel) || 0);
       chance += Math.max(0, superLevel - 1) * 0.018;
     }
-    return Math.max(0, Math.min(0.92, chance));
+    return Math.max(0, Math.min(0.99, chance));
   }
 
   candleSpawnChance(sideState) {
