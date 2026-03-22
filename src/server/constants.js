@@ -19,6 +19,7 @@ module.exports = {
     'bountyLevel',
     'powerLevel',
     'specialRateLevel',
+    'balloonLevel',
     'dragonLevel',
     'dragonSuperBreathLevel',
     'shieldDarkMetalLevel',

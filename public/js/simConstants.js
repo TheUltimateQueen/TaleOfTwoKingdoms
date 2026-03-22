@@ -17,6 +17,7 @@ export const UPGRADE_TYPES = [
   'bountyLevel',
   'powerLevel',
   'specialRateLevel',
+  'balloonLevel',
   'dragonLevel',
   'dragonSuperBreathLevel',
   'shieldDarkMetalLevel',
