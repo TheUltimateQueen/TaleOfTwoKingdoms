@@ -1591,8 +1591,8 @@ class GameRoom {
     if (!this.started || this.gameOver) return;
     this.t += dt;
 
-    // In 2v2, archers alternate on the same side-wide cadence as 1v1.
-    // Result: one team shot every second, each individual archer every two seconds.
+    // In 2v2, all archers fire together on the shared side-wide cadence.
+    // Result: both teammates shoot once per second at the same moment.
     const volleyInterval = SHOT_INTERVAL;
     this.sharedShotCd = Math.max(0, this.sharedShotCd - dt);
     this.left.shotCd = this.sharedShotCd;
@@ -1611,12 +1611,12 @@ class GameRoom {
 
     if (this.sharedShotCd === 0) {
       if (this.archersPerSide > 1) {
-        const leftSlot = this.left.archerVolleyIndex || 0;
-        const rightSlot = this.right.archerVolleyIndex || 0;
-        this.addArrowFromPull('left', leftSlot);
-        this.addArrowFromPull('right', rightSlot);
-        this.left.archerVolleyIndex = (leftSlot + 1) % this.archersPerSide;
-        this.right.archerVolleyIndex = (rightSlot + 1) % this.archersPerSide;
+        for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+          this.addArrowFromPull('left', slot);
+          this.addArrowFromPull('right', slot);
+        }
+        this.left.archerVolleyIndex = 0;
+        this.right.archerVolleyIndex = 0;
       } else {
         this.addArrowFromPull('left', 0);
         this.addArrowFromPull('right', 0);
