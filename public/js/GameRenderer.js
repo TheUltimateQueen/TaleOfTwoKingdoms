@@ -862,6 +862,8 @@ export class GameRenderer {
       : Math.sin(animNow * (moveFreq * 0.45) + animSeed * 0.91) * (specialType === 'rider' ? 0.07 : (specialType === 'dragon' ? 0.05 : 0.032)) * (upgraded ? 1.28 : 1);
     const drawX = x + animSwayX;
     const drawY = y + animBobY;
+    const presidentSetup = specialType === 'president' && Boolean(minion.presidentSetup);
+    const presidentAuraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190);
     const heroSwingPhase = specialType === 'hero'
       ? (Number.isFinite(minion.heroSwing) ? minion.heroSwing : animNow * 8.2)
       : 0;
@@ -908,6 +910,23 @@ export class GameRenderer {
       }
     }
     let usedCachedBody = false;
+    if (!cacheRender && presidentSetup) {
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = this.withAlpha(sideAccentMain, 0.14);
+      ctx.beginPath();
+      ctx.arc(drawX, drawY, presidentAuraRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.64;
+      ctx.strokeStyle = this.withAlpha(sideAccentSoft, 0.88);
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.arc(drawX, drawY, presidentAuraRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
     if (!cacheRender) {
       const radiusBucket = Math.max(12, Math.min(38, Math.round(baseR)));
       let widthMult = 6.8;
@@ -8605,10 +8624,12 @@ export class GameRenderer {
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
+    const sidePalette = TEAM_COLORS[sideName] || TEAM_COLORS.left;
     const scale = minion.super ? 1.2 : 1.04;
     const bodyR = 13 * scale;
     const setup = Boolean(minion.presidentSetup);
     const upgraded = Boolean(minion.presidentExecutiveOrderUpgraded);
+    const auraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190);
     const signLife = upgraded
       ? Math.max(0, Math.min(
         1,
@@ -8630,6 +8651,23 @@ export class GameRenderer {
         this.drawPresidentSprite(proxy, { showHud: false, cacheRender: true });
       });
       if (drewCached) {
+        if (setup) {
+          ctx.save();
+          ctx.globalAlpha = 0.22;
+          ctx.fillStyle = this.withAlpha(sidePalette.soft, 0.18);
+          ctx.beginPath();
+          ctx.arc(minion.x, minion.y, auraRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.62;
+          ctx.strokeStyle = this.withAlpha(sidePalette.soft, 0.9);
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath();
+          ctx.arc(minion.x, minion.y, auraRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
         const beamLife = upgraded
           ? Math.max(0, Math.min(
             1,
@@ -8680,6 +8718,24 @@ export class GameRenderer {
     const x = minion.x;
     const y = minion.y;
     const dir = sideName === 'left' ? 1 : -1;
+
+    if (!cacheRender && setup) {
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = this.withAlpha(sidePalette.soft, 0.18);
+      ctx.beginPath();
+      ctx.arc(x, y, auraRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.62;
+      ctx.strokeStyle = this.withAlpha(sidePalette.soft, 0.9);
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.arc(x, y, auraRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
 
     ctx.fillStyle = '#00000026';
     ctx.beginPath();

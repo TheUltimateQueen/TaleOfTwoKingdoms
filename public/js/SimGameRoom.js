@@ -5305,6 +5305,8 @@ class GameRoom {
   pickPresidentialPardonTarget(president) {
     if (!president || !president.side) return null;
     const sideName = president.side === 'right' ? 'right' : 'left';
+    const maxRange = Math.max(110, Number(president.presidentAuraRadius) || 190);
+    const maxRangeSq = maxRange * maxRange;
     let best = null;
     let bestScore = -Infinity;
     for (const ally of this.minions) {
@@ -5312,6 +5314,7 @@ class GameRoom {
       if ((Number(ally.hp) || 0) <= 0) continue;
       const dx = (Number(ally.x) || 0) - (Number(president.x) || 0);
       const dy = (Number(ally.y) || 0) - (Number(president.y) || 0);
+      if (dx * dx + dy * dy > maxRangeSq) continue;
       const dist = Math.hypot(dx, dy);
       const frontBias = sideName === 'left'
         ? ((Number(ally.x) || 0) / WORLD_W)
