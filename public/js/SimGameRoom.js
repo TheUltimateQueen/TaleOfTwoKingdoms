@@ -3330,7 +3330,8 @@ class GameRoom {
   }
 
   balloonDropBomb(balloon, enemySideName, targetX, targetY, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
-    if (!balloon) return;
+    if (!balloon) return false;
+    if (balloon.balloonBombImpactPending) return false;
     const bombOrigin = this.balloonPayloadOrigin(balloon, 'bomb');
     const level = Math.max(1, Number(balloon.balloonLevel) || 1);
     const upgraded = level > 1;
@@ -3363,6 +3364,7 @@ class GameRoom {
     balloon.balloonBombDamage = damage;
     balloon.balloonBombTowerDamageMult = towerDamageMult;
     balloon.balloonBombEnemySideName = enemySideName;
+    return true;
   }
 
   resolveBalloonBombImpact(balloon, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
@@ -3909,40 +3911,66 @@ class GameRoom {
         const towerTargetY = TOWER_Y - 26;
         const towerInRange = Math.abs(m.x - enemyX) <= 252;
         const attackTarget = target;
-        const isGroundEnemy = (other) => Boolean(other) && !other.removed && !other.flying && !other.balloon;
+        const isEnemyUnit = (other) => Boolean(other) && !other.removed && other.side !== m.side && other.id !== m.id;
+        const isGroundEnemy = (other) => isEnemyUnit(other) && !other.flying && !other.balloon;
         let closestGroundTarget = null;
         let closestGroundSq = Infinity;
+        const midfieldX = WORLD_W * 0.5;
+        const enemySidePad = 6;
+        const enemyHalfMinX = enemySideName === 'right' ? (midfieldX + enemySidePad) : -Infinity;
+        const enemyHalfMaxX = enemySideName === 'left' ? (midfieldX - enemySidePad) : Infinity;
         for (const bucket of enemyBuckets.values()) {
           for (const other of bucket) {
-            if (!isGroundEnemy(other) || other.side === m.side || other.id === m.id) continue;
+            if (!isEnemyUnit(other)) continue;
             const dx = other.x - m.x;
             const dy = other.y - m.y;
             const d2 = dx * dx + dy * dy;
-            if (d2 >= closestGroundSq) continue;
-            closestGroundSq = d2;
-            closestGroundTarget = other;
+            if (isGroundEnemy(other) && d2 < closestGroundSq) {
+              closestGroundSq = d2;
+              closestGroundTarget = other;
+            }
           }
         }
         if ((Number(m.balloonBombCd) || 0) === 0) {
           const bombTarget = attackTarget || closestGroundTarget;
           if (bombTarget) {
-            this.balloonDropBomb(m, enemySideName, bombTarget.x, bombTarget.y, targetBuckets, MINION_TARGET_BUCKET_W);
-            m.balloonBombCd = this.balloonBombCooldown(m);
-            m.atkCd = Math.max(m.atkCd, 0.22);
+            const dropped = this.balloonDropBomb(
+              m,
+              enemySideName,
+              bombTarget.x,
+              bombTarget.y,
+              targetBuckets,
+              MINION_TARGET_BUCKET_W
+            );
+            if (dropped) {
+              m.balloonBombCd = this.balloonBombCooldown(m);
+              m.atkCd = Math.max(m.atkCd, 0.22);
+            }
           } else if (towerInRange) {
-            this.balloonDropBomb(m, enemySideName, enemyX, towerTargetY, targetBuckets, MINION_TARGET_BUCKET_W);
-            m.balloonBombCd = this.balloonBombCooldown(m);
-            m.atkCd = Math.max(m.atkCd, 0.22);
+            const dropped = this.balloonDropBomb(
+              m,
+              enemySideName,
+              enemyX,
+              towerTargetY,
+              targetBuckets,
+              MINION_TARGET_BUCKET_W
+            );
+            if (dropped) {
+              m.balloonBombCd = this.balloonBombCooldown(m);
+              m.atkCd = Math.max(m.atkCd, 0.22);
+            }
           }
         }
 
         if (closestGroundTarget) {
-          // Movement priority: stay above the closest enemy ground unit.
-          const dxToGround = (Number(closestGroundTarget.x) || 0) - (Number(m.x) || 0);
+          // Movement priority: stay above the closest enemy ground unit, while staying on enemy half.
+          const trackedX = Number.isFinite(closestGroundTarget.x) ? Number(closestGroundTarget.x) : (Number(m.x) || 0);
+          const clampedTargetX = clamp(trackedX, enemyHalfMinX, enemyHalfMaxX);
+          const dxToTarget = clampedTargetX - (Number(m.x) || 0);
           const alignPad = Math.max(10, (Number(closestGroundTarget.r) || 14) * 0.38);
-          if (Math.abs(dxToGround) > alignPad) {
+          if (Math.abs(dxToTarget) > alignPad) {
             const moveStep = Math.max(20, Number(m.speed) || 0) * dt;
-            m.x += clamp(dxToGround, -moveStep, moveStep);
+            m.x += clamp(dxToTarget, -moveStep, moveStep);
           }
         }
 
