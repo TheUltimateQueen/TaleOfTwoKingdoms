@@ -5203,7 +5203,11 @@ class GameRoom {
     const radius = Math.max(24, Number(golem.r) || 30);
     const targetY = Number(target.y) || (golem.golemBiteStartY - radius * 2.4);
     const desiredLift = (golem.golemBiteStartY - targetY) + radius * 0.85;
-    golem.golemBiteJumpLift = clamp(desiredLift, radius * 2.35, radius * 6.2);
+    const maxLift = Math.max(
+      radius * 6.2,
+      (golem.golemBiteStartY - STONE_GOLEM_BITE_Y_MIN) + radius * 0.3
+    );
+    golem.golemBiteJumpLift = clamp(desiredLift, radius * 2.35, maxLift);
     this.queueHitSfx('powerup', golem.x, golem.y - (Number(golem.r) || 24) * 0.42, golem.side);
   }
 
@@ -5260,10 +5264,26 @@ class GameRoom {
       const jumpProgress = Math.max(0, Math.min(1, 1 - (jumpNext / maxJump)));
       const startX = Number.isFinite(golem.golemBiteStartX) ? Number(golem.golemBiteStartX) : (Number(golem.x) || 0);
       const startY = Number.isFinite(golem.golemBiteStartY) ? Number(golem.golemBiteStartY) : (Number(golem.y) || (TOWER_Y + 20));
-      const jumpLiftMax = Math.max(16, Number(golem.golemBiteJumpLift) || (Math.max(24, Number(golem.r) || 30) * 2.8));
+      const radius = Math.max(24, Number(golem.r) || 30);
+      const target = this.findMinionById(golem.golemBiteTargetId);
+      const maxLift = Math.max(
+        radius * 6.2,
+        (startY - STONE_GOLEM_BITE_Y_MIN) + radius * 0.3
+      );
+      if (target && !target.removed && target.side !== sideName) {
+        const wantedLift = (startY - (Number(target.y) || startY)) + radius * 0.85;
+        const currentLift = Number(golem.golemBiteJumpLift) || 0;
+        golem.golemBiteJumpLift = clamp(Math.max(currentLift, wantedLift), radius * 2.35, maxLift);
+      } else {
+        golem.golemBiteJumpLift = clamp(
+          Number(golem.golemBiteJumpLift) || (radius * 2.8),
+          radius * 2.35,
+          maxLift
+        );
+      }
+      const jumpLiftMax = Math.max(16, Number(golem.golemBiteJumpLift) || (radius * 2.8));
       const jumpLift = Math.sin(jumpProgress * (Math.PI * 0.5)) * jumpLiftMax;
       golem.y = startY - jumpLift;
-      const target = this.findMinionById(golem.golemBiteTargetId);
       if (target && !target.removed && target.side !== sideName) {
         const wantedX = Number(target.x) || startX;
         const lockX = clamp(
