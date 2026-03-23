@@ -160,6 +160,8 @@ const BALLOON_TOP_MIN_Y = 26;
 const BALLOON_TOP_MAX_Y = 188;
 const BALLOON_LOW_HP_MAX_Y = TOWER_Y + 120;
 const BALLOON_HEALTH_DROP_MAX = Math.max(0, BALLOON_LOW_HP_MAX_Y - BALLOON_TOP_MAX_Y);
+const BALLOON_HEALTH_DROP_SMOOTH_PER_SEC = 140;
+const BALLOON_BAND_RECOVER_PER_SEC = 150;
 const DRAGON_CANDLE_DAMAGE_MULT = 0.11; // 1/20th of previous 2.2x dragon-vs-candle wax damage.
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const NECRO_EXPERT_REVIVE_RADIUS = 176;
@@ -3490,19 +3492,37 @@ class GameRoom {
     };
   }
 
-  balloonHealthDropOffset(balloon) {
+  balloonHealthDropOffset(balloon, dt = null) {
     if (!balloon) return 0;
     const maxHp = Math.max(1, Number(balloon.maxHp) || 1);
     const hp = clamp(Number(balloon.hp) || 0, 0, maxHp);
-    const missingHpPct = 1 - hp / maxHp;
-    return BALLOON_HEALTH_DROP_MAX * missingHpPct;
+    const targetDrop = BALLOON_HEALTH_DROP_MAX * (1 - hp / maxHp);
+    if (!Number.isFinite(balloon.balloonHealthDropVisual)) {
+      balloon.balloonHealthDropVisual = targetDrop;
+      return clamp(targetDrop, 0, BALLOON_HEALTH_DROP_MAX);
+    }
+    if (Number.isFinite(dt) && dt > 0) {
+      const maxStep = BALLOON_HEALTH_DROP_SMOOTH_PER_SEC * dt;
+      const delta = clamp(targetDrop - balloon.balloonHealthDropVisual, -maxStep, maxStep);
+      balloon.balloonHealthDropVisual += delta;
+    }
+    return clamp(Number(balloon.balloonHealthDropVisual) || 0, 0, BALLOON_HEALTH_DROP_MAX);
   }
 
-  balloonFlightBand(balloon) {
-    const drop = this.balloonHealthDropOffset(balloon);
+  balloonFlightBand(balloon, dt = null) {
+    const drop = this.balloonHealthDropOffset(balloon, dt);
     const minY = BALLOON_TOP_MIN_Y;
     const maxY = Math.min(BALLOON_LOW_HP_MAX_Y, BALLOON_TOP_MAX_Y + drop);
     return { minY, maxY, drop };
+  }
+
+  balloonSoftClampY(y, minY, maxY, dt) {
+    if (!Number.isFinite(y)) return clamp(TOWER_Y - 120, minY, maxY);
+    if (!Number.isFinite(dt) || dt <= 0) return clamp(y, minY, maxY);
+    const maxStep = BALLOON_BAND_RECOVER_PER_SEC * dt;
+    if (y < minY) return Math.min(minY, y + maxStep);
+    if (y > maxY) return Math.max(maxY, y - maxStep);
+    return y;
   }
 
   tickMinions(dt, precomputedTargetBuckets = null, precomputedCarrierCounts = null) {
@@ -3517,6 +3537,7 @@ class GameRoom {
       if (!Number.isFinite(m.hitFlashTtl)) m.hitFlashTtl = 0;
       if (!Number.isFinite(m.balloonHitCircleIndex)) m.balloonHitCircleIndex = -1;
       if (!Number.isFinite(m.balloonHitCircleTtl)) m.balloonHitCircleTtl = 0;
+      if (!Number.isFinite(m.balloonHealthDropVisual)) m.balloonHealthDropVisual = null;
       if (!Number.isFinite(m.balloonThrowTtl)) m.balloonThrowTtl = 0;
       if (!Number.isFinite(m.balloonThrowMaxTtl) || m.balloonThrowMaxTtl <= 0) m.balloonThrowMaxTtl = 0.6;
       if (!Number.isFinite(m.balloonBombTtl)) m.balloonBombTtl = 0;
@@ -3761,10 +3782,13 @@ class GameRoom {
         const isBalloon = Boolean(m.balloon);
         m.flyPhase += dt * (isBalloon ? (0.82 + Math.min(0.5, m.speed / 220)) : (1.45 + Math.min(1.1, m.speed / 130)));
         const amp = isBalloon ? (8 + m.r * 0.14) : (12 + m.r * 0.22);
-        const flight = isBalloon ? this.balloonFlightBand(m) : null;
+        const flight = isBalloon ? this.balloonFlightBand(m, dt) : null;
         const minY = isBalloon ? flight.minY : (TOWER_Y - 220);
         const maxY = isBalloon ? flight.maxY : (TOWER_Y + 150);
-        m.y = clamp(m.flyBaseY + Math.sin(m.flyPhase) * amp, minY, maxY);
+        const rawY = m.flyBaseY + Math.sin(m.flyPhase) * amp;
+        m.y = isBalloon
+          ? this.balloonSoftClampY(rawY, minY, maxY, dt)
+          : clamp(rawY, minY, maxY);
       }
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
@@ -4091,7 +4115,7 @@ class GameRoom {
         }
 
         if (m.flying) {
-          const flight = this.balloonFlightBand(m);
+          const flight = this.balloonFlightBand(m, dt);
           const desiredY = clamp(
             (TOWER_Y - 362) + flight.drop,
             flight.minY + 10,
@@ -4234,7 +4258,7 @@ class GameRoom {
         if (m.flying) {
           let desiredY = TOWER_Y - 120;
           if (m.balloon) {
-            const flight = this.balloonFlightBand(m);
+            const flight = this.balloonFlightBand(m, dt);
             desiredY = clamp(
               (TOWER_Y - 120) + flight.drop * 0.55,
               flight.minY + 10,
@@ -6068,6 +6092,9 @@ class GameRoom {
     if (revived.flying) {
       revived.flyBaseY = y;
       if (!Number.isFinite(revived.flyPhase)) revived.flyPhase = Math.random() * Math.PI * 2;
+      if (revived.balloon) {
+        revived.balloonHealthDropVisual = this.balloonHealthDropOffset(revived);
+      }
       revived.dragonBreathTtl = 0;
       revived.dragonBreathToX = null;
       revived.dragonBreathToY = null;
@@ -6693,6 +6720,7 @@ class GameRoom {
       flying: isDragon || isBalloon,
       flyBaseY: (isDragon || isBalloon) ? spawnY : null,
       flyPhase: (isDragon || isBalloon) ? Math.random() * Math.PI * 2 : null,
+      balloonHealthDropVisual: isBalloon ? 0 : null,
       balloonLevel: balloonSpawnLevel,
       balloonThrowTtl: 0,
       balloonThrowMaxTtl: 0.6,
