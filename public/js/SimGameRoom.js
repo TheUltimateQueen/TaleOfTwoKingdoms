@@ -197,7 +197,8 @@ const STONE_GOLEM_SMASH_RADIUS = 108;
 const STONE_GOLEM_SMASH_TOWER_RADIUS = 92;
 const STONE_GOLEM_SMASH_KNOCKBACK = 220;
 const STONE_GOLEM_SMASH_MIDFIELD_PAD = 24;
-const STONE_GOLEM_FLING_MAX_TARGETS = 5;
+const STONE_GOLEM_FLING_MAX_TARGETS_MIN = 4;
+const STONE_GOLEM_FLING_MAX_TARGETS_MAX = 10;
 const STONE_GOLEM_FLING_DELAY = 0.18;
 const STONE_GOLEM_FLING_TTL = 0.72;
 const STONE_GOLEM_FLING_ARC = 104;
@@ -5593,7 +5594,17 @@ class GameRoom {
       return (adx * adx + ady * ady) - (bdx * bdx + bdy * bdy);
     });
 
-    for (const other of uniqueVictims.slice(0, STONE_GOLEM_FLING_MAX_TARGETS)) {
+    const firstFlingUsed = Boolean(golem.golemFirstFlingUsed);
+    const maxFlingTargets = firstFlingUsed
+      ? (
+        STONE_GOLEM_FLING_MAX_TARGETS_MIN
+        + Math.floor(Math.random() * (STONE_GOLEM_FLING_MAX_TARGETS_MAX - STONE_GOLEM_FLING_MAX_TARGETS_MIN + 1))
+      )
+      : Number.POSITIVE_INFINITY;
+    let flungCount = 0;
+
+    for (const other of uniqueVictims) {
+      if (flungCount >= maxFlingTargets) break;
       if (!other || other.removed || other.side === sideName || other.id === golem.id) continue;
       hitAny = true;
       this.dealMinionDamage(golem, other, baseDamage, 'melee');
@@ -5602,7 +5613,9 @@ class GameRoom {
         continue;
       }
       this.startStoneGolemFling(other, awayFromAllyTowerDir, landingDamage, sideName, STONE_GOLEM_FLING_DELAY);
+      flungCount += 1;
     }
+    if (!firstFlingUsed && flungCount > 0) golem.golemFirstFlingUsed = true;
 
     if (Math.abs(golem.x - enemyX) <= STONE_GOLEM_SMASH_TOWER_RADIUS) {
       hitAny = true;
@@ -6860,6 +6873,7 @@ class GameRoom {
       golemShieldMax: isStoneGolem ? hp : 0,
       golemShieldTtl: isStoneGolem ? STONE_GOLEM_SHIELD_TTL : 0,
       golemBiteCd: isStoneGolem ? (1.1 + Math.random() * 1.2) : 0,
+      golemFirstFlingUsed: false,
       golemBiteTargetId: 0,
       golemBiteHeldTargetId: 0,
       golemBiteChewTickTtl: 0,
