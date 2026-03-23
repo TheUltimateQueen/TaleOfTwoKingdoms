@@ -18,6 +18,8 @@ import {
 
 const VOICE_TRIGGER_DELAY_MS = 30;
 const VOICE_CHAIN_DELAY_MS = 180;
+const VOICE_PAN_LEFT = -0.82;
+const VOICE_PAN_RIGHT = 0.82;
 const HERO_VOICE_CLIPS = [
   '/Sounds/HeroVoice/Chacha.m4a',
   '/Sounds/HeroVoice/Haya.m4a',
@@ -302,7 +304,7 @@ export class GameClient {
     this.voicePools = null;
     this.voiceState = null;
     this.voiceSpawnSeen = { hero: new Set(), president: new Set() };
-    this.voiceSpawnQueue = { hero: 0, president: 0 };
+    this.voiceSpawnQueue = { hero: [], president: [] };
     this.voiceRoundActive = false;
     this.gameOverLatched = false;
     this.gameOverLatchedAtMs = 0;
@@ -2141,7 +2143,7 @@ export class GameClient {
       president: { timerId: null, fallbackId: null, audio: null, playing: false, lastUrl: null },
     };
     this.voiceSpawnSeen = { hero: new Set(), president: new Set() };
-    this.voiceSpawnQueue = { hero: 0, president: 0 };
+    this.voiceSpawnQueue = { hero: [], president: [] };
     this.voiceRoundActive = false;
     this.refreshVoicePoolFromManifest('hero', HERO_VOICE_MANIFEST_URL);
     this.refreshVoicePoolFromManifest('president', PRESIDENT_VOICE_MANIFEST_URL);
@@ -2206,8 +2208,8 @@ export class GameClient {
       this.voiceRoundActive = false;
       this.voiceSpawnSeen.hero.clear();
       this.voiceSpawnSeen.president.clear();
-      this.voiceSpawnQueue.hero = 0;
-      this.voiceSpawnQueue.president = 0;
+      this.voiceSpawnQueue.hero.length = 0;
+      this.voiceSpawnQueue.president.length = 0;
       this.stopVoiceType('hero');
       this.stopVoiceType('president');
       return;
@@ -2217,8 +2219,8 @@ export class GameClient {
       this.voiceRoundActive = true;
       this.voiceSpawnSeen.hero.clear();
       this.voiceSpawnSeen.president.clear();
-      this.voiceSpawnQueue.hero = 0;
-      this.voiceSpawnQueue.president = 0;
+      this.voiceSpawnQueue.hero.length = 0;
+      this.voiceSpawnQueue.president.length = 0;
     }
 
     for (let i = 0; i < minions.length; i += 1) {
@@ -2228,22 +2230,28 @@ export class GameClient {
         const key = String(m.id ?? '');
         if (key && !this.voiceSpawnSeen.hero.has(key)) {
           this.voiceSpawnSeen.hero.add(key);
-          this.enqueueVoiceType('hero');
+          this.enqueueVoiceType('hero', m.side);
         }
       }
       if (m.president) {
         const key = String(m.id ?? '');
         if (key && !this.voiceSpawnSeen.president.has(key)) {
           this.voiceSpawnSeen.president.add(key);
-          this.enqueueVoiceType('president');
+          this.enqueueVoiceType('president', m.side);
         }
       }
     }
   }
 
-  enqueueVoiceType(type) {
+  normalizeVoiceSide(side) {
+    return side === 'right' ? 'right' : 'left';
+  }
+
+  enqueueVoiceType(type, side) {
     if (type !== 'hero' && type !== 'president') return;
-    this.voiceSpawnQueue[type] = Math.max(0, Number(this.voiceSpawnQueue[type]) || 0) + 1;
+    const queue = this.voiceSpawnQueue?.[type];
+    if (!Array.isArray(queue)) return;
+    queue.push(this.normalizeVoiceSide(side));
     const state = this.voiceState?.[type];
     if (!state || state.playing || state.timerId) return;
     this.scheduleVoiceType(type, VOICE_TRIGGER_DELAY_MS);
@@ -2262,25 +2270,64 @@ export class GameClient {
   shouldPlayVoiceType(type) {
     const snapshot = this.state.snapshot;
     if (!snapshot || !snapshot.started || snapshot.gameOver) return false;
-    if (type === 'hero' || type === 'president') {
-      return (Number(this.voiceSpawnQueue?.[type]) || 0) > 0;
-    }
-    return false;
+    if (type !== 'hero' && type !== 'president') return false;
+    return Array.isArray(this.voiceSpawnQueue?.[type]) && this.voiceSpawnQueue[type].length > 0;
   }
 
-  pickVoiceClip(type, lastUrl) {
-    const pool = this.voicePools?.[type] || [];
-    if (!pool.length) return null;
-    if (pool.length === 1) return pool[0];
-    const filtered = pool.filter((clip) => clip.url !== lastUrl);
-    const source = filtered.length ? filtered : pool;
-    return source[Math.floor(Math.random() * source.length)];
+  voicePanForSide(side) {
+    return this.normalizeVoiceSide(side) === 'right' ? VOICE_PAN_RIGHT : VOICE_PAN_LEFT;
+  }
+
+  connectVoiceSpatialAudio(audio, side) {
+    if (!audio) return;
+    const ctx = this.sound?.ctx;
+    if (!ctx || typeof ctx.createMediaElementSource !== 'function') return;
+
+    try {
+      const source = ctx.createMediaElementSource(audio);
+      if (typeof ctx.createStereoPanner === 'function') {
+        const panNode = ctx.createStereoPanner();
+        panNode.pan.value = this.voicePanForSide(side);
+        source.connect(panNode);
+        panNode.connect(ctx.destination);
+        const cleanup = () => {
+          try {
+            source.disconnect();
+            panNode.disconnect();
+          } catch {
+            // Ignore teardown errors from already-disconnected nodes.
+          }
+        };
+        audio.addEventListener('ended', cleanup, { once: true });
+        audio.addEventListener('error', cleanup, { once: true });
+      } else {
+        source.connect(ctx.destination);
+        const cleanup = () => {
+          try {
+            source.disconnect();
+          } catch {
+            // Ignore teardown errors from already-disconnected nodes.
+          }
+        };
+        audio.addEventListener('ended', cleanup, { once: true });
+        audio.addEventListener('error', cleanup, { once: true });
+      }
+    } catch {
+      // Fall back to normal media-element playback when WebAudio routing is unavailable.
+    }
+  }
+
+  dequeueVoiceSide(type) {
+    const queue = this.voiceSpawnQueue?.[type];
+    if (!Array.isArray(queue) || queue.length <= 0) return 'left';
+    const side = queue.shift();
+    return this.normalizeVoiceSide(side);
   }
 
   playVoiceType(type) {
     const state = this.voiceState?.[type];
     if (!state || !this.voiceUnlocked || !this.shouldPlayVoiceType(type)) return;
-    this.voiceSpawnQueue[type] = Math.max(0, (Number(this.voiceSpawnQueue[type]) || 0) - 1);
+    const spawnSide = this.dequeueVoiceSide(type);
 
     const clip = this.pickVoiceClip(type, state.lastUrl);
     if (!clip) return;
@@ -2288,6 +2335,7 @@ export class GameClient {
     const audio = new Audio(clip.url);
     audio.preload = 'auto';
     audio.volume = type === 'hero' ? 0.66 : 0.62;
+    this.connectVoiceSpatialAudio(audio, spawnSide);
     state.audio = audio;
     state.playing = true;
     state.lastUrl = clip.url;
@@ -2323,6 +2371,15 @@ export class GameClient {
         settle(VOICE_CHAIN_DELAY_MS);
       });
     }
+  }
+
+  pickVoiceClip(type, lastUrl) {
+    const pool = this.voicePools?.[type] || [];
+    if (!pool.length) return null;
+    if (pool.length === 1) return pool[0];
+    const filtered = pool.filter((clip) => clip.url !== lastUrl);
+    const source = filtered.length ? filtered : pool;
+    return source[Math.floor(Math.random() * source.length)];
   }
 
   stopVoiceType(type) {
