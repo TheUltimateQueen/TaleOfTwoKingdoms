@@ -179,6 +179,7 @@ const ROW_TO_SPECIAL_TYPE = {
   rider: 'rider',
   digger: 'digger',
   monk: 'monk',
+  stonegolem: 'stonegolem',
   shield: 'shield',
   hero: 'hero',
   president: 'president',
@@ -193,6 +194,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   rider: 0.5,
   digger: 0.5,
   monk: 0.46,
+  stonegolem: 0.02,
   shield: 0.1,
   hero: 0.1,
   president: 0.41,
@@ -202,6 +204,8 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
 };
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
+const STONE_GOLEM_SPAWN_EVERY_OFFSET = 6;
+const STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION = 0.5;
 
 const FAILED_SPECIAL_HAT_STYLES = {
   dragon: { code: 'DR', cap: '#5f86b3', brim: '#aec8e7' },
@@ -211,6 +215,7 @@ const FAILED_SPECIAL_HAT_STYLES = {
   gunner: { code: 'GN', cap: '#655447', brim: '#ffd6a1' },
   rider: { code: 'RD', cap: '#7f5f44', brim: '#e8d0b0' },
   monk: { code: 'MK', cap: '#486345', brim: '#c5f2b5' },
+  stonegolem: { code: 'SG', cap: '#4d5965', brim: '#c5d5df' },
   hero: { code: 'HR', cap: '#6a4f2d', brim: '#ffe2a0' },
   president: { code: 'PR', cap: '#6f4632', brim: '#f1c7a2' },
   balloon: { code: 'BA', cap: '#546f78', brim: '#c7e7ee' },
@@ -231,11 +236,17 @@ const SHIELD_DARK_METAL_DURATION = 5;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
 const STONE_GOLEM_ATTACK_SPIN_TURNS = 2.75;
+const STONE_GOLEM_BITE_JUMP_TTL = 0.62;
+const STONE_GOLEM_BITE_LAND_TTL = 0.24;
 const MAX_PARTICLES = 1800;
 const MAX_POOLED_PARTICLES = MAX_PARTICLES * 2;
 const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
+const PRESIDENT_AURA_RANGE_SCALE = 0.25;
+const NECRO_SPECIAL_RATE_BONUS_SCALE = 1 / 3;
+const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
+const NECRO_BASE_EVERY = 12;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
@@ -864,7 +875,8 @@ export class GameRenderer {
     const drawX = x + animSwayX;
     const drawY = y + animBobY;
     const presidentSetup = specialType === 'president' && Boolean(minion.presidentSetup);
-    const presidentAuraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190);
+    const presidentAuraEnabled = presidentSetup && !minion.presidentAuraDisabled;
+    const presidentAuraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190) * PRESIDENT_AURA_RANGE_SCALE;
     const heroSwingPhase = specialType === 'hero'
       ? (Number.isFinite(minion.heroSwing) ? minion.heroSwing : animNow * 8.2)
       : 0;
@@ -911,7 +923,7 @@ export class GameRenderer {
       }
     }
     let usedCachedBody = false;
-    if (!cacheRender && presidentSetup) {
+    if (!cacheRender && presidentAuraEnabled) {
       ctx.save();
       ctx.globalAlpha = 0.2;
       ctx.fillStyle = this.withAlpha(sideAccentMain, 0.14);
@@ -4797,8 +4809,14 @@ export class GameRenderer {
       golemShieldHp: 0,
       golemShieldMax: 0,
       golemShieldTtl: 0,
+      golemBiteJumpTtl: 0,
+      golemBiteJumpMaxTtl: STONE_GOLEM_BITE_JUMP_TTL,
+      golemBiteLandTtl: 0,
+      golemBiteLandMaxTtl: STONE_GOLEM_BITE_LAND_TTL,
+      golemBiteHeld: false,
       president: Boolean(ghost.president),
       presidentSetup: Boolean(ghost.president),
+      presidentAuraDisabled: Boolean(ghost.president),
       presidentAuraRadius: 180,
       dragon: Boolean(ghost.dragon),
       balloon: Boolean(ghost.balloon),
@@ -5862,13 +5880,45 @@ export class GameRenderer {
   }
 
   spawnEveryForSide(sideState) {
-    const spawnLevel = Math.max(1, Number(sideState?.spawnLevel) || 1);
-    return Math.max(0.65, 2.2 - spawnLevel * 0.09);
+    return this.baseSpawnEveryForLevel(sideState?.spawnLevel);
+  }
+
+  baseSpawnEveryForLevel(spawnLevel) {
+    const level = Math.max(1, Number(spawnLevel) || 1);
+    return Math.max(0.65, 2.2 - level * 0.09);
   }
 
   specialSpawnRateBonus(sideState) {
     const level = Math.max(1, Number(sideState?.specialRateLevel) || 1);
     return Math.min(0.24, (level - 1) * 0.03);
+  }
+
+  candleEveryForSide(sideState) {
+    const spawn = Math.max(1, Number(sideState?.spawnLevel) || 1);
+    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
+    const eco = Math.max(0, Number(sideState?.economyLevel) || 0);
+    const tech = Math.floor((spawn + resource + eco) / 6);
+    const baseEvery = Math.max(24, 35 - tech);
+    return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
+  }
+
+  stoneGolemEveryForSide(sideState) {
+    return Math.max(1, this.candleEveryForSide(sideState) + STONE_GOLEM_SPAWN_EVERY_OFFSET);
+  }
+
+  stoneGolemSpawnUnlocked(sideState) {
+    const hp = Number(sideState?.towerHp) || 0;
+    return Boolean(sideState?.towerGolemRescueUsed) || (hp > 0 && hp <= 6000 * STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION);
+  }
+
+  necroTrainingEvery(sideState, matchTimeSec = 0) {
+    const level = Math.max(1, Number(sideState?.spawnLevel) || 1);
+    const levelOneEvery = this.baseSpawnEveryForLevel(1);
+    const currentEvery = this.baseSpawnEveryForLevel(level);
+    const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
+    const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
+    const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
+    return this.scaledSpecialEveryForUi(NECRO_BASE_EVERY * necroEveryFactor, matchTimeSec);
   }
 
   specialSpawnChanceForType(sideState, specialType) {
@@ -5878,7 +5928,12 @@ export class GameRenderer {
       ? overrideBase
       : Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
     if (!Number.isFinite(base)) return null;
-    let chance = base + this.specialSpawnRateBonus(sideState);
+    const specialRateBonus = this.specialSpawnRateBonus(sideState);
+    const tunedSpecialBonus = specialType === 'necrominion'
+      ? specialRateBonus * NECRO_SPECIAL_RATE_BONUS_SCALE
+      : specialRateBonus;
+    if (specialType === 'stonegolem' && !this.stoneGolemSpawnUnlocked(sideState)) return 0;
+    let chance = base + tunedSpecialBonus;
     if (specialType === 'dragon') {
       const dragonLevel = Math.max(0, Number(sideState?.dragonLevel) || 0);
       chance += Math.max(0, dragonLevel - 1) * 0.014;
@@ -5939,15 +5994,17 @@ export class GameRenderer {
     const mythicPressure = Math.floor((power + eco) / 6);
     if (type === 'militia') return 1;
     if (type === 'candle') {
-      const tech = Math.floor((spawn + resource + eco) / 6);
-      const baseEvery = Math.max(24, 35 - tech);
-      return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
+      return this.candleEveryForSide(s);
     }
-    if (type === 'necro') return this.scaledSpecialEveryForUi(12, matchTimeSec);
+    if (type === 'necro') return this.necroTrainingEvery(s, matchTimeSec);
     if (type === 'gunner') return this.scaledSpecialEveryForUi(Math.max(14, 22 - Math.floor((unit + arrow + eco) / 6)), matchTimeSec);
     if (type === 'rider') return this.scaledSpecialEveryForUi(Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)), matchTimeSec);
     if (type === 'digger') return this.scaledSpecialEveryForUi(Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)), matchTimeSec);
     if (type === 'monk') return this.scaledSpecialEveryForUi(Math.max(20, 30 - Math.floor((hp + power + resource) / 7)), matchTimeSec);
+    if (type === 'stonegolem') {
+      if (!this.stoneGolemSpawnUnlocked(s)) return Infinity;
+      return this.stoneGolemEveryForSide(s);
+    }
     if (type === 'shield') return this.scaledSpecialEveryForUi(Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)) * 4, matchTimeSec);
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
@@ -5981,6 +6038,7 @@ export class GameRenderer {
       rider: 0,
       digger: 0,
       monk: 0,
+      stonegolem: 0,
       shield: 0,
       hero: 0,
       president: 0,
@@ -6033,6 +6091,10 @@ export class GameRenderer {
         sideCounts.monk += 1;
         continue;
       }
+      if (m.stoneGolem) {
+        sideCounts.stonegolem += 1;
+        continue;
+      }
       if (m.shieldBearer) {
         sideCounts.shield += 1;
         continue;
@@ -6045,7 +6107,6 @@ export class GameRenderer {
         sideCounts.balloon += 1;
         continue;
       }
-      if (m.stoneGolem) continue;
       sideCounts.militia += 1;
     }
 
@@ -6107,6 +6168,10 @@ export class GameRenderer {
           activeCountByType.monk += 1;
           continue;
         }
+        if (m.stoneGolem) {
+          activeCountByType.stonegolem += 1;
+          continue;
+        }
         if (m.shieldBearer) {
           activeCountByType.shield += 1;
           continue;
@@ -6119,7 +6184,6 @@ export class GameRenderer {
           activeCountByType.balloon += 1;
           continue;
         }
-        if (m.stoneGolem) continue;
         activeCountByType.militia += 1;
       }
       if (Array.isArray(candles)) {
@@ -6137,6 +6201,7 @@ export class GameRenderer {
       rider: Math.max(1, Number(sideState?.unitLevel) || 1),
       digger: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       monk: Math.max(1, Number(sideState?.powerLevel) || 1),
+      stonegolem: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       shield: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       hero: Math.max(1, Number(sideState?.powerLevel) || 1),
       president: Math.max(1, Number(sideState?.resourceLevel) || 1),
@@ -6152,6 +6217,7 @@ export class GameRenderer {
       { type: 'rider', label: unitLabel('rider', this.themeMode), color: '#d7c2a1', unlockHint: '' },
       { type: 'digger', label: unitLabel('digger', this.themeMode), color: '#b79a74', unlockHint: '' },
       { type: 'monk', label: unitLabel('monk', this.themeMode), color: '#cbffb6', unlockHint: '' },
+      { type: 'stonegolem', label: unitLabel('stonegolem', this.themeMode), color: '#d2dee8', unlockHint: 'at tower 50% hp' },
       { type: 'shield', label: unitLabel('shield', this.themeMode), color: '#b0d7ff', unlockHint: '' },
       { type: 'hero', label: unitLabel('hero', this.themeMode), color: '#ffe2a0', unlockHint: 'after first hit' },
       { type: 'president', label: unitLabel('president', this.themeMode), color: '#f1c7a2', unlockHint: '' },
@@ -8632,7 +8698,8 @@ export class GameRenderer {
     const bodyR = 13 * scale;
     const setup = Boolean(minion.presidentSetup);
     const upgraded = Boolean(minion.presidentExecutiveOrderUpgraded);
-    const auraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190);
+    const auraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190) * PRESIDENT_AURA_RANGE_SCALE;
+    const auraEnabled = setup && !minion.presidentAuraDisabled;
     const signLife = upgraded
       ? Math.max(0, Math.min(
         1,
@@ -8654,7 +8721,7 @@ export class GameRenderer {
         this.drawPresidentSprite(proxy, { showHud: false, cacheRender: true });
       });
       if (drewCached) {
-        if (setup) {
+        if (auraEnabled) {
           ctx.save();
           ctx.globalAlpha = 0.22;
           ctx.fillStyle = this.withAlpha(sidePalette.soft, 0.18);
@@ -8722,7 +8789,7 @@ export class GameRenderer {
     const y = minion.y;
     const dir = sideName === 'left' ? 1 : -1;
 
-    if (!cacheRender && setup) {
+    if (!cacheRender && auraEnabled) {
       ctx.save();
       ctx.globalAlpha = 0.22;
       ctx.fillStyle = this.withAlpha(sidePalette.soft, 0.18);
@@ -9176,6 +9243,13 @@ export class GameRenderer {
     const smashLife = Math.max(0, Math.min(1, (Number(minion.golemSmashTtl) || 0) / STONE_GOLEM_SMASH_TTL));
     const smashProgress = 1 - smashLife;
     const smashSpin = dir * (smashProgress * Math.PI * 2 * STONE_GOLEM_ATTACK_SPIN_TURNS);
+    const biteJumpMax = Math.max(0.01, Number(minion.golemBiteJumpMaxTtl) || STONE_GOLEM_BITE_JUMP_TTL);
+    const biteJumpLife = Math.max(0, Math.min(1, (Number(minion.golemBiteJumpTtl) || 0) / biteJumpMax));
+    const biteJumpProgress = 1 - biteJumpLife;
+    const biteLandMax = Math.max(0.01, Number(minion.golemBiteLandMaxTtl) || STONE_GOLEM_BITE_LAND_TTL);
+    const biteLandLife = Math.max(0, Math.min(1, (Number(minion.golemBiteLandTtl) || 0) / biteLandMax));
+    const biteHeld = Boolean(minion.golemBiteHeld);
+    const biteChewPulse = biteHeld ? (0.5 + Math.sin(animNow * 19 + animSeed * 0.7) * 0.5) : 0;
     const shieldMax = Math.max(0, Number(minion.golemShieldMax) || 0);
     const shieldHp = Math.max(0, Number(minion.golemShieldHp) || 0);
     const shieldTtl = Math.max(0, Number(minion.golemShieldTtl) || 0);
@@ -9195,19 +9269,31 @@ export class GameRenderer {
     const eyeGlow = riceGolem ? '#ecfbff' : sidePalette.soft;
     const hudColor = themed ? '#fff1df' : '#e3eadf';
     const hudLabel = breadGolem ? 'BREAD GOLEM' : (riceGolem ? 'RICE GOLEM' : 'GOLEM');
-    let jumpLift = 0;
+    let smashJumpLift = 0;
     if (smashLife > 0) {
       if (smashProgress < 0.45) {
-        jumpLift = Math.sin((smashProgress / 0.45) * (Math.PI * 0.5)) * (baseR * 0.34);
+        smashJumpLift = Math.sin((smashProgress / 0.45) * (Math.PI * 0.5)) * (baseR * 0.34);
       } else {
         const fallT = Math.max(0, Math.min(1, (smashProgress - 0.45) / 0.55));
-        jumpLift = (1 - fallT) * (baseR * 0.34);
+        smashJumpLift = (1 - fallT) * (baseR * 0.34);
       }
     }
+    let biteJumpLift = 0;
+    if (biteJumpLife > 0) {
+      if (biteJumpProgress < 0.6) {
+        biteJumpLift = Math.sin((biteJumpProgress / 0.6) * (Math.PI * 0.5)) * (baseR * 0.22);
+      } else {
+        const fallT = Math.max(0, Math.min(1, (biteJumpProgress - 0.6) / 0.4));
+        biteJumpLift = (1 - fallT) * (baseR * 0.22);
+      }
+    }
+    const biteLandSquash = biteLandLife > 0 ? Math.sin((1 - biteLandLife) * Math.PI) * (baseR * 0.16) : 0;
+    const jumpLift = smashJumpLift + biteJumpLift;
     const impactLife = smashLife > 0 ? Math.max(0, 1 - Math.abs(smashProgress - 0.74) / 0.24) : 0;
-    const drawX = x + idleSway * baseR * 0.03 + Math.sin(animNow * 26 + animSeed) * impactLife * 1.6;
-    const drawY = y - jumpLift + idlePulse * baseR * 0.035;
-    const shadowStretch = 1 + Math.max(0, jumpLift / (baseR * 0.72));
+    const biteLandShake = biteLandLife > 0 ? Math.sin(animNow * 42 + animSeed) * biteLandLife * 1.8 : 0;
+    const drawX = x + idleSway * baseR * 0.03 + Math.sin(animNow * 26 + animSeed) * impactLife * 1.6 + biteLandShake;
+    const drawY = y - jumpLift + biteLandSquash + idlePulse * baseR * 0.035;
+    const shadowStretch = 1 + Math.max(0, jumpLift / (baseR * 0.72)) + biteLandLife * 0.18;
 
     ctx.fillStyle = '#00000033';
     ctx.beginPath();
@@ -9249,7 +9335,8 @@ export class GameRenderer {
 
     ctx.save();
     ctx.translate(drawX, drawY);
-    ctx.rotate((Math.sin(animNow * 4.2 + animSeed) * 0.018 + marchSwing * 0.018) * (1 - smashLife * 0.35));
+    const bitePoseLife = Math.max(biteJumpLife, biteLandLife, biteHeld ? (0.72 + biteChewPulse * 0.28) : 0);
+    ctx.rotate((Math.sin(animNow * 4.2 + animSeed) * 0.018 + marchSwing * 0.018) * (1 - smashLife * 0.35) * (1 - bitePoseLife * 0.55));
     if (impactLife > 0) {
       const sx = 1 + impactLife * 0.06;
       const sy = 1 - impactLife * 0.08;
@@ -9278,7 +9365,8 @@ export class GameRenderer {
     const drawArm = (sideSign) => {
       const shoulderX = sideSign * bodyW * 0.62;
       const shoulderY = -bodyH * 0.16;
-      const idleAngle = sideSign * (0.16 + marchSwing * 0.34);
+      const biteRaise = bitePoseLife * (0.5 + biteChewPulse * 0.2);
+      const idleAngle = sideSign * (0.16 + marchSwing * 0.34) - biteRaise * sideSign;
       const attackAngle = smashSpin + sideSign * Math.PI * 0.96;
       const armAngle = smashLife > 0 ? attackAngle : idleAngle;
 
@@ -9306,8 +9394,8 @@ export class GameRenderer {
     drawArm(1);
 
     ctx.fillStyle = bootFill;
-    const leftBootLift = Math.max(0, marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35);
-    const rightBootLift = Math.max(0, -marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35);
+    const leftBootLift = Math.max(0, marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35) + bitePoseLife * baseR * 0.18;
+    const rightBootLift = Math.max(0, -marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35) + bitePoseLife * baseR * 0.18;
     ctx.fillRect(-bodyW * 0.36, bodyH * 0.56 - leftBootLift, bodyW * 0.26, bodyH * 0.28);
     ctx.fillRect(bodyW * 0.1, bodyH * 0.56 - rightBootLift, bodyW * 0.26, bodyH * 0.28);
 
@@ -9321,6 +9409,33 @@ export class GameRenderer {
     ctx.fillStyle = this.withAlpha(eyeGlow, 0.5 + eyePulse * 0.3 + smashLife * 0.2);
     ctx.fillRect(-bodyW * 0.16, eyeY + bodyH * 0.014, eyeGlowW, eyeGlowH);
     ctx.fillRect(bodyW * 0.06, eyeY + bodyH * 0.014, eyeGlowW, eyeGlowH);
+
+    const biteMouthOpen = Math.max(
+      biteHeld ? (0.68 + biteChewPulse * 0.32) : 0,
+      biteJumpLife * 0.95,
+      biteLandLife * 0.62
+    );
+    const mouthCenterY = -bodyH * 0.09 + biteMouthOpen * bodyH * 0.045;
+    const mouthW = bodyW * (0.13 + biteMouthOpen * 0.18);
+    const mouthH = bodyH * (0.034 + biteMouthOpen * 0.24);
+    ctx.fillStyle = this.withAlpha(eyeSlot, 0.84 + biteMouthOpen * 0.12);
+    ctx.beginPath();
+    ctx.ellipse(0, mouthCenterY, mouthW, mouthH, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (biteMouthOpen > 0.2) {
+      ctx.strokeStyle = this.withAlpha('#f3fbff', 0.22 + biteMouthOpen * 0.28);
+      ctx.lineWidth = 1.1 + biteMouthOpen * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(-mouthW * 0.78, mouthCenterY - mouthH * 0.4);
+      ctx.lineTo(mouthW * 0.78, mouthCenterY - mouthH * 0.4);
+      ctx.stroke();
+      ctx.strokeStyle = this.withAlpha(bodyStroke, 0.32 + biteMouthOpen * 0.34);
+      ctx.lineWidth = 1 + biteMouthOpen * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(-mouthW * 0.84, mouthCenterY + mouthH * 0.46);
+      ctx.lineTo(mouthW * 0.84, mouthCenterY + mouthH * 0.46);
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = crackColor;
     ctx.lineWidth = 1.4;
@@ -9424,6 +9539,11 @@ export class GameRenderer {
       golemShieldHp: 0,
       golemShieldMax: 0,
       golemShieldTtl: 0,
+      golemBiteJumpTtl: 0,
+      golemBiteJumpMaxTtl: STONE_GOLEM_BITE_JUMP_TTL,
+      golemBiteLandTtl: 0,
+      golemBiteLandMaxTtl: STONE_GOLEM_BITE_LAND_TTL,
+      golemBiteHeld: false,
       president: false,
       presidentSetup: true,
       presidentAuraRadius: 180,
@@ -9464,6 +9584,11 @@ export class GameRenderer {
       base.monk = true;
       base.r = 18;
       base.level = 10;
+    } else if (type === 'stonegolem') {
+      base.stoneGolem = true;
+      base.r = 30;
+      base.level = 14;
+      base.tier = 2;
     } else if (type === 'hero') {
       base.hero = true;
       base.r = 23;

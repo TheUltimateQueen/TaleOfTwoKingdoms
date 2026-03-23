@@ -115,6 +115,10 @@ const PRESIDENT_EXECUTIVE_ORDER_SIGN_TTL = 0.9;
 const PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL = 0.55;
 const PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT = 0.5;
 const PRESIDENT_EXECUTIVE_ORDER_HITS = 4;
+const PRESIDENT_AURA_RANGE_SCALE = 0.25;
+const NECRO_SPECIAL_RATE_BONUS_SCALE = 1 / 3;
+const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
+const NECRO_BASE_EVERY = 12;
 const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
 const DIGGER_GOLD_FINDER_MINE_TIME = 1;
 const NECRO_SELF_SHIELD_FADE_SECONDS = 20;
@@ -198,6 +202,17 @@ const STONE_GOLEM_FLING_ARC = 104;
 const STONE_GOLEM_FLING_AIR_ARC = 72;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
+const STONE_GOLEM_BITE_INTERVAL = 4.2;
+const STONE_GOLEM_BITE_SEARCH_RADIUS = 420;
+const STONE_GOLEM_BITE_X_RANGE = 108;
+const STONE_GOLEM_BITE_MAX_OFFSET_X = 52;
+const STONE_GOLEM_BITE_Y_MIN = 18;
+const STONE_GOLEM_BITE_Y_MAX = 460;
+const STONE_GOLEM_BITE_JUMP_TTL = 0.62;
+const STONE_GOLEM_BITE_LAND_TTL = 0.24;
+const STONE_GOLEM_BITE_CHEW_TICK = 0.2;
+const STONE_GOLEM_BITE_CHEW_DAMAGE_MULT = 0.54;
+const STONE_GOLEM_BITE_RELEASE_LOCK_TTL = 0.55;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
@@ -213,6 +228,7 @@ const SPECIAL_SPAWN_QUEUE_ORDER = [
   'gunner',
   'rider',
   'monk',
+  'stonegolem',
   'hero',
   'president',
   'balloon',
@@ -224,6 +240,7 @@ const SPECIAL_SPAWN_BASE_CHANCE = {
   rider: 0.5,
   digger: 0.5,
   monk: 0.46,
+  stonegolem: 0.02,
   shield: 0.1,
   hero: 0.1,
   president: 0.41,
@@ -240,6 +257,7 @@ const CANDLE_RECRUIT_RANGE = 210;
 const CANDLE_SPAWN_OFFSET = 56;
 const CANDLE_CART_HALF_W = 34;
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
+const STONE_GOLEM_SPAWN_EVERY_OFFSET = 6;
 const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22 / 3;
@@ -284,6 +302,7 @@ const DEBUG_FORCE_SPECIAL_TYPES = new Set([
   'gunner',
   'rider',
   'monk',
+  'stonegolem',
   'hero',
   'president',
   'balloon',
@@ -1109,6 +1128,11 @@ class GameRoom {
       golemShieldHp: roundTo(m.golemShieldHp, 1),
       golemShieldMax: roundTo(m.golemShieldMax, 1),
       golemShieldTtl: roundTo(m.golemShieldTtl, 2),
+      golemBiteJumpTtl: roundTo(m.golemBiteJumpTtl, 2),
+      golemBiteJumpMaxTtl: roundTo(m.golemBiteJumpMaxTtl, 2),
+      golemBiteLandTtl: roundTo(m.golemBiteLandTtl, 2),
+      golemBiteLandMaxTtl: roundTo(m.golemBiteLandMaxTtl, 2),
+      golemBiteHeld: Boolean(m.golemBiteHeldTargetId),
       necroShieldHp: roundTo(m.necroShieldHp, 1),
       necroShieldMax: roundTo(m.necroShieldMax, 1),
       necroShieldTtl: roundTo(m.necroShieldTtl, 2),
@@ -1560,6 +1584,7 @@ class GameRoom {
     if (type === 'gunner') return Boolean(minion.gunner);
     if (type === 'rider') return Boolean(minion.rider);
     if (type === 'monk') return Boolean(minion.monk);
+    if (type === 'stonegolem') return Boolean(minion.stoneGolem);
     if (type === 'hero') return Boolean(minion.hero);
     if (type === 'president') return Boolean(minion.president);
     if (type === 'balloon') return Boolean(minion.balloon);
@@ -1801,6 +1826,16 @@ class GameRoom {
   statCandleSpawnChance(side) {
     const bonus = this.statSpecialRateBonus(side) + clamp(Number(side?.debugCandleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
     return clamp(CANDLE_SPAWN_BASE_CHANCE + bonus, CANDLE_SPAWN_BASE_CHANCE, 0.92);
+  }
+
+  statStoneGolemEvery(side) {
+    return Math.max(1, this.statCandleEvery(side) + STONE_GOLEM_SPAWN_EVERY_OFFSET);
+  }
+
+  stoneGolemSpawnUnlocked(side) {
+    const hp = Number(side?.towerHp) || 0;
+    return Boolean(side?.towerGolemRescueUsed)
+      || (hp > 0 && hp <= TOWER_MAX_HP * STONE_GOLEM_HALF_HP_THRESHOLD);
   }
 
   candleSpawnEtaSeconds(sideName = 'left') {
@@ -3625,7 +3660,21 @@ class GameRoom {
         } else {
           m.golemShieldHp = 0;
         }
+        if (!Number.isFinite(m.golemBiteCd)) m.golemBiteCd = 0;
+        m.golemBiteCd = Math.max(0, m.golemBiteCd - dt);
+        if (!Number.isFinite(m.golemBiteJumpTtl)) m.golemBiteJumpTtl = 0;
+        if (!Number.isFinite(m.golemBiteJumpMaxTtl) || m.golemBiteJumpMaxTtl <= 0) m.golemBiteJumpMaxTtl = STONE_GOLEM_BITE_JUMP_TTL;
+        if (!Number.isFinite(m.golemBiteLandTtl)) m.golemBiteLandTtl = 0;
+        if (!Number.isFinite(m.golemBiteLandMaxTtl) || m.golemBiteLandMaxTtl <= 0) m.golemBiteLandMaxTtl = STONE_GOLEM_BITE_LAND_TTL;
+        if (!Number.isFinite(m.golemBiteChewTickTtl)) m.golemBiteChewTickTtl = 0;
+        if (!Number.isFinite(m.golemBiteTargetId)) m.golemBiteTargetId = 0;
+        if (!Number.isFinite(m.golemBiteHeldTargetId)) m.golemBiteHeldTargetId = 0;
+        if (!Number.isFinite(m.golemBiteStartY)) m.golemBiteStartY = m.y;
+        if (!Number.isFinite(m.golemBiteJumpLift)) m.golemBiteJumpLift = 0;
+        if (!Number.isFinite(m.golemBiteAnimT)) m.golemBiteAnimT = 0;
       }
+      if (!Number.isFinite(m.golemBiteLockTtl)) m.golemBiteLockTtl = 0;
+      m.golemBiteLockTtl = Math.max(0, m.golemBiteLockTtl - dt);
       if (m.necrominion) {
         const sideState = m.side === 'right' ? this.right : this.left;
         m.necroExpertUpgraded = (Number(sideState?.necroExpertSummonerLevel) || 0) > 0;
@@ -3642,6 +3691,10 @@ class GameRoom {
         }
       }
       if (this.tickStoneGolemFling(m, dt)) continue;
+      if ((Number(m.golemBiteLockTtl) || 0) > 0 && !m.stoneGolem) {
+        m.atkCd = Math.max(m.atkCd, 0.3);
+        continue;
+      }
       if (m.president) {
         const sideState = m.side === 'right' ? this.right : this.left;
         m.presidentExecutiveOrderUpgraded = (Number(sideState?.presidentExecutiveOrderLevel) || 0) > 0;
@@ -3717,6 +3770,10 @@ class GameRoom {
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
       const mySideState = m.side === 'right' ? this.right : this.left;
+      if (m.stoneGolem && this.tickStoneGolemBite(m, dt, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W)) {
+        m.atkCd = Math.max(m.atkCd, 0.18);
+        continue;
+      }
       const gunnerSkyActive = m.gunner && (Number(mySideState?.gunnerSkyCannonLevel) || 0) > 0;
       if (m.dragon && (Number(mySideState?.dragonSuperBreathLevel) || 0) > 0 && m.dragonSuperBreathCd === 0) {
         this.dragonSuperBreath(m);
@@ -3913,6 +3970,7 @@ class GameRoom {
         if (!bucket) continue;
         for (const other of bucket) {
           if (!other || other.removed || other.side === m.side || other.id === m.id) continue;
+          if (m.stoneGolem && other.flying) continue;
           const dx = other.x - m.x;
           const dy = other.y - m.y;
           const d2 = dx * dx + dy * dy;
@@ -3931,6 +3989,23 @@ class GameRoom {
             target = other;
             bestSq = d2;
           }
+        }
+      }
+
+      if (m.stoneGolem) {
+        const biteTarget = this.findStoneGolemBiteTarget(m, targetBuckets, MINION_TARGET_BUCKET_W);
+        if (biteTarget) {
+          const step = Math.max(18, Number(m.speed) || 0) * dt;
+          const dxFly = (Number(biteTarget.x) || 0) - (Number(m.x) || 0);
+          if (Math.abs(dxFly) > 2) m.x += clamp(dxFly, -step, step);
+          const biteBusy = (Number(m.golemBiteJumpTtl) || 0) > 0
+            || (Number(m.golemBiteLandTtl) || 0) > 0
+            || (Number(m.golemBiteHeldTargetId) || 0) > 0;
+          if (!biteBusy && (Number(m.golemBiteCd) || 0) <= 0) {
+            this.startStoneGolemBite(m, biteTarget);
+          }
+          m.atkCd = Math.max(m.atkCd, 0.24);
+          continue;
         }
       }
 
@@ -4399,7 +4474,7 @@ class GameRoom {
       if (!m || m.removed || !m.president || m.side !== sideName || !m.presidentSetup) continue;
       const dx = attacker.x - m.x;
       const dy = attacker.y - m.y;
-      const auraR = Math.max(110, Number(m.presidentAuraRadius) || 190);
+      const auraR = Math.max(110, Number(m.presidentAuraRadius) || 190) * PRESIDENT_AURA_RANGE_SCALE;
       if (dx * dx + dy * dy > auraR * auraR) continue;
       mul = Math.max(mul, Number(m.presidentAuraMult) || 1.24);
     }
@@ -4484,8 +4559,13 @@ class GameRoom {
     return 75 + side.unitHpLevel * 30 + side.economyLevel * 18;
   }
 
+  baseSpawnEveryForLevel(spawnLevel) {
+    const level = Math.max(1, Number(spawnLevel) || 1);
+    return Math.max(0.65, 2.2 - level * 0.09);
+  }
+
   statSpawnEvery(side) {
-    const base = Math.max(0.65, 2.2 - side.spawnLevel * 0.09);
+    const base = this.baseSpawnEveryForLevel(side.spawnLevel);
     const mul = clamp(Number(side?.debugSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
     return Math.max(0.18, base / mul);
   }
@@ -4565,7 +4645,13 @@ class GameRoom {
   }
 
   statNecroEvery(side = null) {
-    return this.scaleSpecialCooldownEvery(12, side);
+    const level = Math.max(1, Number(side?.spawnLevel) || 1);
+    const levelOneEvery = this.baseSpawnEveryForLevel(1);
+    const currentEvery = this.baseSpawnEveryForLevel(level);
+    const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
+    const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
+    const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
+    return this.scaleSpecialCooldownEvery(NECRO_BASE_EVERY * necroEveryFactor, side);
   }
 
   statSuperEvery(side) {
@@ -4586,7 +4672,12 @@ class GameRoom {
       ? overrideBase
       : Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
     if (!Number.isFinite(base)) return 0;
-    let chance = base + this.statSpecialRateBonus(side);
+    const specialRateBonus = this.statSpecialRateBonus(side);
+    const tunedSpecialBonus = type === 'necrominion'
+      ? specialRateBonus * NECRO_SPECIAL_RATE_BONUS_SCALE
+      : specialRateBonus;
+    if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
+    let chance = base + tunedSpecialBonus;
     if (type === 'dragon') chance += Math.max(0, (Number(side?.dragonLevel) || 0) - 1) * 0.014;
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     if (type === 'super') chance += Math.max(0, (Number(side?.superMinionLevel) || 0) - 1) * 0.018;
@@ -5029,6 +5120,212 @@ class GameRoom {
     this.applyMinionTowerDamage(rider, enemySideName, damage, x, y);
   }
 
+  findMinionById(minionId) {
+    const id = Math.round(Number(minionId) || 0);
+    if (id <= 0) return null;
+    for (const minion of this.minions) {
+      if (!minion || minion.removed || minion.id !== id) continue;
+      return minion;
+    }
+    return null;
+  }
+
+  stoneGolemMouthAnchor(golem) {
+    if (!golem) return { x: 0, y: 0 };
+    const dir = golem.side === 'left' ? 1 : -1;
+    const radius = Math.max(20, Number(golem.r) || 28);
+    return {
+      x: (Number(golem.x) || 0) + dir * radius * 0.92,
+      y: (Number(golem.y) || 0) - radius * 0.96,
+    };
+  }
+
+  releaseStoneGolemHeldTarget(golem, lockTtl = STONE_GOLEM_BITE_RELEASE_LOCK_TTL) {
+    if (!golem) return null;
+    const heldTargetId = Math.round(Number(golem.golemBiteHeldTargetId) || 0);
+    const held = heldTargetId > 0 ? this.findMinionById(heldTargetId) : null;
+    if (held && !held.removed) {
+      held.golemBiteLockTtl = Math.max(Number(held.golemBiteLockTtl) || 0, Math.max(0, Number(lockTtl) || 0));
+    }
+    golem.golemBiteHeldTargetId = 0;
+    golem.golemBiteChewTickTtl = 0;
+    return held;
+  }
+
+  findStoneGolemBiteTarget(golem, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!golem || !golem.stoneGolem) return null;
+    const originX = Number(golem.x) || 0;
+    const originY = Number(golem.y) || 0;
+    const radius = Math.max(24, Number(golem.r) || 30);
+    const searchR = Math.max(STONE_GOLEM_BITE_SEARCH_RADIUS, radius * 3.8);
+    let best = null;
+    let bestScore = Infinity;
+
+    this.forEachEnemyMinionInRadius(
+      golem.side,
+      originX,
+      originY - radius * 0.35,
+      searchR,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.removed || !other.flying) return;
+        if ((Number(other.golemBiteLockTtl) || 0) > 0) return;
+        if ((Number(other.golemFlingTtl) || 0) > 0) return;
+        const dx = (Number(other.x) || 0) - originX;
+        const dy = originY - (Number(other.y) || 0);
+        const absDx = Math.abs(dx);
+        if (absDx > STONE_GOLEM_BITE_X_RANGE) return;
+        if (dy < STONE_GOLEM_BITE_Y_MIN || dy > STONE_GOLEM_BITE_Y_MAX) return;
+        const score = absDx * 2.2 + Math.abs((radius * 5.2) - dy) * 0.32;
+        if (score < bestScore) {
+          bestScore = score;
+          best = other;
+        }
+      }
+    );
+
+    return best;
+  }
+
+  startStoneGolemBite(golem, target) {
+    if (!golem || !golem.stoneGolem || !target || target.removed) return;
+    golem.golemBiteCd = STONE_GOLEM_BITE_INTERVAL;
+    golem.golemBiteTargetId = target.id;
+    golem.golemBiteHeldTargetId = 0;
+    golem.golemBiteChewTickTtl = 0;
+    golem.golemBiteJumpMaxTtl = STONE_GOLEM_BITE_JUMP_TTL;
+    golem.golemBiteJumpTtl = STONE_GOLEM_BITE_JUMP_TTL;
+    golem.golemBiteLandMaxTtl = STONE_GOLEM_BITE_LAND_TTL;
+    golem.golemBiteLandTtl = 0;
+    golem.golemBiteStartX = Number(golem.x) || 0;
+    golem.golemBiteStartY = Number(golem.y) || (TOWER_Y + 20);
+    const radius = Math.max(24, Number(golem.r) || 30);
+    const targetY = Number(target.y) || (golem.golemBiteStartY - radius * 2.4);
+    const desiredLift = (golem.golemBiteStartY - targetY) + radius * 0.85;
+    golem.golemBiteJumpLift = clamp(desiredLift, radius * 2.35, radius * 6.2);
+    this.queueHitSfx('powerup', golem.x, golem.y - (Number(golem.r) || 24) * 0.42, golem.side);
+  }
+
+  tickStoneGolemBite(golem, dt, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!golem || !golem.stoneGolem) return false;
+    const sideName = golem.side === 'right' ? 'right' : 'left';
+    const animT = (Number(golem.golemBiteAnimT) || 0) + dt;
+    golem.golemBiteAnimT = animT;
+
+    const heldTargetId = Math.round(Number(golem.golemBiteHeldTargetId) || 0);
+    if (heldTargetId > 0) {
+      const held = this.findMinionById(heldTargetId);
+      if (!held || held.removed || held.side === sideName || (Number(held.hp) || 0) <= 0) {
+        this.releaseStoneGolemHeldTarget(golem, 0);
+      } else {
+        const mouth = this.stoneGolemMouthAnchor(golem);
+        const golemDir = golem.side === 'left' ? 1 : -1;
+        const holdX = mouth.x + golemDir * ((Math.max(20, Number(golem.r) || 28) * 0.44)) + Math.sin(animT * 11.2) * 2.6;
+        const holdY = mouth.y + Math.sin(animT * 22) * 2.2;
+        held.x = clamp(holdX, TOWER_X_LEFT + 24, TOWER_X_RIGHT - 24);
+        held.y = clamp(holdY, 18, TOWER_Y + 145);
+        if (held.flying && Number.isFinite(held.flyBaseY)) held.flyBaseY = held.y;
+        if (held.shieldBearer && Number.isFinite(held.shieldBaseY)) held.shieldBaseY = held.y;
+        if (held.digger && Number.isFinite(held.digBaseY)) held.digBaseY = held.y;
+        held.golemBiteLockTtl = Math.max(Number(held.golemBiteLockTtl) || 0, dt + 0.14);
+
+        const chewTickNow = Number(golem.golemBiteChewTickTtl) || STONE_GOLEM_BITE_CHEW_TICK;
+        const chewTickNext = chewTickNow - dt;
+        if (chewTickNext <= 0) {
+          golem.golemBiteChewTickTtl = STONE_GOLEM_BITE_CHEW_TICK;
+          const chewDamage = this.minionOutgoingDamage(
+            golem,
+            (Number(golem.dmg) || 0) * STONE_GOLEM_DAMAGE_MULT * STONE_GOLEM_BITE_CHEW_DAMAGE_MULT
+          );
+          this.dealMinionDamage(golem, held, chewDamage, 'melee');
+          held.hitFlashTtl = Math.max(Number(held.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+          if ((Number(held.hp) || 0) <= 0) {
+            this.killMinionByRef(held, sideName, { goldScalar: 0.92 });
+            this.releaseStoneGolemHeldTarget(golem, 0);
+            this.queueHitSfx('explosion', mouth.x, mouth.y, sideName);
+          }
+        } else {
+          golem.golemBiteChewTickTtl = chewTickNext;
+        }
+      }
+    }
+
+    const jumpNow = Number(golem.golemBiteJumpTtl) || 0;
+    if (jumpNow > 0) {
+      const maxJump = Math.max(0.01, Number(golem.golemBiteJumpMaxTtl) || STONE_GOLEM_BITE_JUMP_TTL);
+      const jumpNext = Math.max(0, jumpNow - dt);
+      golem.golemBiteJumpTtl = jumpNext;
+
+      const jumpProgress = Math.max(0, Math.min(1, 1 - (jumpNext / maxJump)));
+      const startX = Number.isFinite(golem.golemBiteStartX) ? Number(golem.golemBiteStartX) : (Number(golem.x) || 0);
+      const startY = Number.isFinite(golem.golemBiteStartY) ? Number(golem.golemBiteStartY) : (Number(golem.y) || (TOWER_Y + 20));
+      const jumpLiftMax = Math.max(16, Number(golem.golemBiteJumpLift) || (Math.max(24, Number(golem.r) || 30) * 2.8));
+      const jumpLift = Math.sin(jumpProgress * (Math.PI * 0.5)) * jumpLiftMax;
+      golem.y = startY - jumpLift;
+      const target = this.findMinionById(golem.golemBiteTargetId);
+      if (target && !target.removed && target.side !== sideName) {
+        const wantedX = Number(target.x) || startX;
+        const lockX = clamp(
+          wantedX,
+          startX - STONE_GOLEM_BITE_MAX_OFFSET_X,
+          startX + STONE_GOLEM_BITE_MAX_OFFSET_X
+        );
+        const alignRate = 0.16 + jumpProgress * 0.24;
+        golem.x += (lockX - (Number(golem.x) || 0)) * Math.min(1, alignRate);
+      } else {
+        golem.x += (startX - (Number(golem.x) || 0)) * Math.min(1, dt * 6.8);
+      }
+
+      if (jumpNext <= 0) {
+        golem.y = startY - jumpLiftMax;
+        const latch = this.findMinionById(golem.golemBiteTargetId);
+        if (
+          latch
+          && !latch.removed
+          && latch.side !== sideName
+          && latch.flying
+          && (Number(latch.hp) || 0) > 0
+          && Math.abs((Number(latch.x) || 0) - (Number(golem.x) || 0)) <= STONE_GOLEM_BITE_X_RANGE + 18
+        ) {
+          golem.golemBiteHeldTargetId = latch.id;
+          golem.golemBiteChewTickTtl = STONE_GOLEM_BITE_CHEW_TICK * 0.45;
+          latch.golemBiteLockTtl = Math.max(Number(latch.golemBiteLockTtl) || 0, 0.2);
+          this.queueHitSfx('gunhit', latch.x, latch.y, sideName);
+        }
+        golem.golemBiteTargetId = 0;
+        golem.golemBiteLandMaxTtl = STONE_GOLEM_BITE_LAND_TTL;
+        golem.golemBiteLandTtl = STONE_GOLEM_BITE_LAND_TTL;
+      }
+
+      return true;
+    }
+
+    const landNow = Number(golem.golemBiteLandTtl) || 0;
+    if (landNow > 0) {
+      const landMax = Math.max(0.01, Number(golem.golemBiteLandMaxTtl) || STONE_GOLEM_BITE_LAND_TTL);
+      const landNext = Math.max(0, landNow - dt);
+      golem.golemBiteLandTtl = landNext;
+      const startY = Number.isFinite(golem.golemBiteStartY) ? Number(golem.golemBiteStartY) : (Number(golem.y) || (TOWER_Y + 20));
+      const jumpLiftMax = Math.max(16, Number(golem.golemBiteJumpLift) || (Math.max(24, Number(golem.r) || 30) * 2.8));
+      const landProgress = Math.max(0, Math.min(1, 1 - (landNext / landMax)));
+      const eased = landProgress * landProgress * (3 - 2 * landProgress);
+      golem.y = startY - (1 - eased) * jumpLiftMax;
+      if (landNext <= 0) {
+        golem.y = startY;
+        this.releaseStoneGolemHeldTarget(golem, STONE_GOLEM_BITE_RELEASE_LOCK_TTL);
+        this.stoneGolemSmash(golem, enemySideName, enemyX, minionBuckets, bucketW);
+        golem.atkCd = Math.max(Number(golem.atkCd) || 0, STONE_GOLEM_SMASH_INTERVAL * 0.52);
+      }
+      return true;
+    }
+
+    if ((Number(golem.golemBiteHeldTargetId) || 0) > 0) {
+      this.releaseStoneGolemHeldTarget(golem, STONE_GOLEM_BITE_RELEASE_LOCK_TTL);
+    }
+    return false;
+  }
+
   startStoneGolemFling(target, awayFromAllyTowerDir, landingDamage = 0, sourceSide = null, delay = 0) {
     if (!target || target.removed) return;
     const direction = awayFromAllyTowerDir >= 0 ? 1 : -1;
@@ -5429,7 +5726,7 @@ class GameRoom {
   pickPresidentialPardonTarget(president) {
     if (!president || !president.side) return null;
     const sideName = president.side === 'right' ? 'right' : 'left';
-    const maxRange = Math.max(110, Number(president.presidentAuraRadius) || 190);
+    const maxRange = Math.max(110, Number(president.presidentAuraRadius) || 190) * PRESIDENT_AURA_RANGE_SCALE;
     const maxRangeSq = maxRange * maxRange;
     let best = null;
     let bestScore = -Infinity;
@@ -5898,6 +6195,19 @@ class GameRoom {
       golemShieldHp: 0,
       golemShieldMax: 0,
       golemShieldTtl: 0,
+      golemBiteCd: 0,
+      golemBiteTargetId: 0,
+      golemBiteHeldTargetId: 0,
+      golemBiteChewTickTtl: 0,
+      golemBiteJumpTtl: 0,
+      golemBiteJumpMaxTtl: STONE_GOLEM_BITE_JUMP_TTL,
+      golemBiteLandTtl: 0,
+      golemBiteLandMaxTtl: STONE_GOLEM_BITE_LAND_TTL,
+      golemBiteStartX: null,
+      golemBiteStartY: null,
+      golemBiteJumpLift: 0,
+      golemBiteAnimT: 0,
+      golemBiteLockTtl: 0,
       necroShieldHp: 0,
       necroShieldMax: 0,
       necroShieldTtl: 0,
@@ -6139,6 +6449,8 @@ class GameRoom {
     const gunnerEvery = this.statGunnerEvery(side);
     const riderEvery = this.statRiderEvery(side);
     const monkEvery = this.statMonkEvery(side);
+    const stoneGolemEvery = this.statStoneGolemEvery(side);
+    const stoneGolemUnlocked = this.stoneGolemSpawnUnlocked(side);
     const heroEvery = this.statHeroEvery(side);
     const presidentEvery = this.statPresidentEvery(side);
     const balloonEvery = this.statBalloonEvery(side);
@@ -6154,6 +6466,7 @@ class GameRoom {
         gunner: side.spawnCount % gunnerEvery === 0,
         rider: side.spawnCount % riderEvery === 0,
         monk: side.spawnCount % monkEvery === 0,
+        stonegolem: stoneGolemUnlocked && side.spawnCount % stoneGolemEvery === 0,
         // Hero's signature moment is still tower-first-hit rescue.
         // Natural hero training only unlocks after this side's tower has been damaged once.
         hero: side.towerDamagedOnce && side.spawnCount % heroEvery === 0,
@@ -6415,6 +6728,19 @@ class GameRoom {
       golemShieldHp: isStoneGolem ? hp : 0,
       golemShieldMax: isStoneGolem ? hp : 0,
       golemShieldTtl: isStoneGolem ? STONE_GOLEM_SHIELD_TTL : 0,
+      golemBiteCd: isStoneGolem ? (1.1 + Math.random() * 1.2) : 0,
+      golemBiteTargetId: 0,
+      golemBiteHeldTargetId: 0,
+      golemBiteChewTickTtl: 0,
+      golemBiteJumpTtl: 0,
+      golemBiteJumpMaxTtl: STONE_GOLEM_BITE_JUMP_TTL,
+      golemBiteLandTtl: 0,
+      golemBiteLandMaxTtl: STONE_GOLEM_BITE_LAND_TTL,
+      golemBiteStartX: null,
+      golemBiteStartY: isStoneGolem ? spawnY : null,
+      golemBiteJumpLift: 0,
+      golemBiteAnimT: Math.random() * Math.PI * 2,
+      golemBiteLockTtl: 0,
       necroShieldHp: isNecrominion ? hp : 0,
       necroShieldMax: isNecrominion ? hp : 0,
       necroShieldTtl: isNecrominion ? NECRO_SELF_SHIELD_FADE_SECONDS : 0,

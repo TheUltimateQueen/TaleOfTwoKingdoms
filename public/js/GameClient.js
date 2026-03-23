@@ -74,7 +74,7 @@ const TEST_UPGRADE_MAX = {
   gunnerSkyCannonLevel: 1,
   presidentExecutiveOrderLevel: 1,
 };
-const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'hero', 'president', 'balloon', 'super']);
+const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'stonegolem', 'hero', 'president', 'balloon', 'super']);
 const TEST_SPECIAL_LABELS = {
   dragon: 'Dragon',
   shield: 'Shield',
@@ -83,6 +83,7 @@ const TEST_SPECIAL_LABELS = {
   gunner: 'Gunner',
   rider: 'Rider',
   monk: 'Monk',
+  stonegolem: 'Golem',
   hero: 'Hero',
   president: 'President',
   balloon: 'Balloon',
