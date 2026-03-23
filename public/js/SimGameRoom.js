@@ -189,7 +189,13 @@ const STONE_GOLEM_SPEED_MULT = 0.58;
 const STONE_GOLEM_SMASH_INTERVAL = 3;
 const STONE_GOLEM_SMASH_RADIUS = 108;
 const STONE_GOLEM_SMASH_TOWER_RADIUS = 92;
-const STONE_GOLEM_SMASH_KNOCKBACK = 24;
+const STONE_GOLEM_SMASH_KNOCKBACK = 220;
+const STONE_GOLEM_SMASH_MIDFIELD_PAD = 24;
+const STONE_GOLEM_FLING_MAX_TARGETS = 5;
+const STONE_GOLEM_FLING_DELAY = 0.18;
+const STONE_GOLEM_FLING_TTL = 0.72;
+const STONE_GOLEM_FLING_ARC = 104;
+const STONE_GOLEM_FLING_AIR_ARC = 72;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
 const MINION_HIT_FLASH_TTL = 0.18;
@@ -3635,6 +3641,7 @@ class GameRoom {
           m.necroShieldHp = Math.max(0, Math.min(m.necroShieldHp, cap));
         }
       }
+      if (this.tickStoneGolemFling(m, dt)) continue;
       if (m.president) {
         const sideState = m.side === 'right' ? this.right : this.left;
         m.presidentExecutiveOrderUpgraded = (Number(sideState?.presidentExecutiveOrderLevel) || 0) > 0;
@@ -5022,12 +5029,114 @@ class GameRoom {
     this.applyMinionTowerDamage(rider, enemySideName, damage, x, y);
   }
 
+  startStoneGolemFling(target, awayFromAllyTowerDir, landingDamage = 0, sourceSide = null, delay = 0) {
+    if (!target || target.removed) return;
+    const direction = awayFromAllyTowerDir >= 0 ? 1 : -1;
+    const startX = Number(target.x) || 0;
+    const startY = Number(target.y) || (TOWER_Y + 40);
+    const midfieldX = WORLD_W * 0.5;
+    const midfieldStop = direction > 0
+      ? (midfieldX + STONE_GOLEM_SMASH_MIDFIELD_PAD)
+      : (midfieldX - STONE_GOLEM_SMASH_MIDFIELD_PAD);
+    const toMidfield = direction > 0
+      ? Math.max(0, midfieldStop - startX)
+      : Math.max(0, startX - midfieldStop);
+    const launchMul = target.dragon ? 0.46 : (target.super ? 0.72 : 1);
+    const launchDistance = Math.max(STONE_GOLEM_SMASH_KNOCKBACK * launchMul, toMidfield + 12);
+    let endX = startX + direction * launchDistance;
+    if (direction > 0) endX = Math.max(endX, midfieldStop);
+    else endX = Math.min(endX, midfieldStop);
+    endX = clamp(endX, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
+
+    const flying = Boolean(target.flying);
+    const endY = flying
+      ? clamp(startY + (Math.random() * 12 - 6), TOWER_Y - 220, TOWER_Y + 150)
+      : startY;
+    const baseArc = flying ? STONE_GOLEM_FLING_AIR_ARC : STONE_GOLEM_FLING_ARC;
+    const sizeMul = Math.max(0.72, Math.min(2.4, (Number(target.r) || 16) / 16));
+    const arcMul = target.dragon ? 0.62 : (target.super ? 0.78 : 1);
+    const arcHeight = Math.max(24, (baseArc * arcMul) / Math.sqrt(sizeMul));
+    const ttl = STONE_GOLEM_FLING_TTL * (target.dragon ? 1.08 : 1);
+
+    target.golemFlingFromX = startX;
+    target.golemFlingFromY = startY;
+    target.golemFlingToX = endX;
+    target.golemFlingToY = endY;
+    target.golemFlingArc = arcHeight;
+    target.golemFlingMaxTtl = ttl;
+    target.golemFlingTtl = ttl;
+    target.golemFlingDelayTtl = Math.max(0, Number(delay) || 0);
+    target.golemFlingLandingDamage = Math.max(0, Number(landingDamage) || 0);
+    target.golemFlingSourceSide = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
+  }
+
+  tickStoneGolemFling(minion, dt) {
+    if (!minion) return false;
+    const delayNow = Number(minion.golemFlingDelayTtl) || 0;
+    if (delayNow > 0) {
+      const delayNext = Math.max(0, delayNow - dt);
+      minion.golemFlingDelayTtl = delayNext;
+      if (delayNext > 0) return true;
+      minion.golemFlingFromX = Number(minion.x) || Number(minion.golemFlingFromX) || 0;
+      minion.golemFlingFromY = Number(minion.y) || Number(minion.golemFlingFromY) || (TOWER_Y + 40);
+    }
+    const ttlNow = Number(minion.golemFlingTtl) || 0;
+    if (ttlNow <= 0) return false;
+
+    const maxTtl = Math.max(0.01, Number(minion.golemFlingMaxTtl) || STONE_GOLEM_FLING_TTL);
+    const ttlNext = Math.max(0, ttlNow - dt);
+    minion.golemFlingTtl = ttlNext;
+    const progress = Math.max(0, Math.min(1, 1 - (ttlNext / maxTtl)));
+    const fromX = Number.isFinite(minion.golemFlingFromX) ? Number(minion.golemFlingFromX) : (Number(minion.x) || 0);
+    const fromY = Number.isFinite(minion.golemFlingFromY) ? Number(minion.golemFlingFromY) : (Number(minion.y) || (TOWER_Y + 40));
+    const toX = Number.isFinite(minion.golemFlingToX) ? Number(minion.golemFlingToX) : fromX;
+    const toY = Number.isFinite(minion.golemFlingToY) ? Number(minion.golemFlingToY) : fromY;
+    const arc = Math.max(0, Number(minion.golemFlingArc) || 0);
+    const eased = progress * progress * (3 - 2 * progress);
+
+    minion.x = fromX + (toX - fromX) * eased;
+    minion.y = fromY + (toY - fromY) * eased - Math.sin(Math.PI * eased) * arc;
+
+    if (ttlNext > 0) return true;
+
+    minion.x = toX;
+    minion.y = toY;
+    if (minion.flying && Number.isFinite(minion.flyBaseY)) minion.flyBaseY = toY;
+    if (minion.shieldBearer) minion.shieldBaseY = toY;
+    if (minion.digger) minion.digBaseY = toY;
+    const landingDamage = Math.max(0, Number(minion.golemFlingLandingDamage) || 0);
+    const sourceSide = minion.golemFlingSourceSide === 'right'
+      ? 'right'
+      : (minion.golemFlingSourceSide === 'left' ? 'left' : null);
+    if (landingDamage > 0 && (Number(minion.hp) || 0) > 0) {
+      this.dealDamageToMinion(minion, landingDamage, sourceSide, 'unit');
+      minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+      if ((Number(minion.hp) || 0) <= 0) {
+        const killerSide = sourceSide || (minion.side === 'left' ? 'right' : 'left');
+        this.killMinionByRef(minion, killerSide, { goldScalar: 0.86 });
+      }
+    }
+    minion.golemFlingFromX = null;
+    minion.golemFlingFromY = null;
+    minion.golemFlingToX = null;
+    minion.golemFlingToY = null;
+    minion.golemFlingArc = 0;
+    minion.golemFlingMaxTtl = 0;
+    minion.golemFlingTtl = 0;
+    minion.golemFlingDelayTtl = 0;
+    minion.golemFlingLandingDamage = 0;
+    minion.golemFlingSourceSide = null;
+    return false;
+  }
+
   stoneGolemSmash(golem, enemySideName, enemyX, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!golem || !golem.stoneGolem) return;
     const sideName = golem.side === 'right' ? 'right' : 'left';
     const awayFromAllyTowerDir = sideName === 'left' ? 1 : -1;
+    const sideState = sideName === 'right' ? this.right : this.left;
     const smashR = Math.max(STONE_GOLEM_SMASH_RADIUS, (Number(golem.r) || 28) * 2.35);
     const baseDamage = this.minionOutgoingDamage(golem, (Number(golem.dmg) || 0) * STONE_GOLEM_DAMAGE_MULT * 3);
+    const landingDamage = Math.max(1, this.statMinionHp(sideState) * 0.5);
     const victims = [];
     let hitAny = false;
 
@@ -5044,16 +5153,31 @@ class GameRoom {
       }
     );
 
+    const uniqueVictims = [];
+    const seenVictims = new Set();
     for (const other of victims) {
+      if (!other || other.removed || other.side === sideName || other.id === golem.id) continue;
+      if (seenVictims.has(other.id)) continue;
+      seenVictims.add(other.id);
+      uniqueVictims.push(other);
+    }
+    uniqueVictims.sort((a, b) => {
+      const adx = (Number(a?.x) || 0) - (Number(golem.x) || 0);
+      const ady = (Number(a?.y) || 0) - (Number(golem.y) || 0);
+      const bdx = (Number(b?.x) || 0) - (Number(golem.x) || 0);
+      const bdy = (Number(b?.y) || 0) - (Number(golem.y) || 0);
+      return (adx * adx + ady * ady) - (bdx * bdx + bdy * bdy);
+    });
+
+    for (const other of uniqueVictims.slice(0, STONE_GOLEM_FLING_MAX_TARGETS)) {
       if (!other || other.removed || other.side === sideName || other.id === golem.id) continue;
       hitAny = true;
       this.dealMinionDamage(golem, other, baseDamage, 'melee');
-      const knock = STONE_GOLEM_SMASH_KNOCKBACK * (other.dragon ? 0.34 : other.super ? 0.62 : 1);
-      other.x = clamp(other.x + awayFromAllyTowerDir * knock, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
-      if (other.flying && Number.isFinite(other.flyBaseY)) {
-        other.flyBaseY += (other.y - other.flyBaseY) * 0.08;
+      if (other.hp <= 0) {
+        this.killMinionByRef(other, sideName, { goldScalar: 0.9 });
+        continue;
       }
-      if (other.hp <= 0) this.killMinionByRef(other, sideName, { goldScalar: 0.9 });
+      this.startStoneGolemFling(other, awayFromAllyTowerDir, landingDamage, sideName, STONE_GOLEM_FLING_DELAY);
     }
 
     if (Math.abs(golem.x - enemyX) <= STONE_GOLEM_SMASH_TOWER_RADIUS) {

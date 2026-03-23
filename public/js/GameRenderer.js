@@ -230,6 +230,7 @@ const MINION_HIT_FLASH_TTL = 0.18;
 const SHIELD_DARK_METAL_DURATION = 5;
 const STONE_GOLEM_SMASH_TTL = 0.45;
 const STONE_GOLEM_SHIELD_TTL = 5;
+const STONE_GOLEM_ATTACK_SPIN_TURNS = 2.75;
 const MAX_PARTICLES = 1800;
 const MAX_POOLED_PARTICLES = MAX_PARTICLES * 2;
 const MAX_DAMAGE_TEXTS = 180;
@@ -9166,8 +9167,15 @@ export class GameRenderer {
     const baseR = Math.max(22, Number(minion.r) || 30);
     const bodyW = baseR * 1.9;
     const bodyH = baseR * 1.8;
+    const animNow = performance.now() * 0.001;
+    const animSeed = (Number(minion.id) || 0) * 0.37;
+    const moveMag = Math.max(0.2, Math.min(1.2, (Number(minion.speed) || 0) / 90));
+    const idlePulse = Math.sin(animNow * 3.1 + animSeed);
+    const idleSway = Math.sin(animNow * 2.4 + animSeed * 1.7);
+    const marchSwing = Math.sin((Number(minion.x) || 0) * 0.1 + animNow * (2.4 + moveMag * 1.6) + animSeed);
     const smashLife = Math.max(0, Math.min(1, (Number(minion.golemSmashTtl) || 0) / STONE_GOLEM_SMASH_TTL));
     const smashProgress = 1 - smashLife;
+    const smashSpin = dir * (smashProgress * Math.PI * 2 * STONE_GOLEM_ATTACK_SPIN_TURNS);
     const shieldMax = Math.max(0, Number(minion.golemShieldMax) || 0);
     const shieldHp = Math.max(0, Number(minion.golemShieldHp) || 0);
     const shieldTtl = Math.max(0, Number(minion.golemShieldTtl) || 0);
@@ -9197,24 +9205,25 @@ export class GameRenderer {
       }
     }
     const impactLife = smashLife > 0 ? Math.max(0, 1 - Math.abs(smashProgress - 0.74) / 0.24) : 0;
-    const drawY = y - jumpLift;
+    const drawX = x + idleSway * baseR * 0.03 + Math.sin(animNow * 26 + animSeed) * impactLife * 1.6;
+    const drawY = y - jumpLift + idlePulse * baseR * 0.035;
     const shadowStretch = 1 + Math.max(0, jumpLift / (baseR * 0.72));
 
     ctx.fillStyle = '#00000033';
     ctx.beginPath();
-    ctx.ellipse(x, y + bodyH * 0.66, bodyW * 0.84 * shadowStretch, bodyH * 0.24, 0, 0, Math.PI * 2);
+    ctx.ellipse(drawX, y + bodyH * 0.66, bodyW * 0.84 * shadowStretch, bodyH * 0.24, 0, 0, Math.PI * 2);
     ctx.fill();
 
     if (shieldHpPct > 0 && shieldFade > 0) {
       const auraAlpha = (0.14 + shieldHpPct * 0.2) * (0.45 + shieldFade * 0.55);
       ctx.fillStyle = this.withAlpha(sidePalette.soft, auraAlpha * 0.55);
       ctx.beginPath();
-      ctx.ellipse(x, drawY - bodyH * 0.08, bodyW * 0.72, bodyH * 0.7, 0, 0, Math.PI * 2);
+      ctx.ellipse(drawX, drawY - bodyH * 0.08, bodyW * 0.72, bodyH * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = this.withAlpha('#dcf5ff', auraAlpha + 0.14);
       ctx.lineWidth = 1.6 + shieldHpPct * 1.6;
       ctx.beginPath();
-      ctx.ellipse(x, drawY - bodyH * 0.1, bodyW * (0.78 + shieldHpPct * 0.1), bodyH * (0.76 + shieldHpPct * 0.1), 0, 0, Math.PI * 2);
+      ctx.ellipse(drawX, drawY - bodyH * 0.1, bodyW * (0.78 + shieldHpPct * 0.1), bodyH * (0.76 + shieldHpPct * 0.1), 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -9222,24 +9231,25 @@ export class GameRenderer {
       ctx.strokeStyle = this.withAlpha(sidePalette.primary, 0.22 + smashLife * 0.3);
       ctx.lineWidth = 3 + smashLife * 3;
       ctx.beginPath();
-      ctx.ellipse(x, y + bodyH * 0.54, bodyW * (0.58 + smashLife * 0.58), bodyH * (0.19 + smashLife * 0.22), 0, 0, Math.PI * 2);
+      ctx.ellipse(drawX, y + bodyH * 0.54, bodyW * (0.58 + smashLife * 0.58), bodyH * (0.19 + smashLife * 0.22), 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.strokeStyle = this.withAlpha('#e7f5ff', 0.18 + smashLife * 0.22);
       ctx.lineWidth = 1.6 + smashLife * 1.2;
       ctx.beginPath();
-      ctx.ellipse(x, y + bodyH * 0.56, bodyW * (0.45 + smashLife * 0.44), bodyH * (0.14 + smashLife * 0.15), 0, 0, Math.PI * 2);
+      ctx.ellipse(drawX, y + bodyH * 0.56, bodyW * (0.45 + smashLife * 0.44), bodyH * (0.14 + smashLife * 0.15), 0, 0, Math.PI * 2);
       ctx.stroke();
       if (impactLife > 0) {
         ctx.strokeStyle = this.withAlpha('#f7dbe3', 0.2 + impactLife * 0.32);
         ctx.lineWidth = 2 + impactLife * 2;
         ctx.beginPath();
-        ctx.ellipse(x, y + bodyH * 0.58, bodyW * (0.52 + impactLife * 0.38), bodyH * (0.12 + impactLife * 0.15), 0, 0, Math.PI * 2);
+        ctx.ellipse(drawX, y + bodyH * 0.58, bodyW * (0.52 + impactLife * 0.38), bodyH * (0.12 + impactLife * 0.15), 0, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
 
     ctx.save();
-    ctx.translate(x, drawY);
+    ctx.translate(drawX, drawY);
+    ctx.rotate((Math.sin(animNow * 4.2 + animSeed) * 0.018 + marchSwing * 0.018) * (1 - smashLife * 0.35));
     if (impactLife > 0) {
       const sx = 1 + impactLife * 0.06;
       const sy = 1 - impactLife * 0.08;
@@ -9262,24 +9272,55 @@ export class GameRenderer {
     ctx.lineWidth = 2.1;
     ctx.stroke();
 
-    ctx.fillStyle = armFill;
-    ctx.fillRect(-bodyW * 0.82, -bodyH * 0.26, bodyW * 0.28, bodyH * 0.7);
-    ctx.fillRect(bodyW * 0.54, -bodyH * 0.26, bodyW * 0.28, bodyH * 0.7);
-    ctx.fillStyle = armAccent;
-    ctx.fillRect(-bodyW * 0.78, bodyH * 0.32, bodyW * 0.2, bodyH * 0.24);
-    ctx.fillRect(bodyW * 0.58, bodyH * 0.32, bodyW * 0.2, bodyH * 0.24);
+    const armLen = bodyH * 0.86;
+    const armWidth = bodyW * 0.24;
+    const spinTrailAlpha = smashLife > 0 ? (0.16 + smashLife * 0.28) : 0;
+    const drawArm = (sideSign) => {
+      const shoulderX = sideSign * bodyW * 0.62;
+      const shoulderY = -bodyH * 0.16;
+      const idleAngle = sideSign * (0.16 + marchSwing * 0.34);
+      const attackAngle = smashSpin + sideSign * Math.PI * 0.96;
+      const armAngle = smashLife > 0 ? attackAngle : idleAngle;
+
+      ctx.save();
+      ctx.translate(shoulderX, shoulderY);
+      ctx.rotate(armAngle);
+      ctx.fillStyle = armFill;
+      ctx.fillRect(-armWidth * 0.5, -armWidth * 0.32, armWidth, armLen * 0.92);
+      ctx.fillStyle = armAccent;
+      ctx.fillRect(-armWidth * 0.44, armLen * 0.45, armWidth * 0.88, armLen * 0.24);
+      ctx.fillStyle = bodyStroke;
+      ctx.fillRect(-armWidth * 0.58, armLen * 0.72, armWidth * 1.16, armLen * 0.2);
+      ctx.restore();
+
+      if (spinTrailAlpha > 0) {
+        const trailR = bodyW * (0.54 + smashLife * 0.22);
+        ctx.strokeStyle = this.withAlpha(sidePalette.soft, spinTrailAlpha + 0.08);
+        ctx.lineWidth = 1.8 + smashLife * 1.8;
+        ctx.beginPath();
+        ctx.arc(shoulderX, shoulderY + bodyH * 0.08, trailR, armAngle - dir * 0.5, armAngle - dir * 2.25, dir < 0);
+        ctx.stroke();
+      }
+    };
+    drawArm(-1);
+    drawArm(1);
 
     ctx.fillStyle = bootFill;
-    ctx.fillRect(-bodyW * 0.36, bodyH * 0.56, bodyW * 0.26, bodyH * 0.28);
-    ctx.fillRect(bodyW * 0.1, bodyH * 0.56, bodyW * 0.26, bodyH * 0.28);
+    const leftBootLift = Math.max(0, marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35);
+    const rightBootLift = Math.max(0, -marchSwing) * baseR * 0.08 * (1 - smashLife * 0.35);
+    ctx.fillRect(-bodyW * 0.36, bodyH * 0.56 - leftBootLift, bodyW * 0.26, bodyH * 0.28);
+    ctx.fillRect(bodyW * 0.1, bodyH * 0.56 - rightBootLift, bodyW * 0.26, bodyH * 0.28);
 
     ctx.fillStyle = eyeSlot;
     const eyeY = -bodyH * 0.3;
     ctx.fillRect(-bodyW * 0.18, eyeY, bodyW * 0.14, bodyH * 0.08);
     ctx.fillRect(bodyW * 0.04, eyeY, bodyW * 0.14, bodyH * 0.08);
-    ctx.fillStyle = eyeGlow;
-    ctx.fillRect(-bodyW * 0.16, eyeY + bodyH * 0.014, bodyW * 0.1, bodyH * 0.035);
-    ctx.fillRect(bodyW * 0.06, eyeY + bodyH * 0.014, bodyW * 0.1, bodyH * 0.035);
+    const eyePulse = 0.5 + Math.sin(animNow * 8.8 + animSeed + smashLife * 4.2) * 0.5;
+    const eyeGlowW = bodyW * (0.094 + eyePulse * 0.012);
+    const eyeGlowH = bodyH * (0.034 + eyePulse * 0.009 + smashLife * 0.006);
+    ctx.fillStyle = this.withAlpha(eyeGlow, 0.5 + eyePulse * 0.3 + smashLife * 0.2);
+    ctx.fillRect(-bodyW * 0.16, eyeY + bodyH * 0.014, eyeGlowW, eyeGlowH);
+    ctx.fillRect(bodyW * 0.06, eyeY + bodyH * 0.014, eyeGlowW, eyeGlowH);
 
     ctx.strokeStyle = crackColor;
     ctx.lineWidth = 1.4;
@@ -9336,11 +9377,11 @@ export class GameRenderer {
       ctx.fillStyle = hudColor;
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(hudLabel, x, drawY - bodyH - 20);
+      ctx.fillText(hudLabel, drawX, drawY - bodyH - 20);
       if (shieldMax > 0 && (shieldHpPct > 0 || shieldFade > 0)) {
         const barScale = Math.max(1.7, (baseR / 16) * 1.4);
         const shieldW = 36 * barScale;
-        const shieldX = x - shieldW / 2;
+        const shieldX = drawX - shieldW / 2;
         const shieldY = (drawY + 8) - (26 * barScale + 2) - 8;
         ctx.fillStyle = '#101420d9';
         ctx.fillRect(shieldX, shieldY, shieldW, 4);
@@ -9349,7 +9390,7 @@ export class GameRenderer {
           ctx.fillRect(shieldX, shieldY, shieldW * shieldHpPct, 4);
         }
       }
-      this.drawMinionHpBar(minion, x, drawY + 8, Math.max(1.7, (baseR / 16) * 1.4));
+      this.drawMinionHpBar(minion, drawX, drawY + 8, Math.max(1.7, (baseR / 16) * 1.4));
     }
   }
 
