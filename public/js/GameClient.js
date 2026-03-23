@@ -891,7 +891,10 @@ export class GameClient {
 
   pushHostState(force = false) {
     if (!this.hostAuthoritative || this.isController || !this.localRoom || !this.state.roomId) return;
-    const snapshot = this.localRoom.serialize();
+    const roomStarted = Boolean(this.localRoom.started);
+    const roomGameOver = Boolean(this.localRoom.gameOver);
+    if (!force && !roomStarted && !roomGameOver) return;
+    const snapshot = this.localRoom.snapshotForDisplay();
     this.state.snapshot = snapshot;
     this.state.world = snapshot.world;
     this.handleDisplayState(snapshot);
@@ -909,7 +912,6 @@ export class GameClient {
     for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
 
     const now = performance.now();
-    if (!force && !snapshot.started && !snapshot.gameOver) return;
     if (!force && now < this.nextHostStateEmitAt) return;
     this.nextHostStateEmitAt = now + HOST_STATE_EMIT_MS;
 
@@ -942,9 +944,10 @@ export class GameClient {
     };
 
     const needsDisplaySnapshot = this.remoteDisplayCount > 0;
+    const displaySnapshot = needsDisplaySnapshot ? this.localRoom.serialize() : null;
     this.socket.emit('host_state', {
       roomId: this.state.roomId,
-      snapshot: needsDisplaySnapshot ? snapshot : null,
+      snapshot: displaySnapshot,
       controllerFrame,
       sfxEvents,
       damageEvents,

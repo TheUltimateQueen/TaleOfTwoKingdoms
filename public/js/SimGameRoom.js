@@ -630,6 +630,45 @@ class GameRoom {
     this.debugResourceRateMultiplier = 1;
     this.debugPowerDropRateMultiplier = 1;
     this.debugColliderOverlay = false;
+    this.worldInfo = {
+      w: WORLD_W,
+      h: WORLD_H,
+      groundY: GROUND_Y,
+      towerY: TOWER_Y,
+      towerLeftX: TOWER_X_LEFT,
+      towerRightX: TOWER_X_RIGHT,
+    };
+    this.displayPrimaryPlayers = { left: null, right: null };
+    this.displayDebug = { colliderOverlay: false };
+    this.displayCandles = [null, null];
+    this.displaySnapshot = {
+      id: this.id,
+      mode: this.mode,
+      themeMode: this.themeMode,
+      archersPerSide: this.archersPerSide,
+      requiredPlayers: this.requiredPlayers(),
+      playerCount: 0,
+      started: false,
+      gameOver: false,
+      winner: null,
+      t: 0,
+      world: this.worldInfo,
+      left: this.left,
+      right: this.right,
+      arrows: this.arrows,
+      minions: this.minions,
+      candles: this.displayCandles,
+      candleScorches: this.candleScorches,
+      resources: this.resources,
+      shotPowers: this.shotPowers,
+      cannonBalls: this.cannonBalls,
+      upgradeCards: this.upgradeCards,
+      players: this.players,
+      primaryPlayers: this.displayPrimaryPlayers,
+      postGameReport: null,
+      debug: this.displayDebug,
+      hasDisplay: false,
+    };
 
     this.nextResourceAt = 5;
     this.nextShotPowerAt = 7;
@@ -660,6 +699,40 @@ class GameRoom {
 
     this.seedUpgradeCards();
     this.resetMatchReport();
+  }
+
+  snapshotForDisplay() {
+    const snapshot = this.displaySnapshot;
+    snapshot.mode = this.mode;
+    snapshot.themeMode = this.themeMode;
+    snapshot.archersPerSide = this.archersPerSide;
+    snapshot.requiredPlayers = this.requiredPlayers();
+    snapshot.playerCount = this.totalPlayers();
+    snapshot.started = this.started;
+    snapshot.gameOver = this.gameOver;
+    snapshot.winner = this.winner;
+    snapshot.t = this.t;
+    snapshot.left = this.left;
+    snapshot.right = this.right;
+    snapshot.arrows = this.arrows;
+    snapshot.minions = this.minions;
+    this.displayCandles[0] = this.candles.left;
+    this.displayCandles[1] = this.candles.right;
+    snapshot.candles = this.displayCandles;
+    snapshot.candleScorches = this.candleScorches;
+    snapshot.resources = this.resources;
+    snapshot.shotPowers = this.shotPowers;
+    snapshot.cannonBalls = this.cannonBalls;
+    snapshot.upgradeCards = this.upgradeCards;
+    snapshot.players = this.players;
+    this.displayPrimaryPlayers.left = this.players.left[0] || null;
+    this.displayPrimaryPlayers.right = this.players.right[0] || null;
+    snapshot.primaryPlayers = this.displayPrimaryPlayers;
+    snapshot.postGameReport = this.gameOver ? this.buildPostGameReport() : null;
+    this.displayDebug.colliderOverlay = Boolean(this.debugColliderOverlay);
+    snapshot.debug = this.displayDebug;
+    snapshot.hasDisplay = Boolean(this.display);
+    return snapshot;
   }
 
   defaultPlayerNameForSide(sideName, slot = 0) {
@@ -1687,10 +1760,10 @@ class GameRoom {
     this.refreshPresidentAuraCache();
 
     this.tickShotPowers(dt);
-    this.tickCannonBalls(dt);
     const preBuckets = this.buildDualMinionBuckets(ARROW_TARGET_BUCKET_W, MINION_TARGET_BUCKET_W);
+    this.tickCannonBalls(dt, preBuckets.minion);
     this.tickArrows(dt, preBuckets.arrow);
-    this.tickMinions(dt, preBuckets.minion, preBuckets.carrierCounts);
+    this.tickMinions(dt, preBuckets.minion);
     const candleBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const candleHolders = this.collectAllCandleHolders();
     this.tickCandle(dt, candleBuckets, candleHolders);
@@ -1754,10 +1827,10 @@ class GameRoom {
     this.shotPowers.length = write;
   }
 
-  tickCannonBalls(dt) {
+  tickCannonBalls(dt, precomputedBuckets = null) {
     if (!Array.isArray(this.cannonBalls) || this.cannonBalls.length === 0) return;
     let write = 0;
-    const preBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
+    const preBuckets = precomputedBuckets || this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     for (let i = 0; i < this.cannonBalls.length; i += 1) {
       const ball = this.cannonBalls[i];
       if (!ball) continue;
@@ -4045,12 +4118,16 @@ class GameRoom {
         const enemySidePad = 6;
         const enemyHalfMinX = enemySideName === 'right' ? (midfieldX + enemySidePad) : -Infinity;
         const enemyHalfMaxX = enemySideName === 'left' ? (midfieldX - enemySidePad) : Infinity;
-        for (const bucket of enemyBuckets.values()) {
+        const balloonScan = Math.max(1, Math.ceil(430 / MINION_TARGET_BUCKET_W));
+        for (let cell = centerCell - balloonScan; cell <= centerCell + balloonScan; cell += 1) {
+          const bucket = enemyBuckets.get(cell);
+          if (!bucket) continue;
           for (const other of bucket) {
             if (!isEnemyUnit(other)) continue;
             const dx = other.x - m.x;
             const dy = other.y - m.y;
             const d2 = dx * dx + dy * dy;
+            if (d2 > 430 * 430) continue;
             if (isGroundEnemy(other) && d2 < closestGroundSq) {
               closestGroundSq = d2;
               closestGroundTarget = other;

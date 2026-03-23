@@ -309,6 +309,8 @@ export class GameRenderer {
     this.fxFrameDtAvg = 1 / 60;
     this.fxQualityHold = 0;
     this.frameArrowCount = 0;
+    this.balloonMinionBuffer = [];
+    this.groundMinionBuffer = [];
     this.lastFrameAt = performance.now();
   }
 
@@ -4387,8 +4389,16 @@ export class GameRenderer {
     this.drawComboBanner('left', world.towerLeftX, world.towerY - 230, snapshot.left);
     this.drawComboBanner('right', world.towerRightX, world.towerY - 230, snapshot.right);
     const allMinions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
-    const balloonMinions = allMinions.filter((m) => m && m.balloon);
-    const nonBalloonMinions = allMinions.filter((m) => m && !m.balloon);
+    const balloonMinions = this.balloonMinionBuffer;
+    const nonBalloonMinions = this.groundMinionBuffer;
+    balloonMinions.length = 0;
+    nonBalloonMinions.length = 0;
+    for (let i = 0; i < allMinions.length; i += 1) {
+      const minion = allMinions[i];
+      if (!minion) continue;
+      if (minion.balloon) balloonMinions.push(minion);
+      else nonBalloonMinions.push(minion);
+    }
     // Balloons are intentionally painted first so the upgrade panel/cards remain readable above them.
     for (const minion of balloonMinions) this.drawMinionSprite(minion);
     this.drawUpgradeChargeBar('left', 42, 220, 16, 270, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
