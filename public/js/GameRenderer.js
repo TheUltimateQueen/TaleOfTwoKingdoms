@@ -311,6 +311,8 @@ export class GameRenderer {
     this.frameArrowCount = 0;
     this.balloonMinionBuffer = [];
     this.groundMinionBuffer = [];
+    this.cardTextFitCache = new Map();
+    this.cardTextFitCacheMaxEntries = 1024;
     this.lastFrameAt = performance.now();
   }
 
@@ -341,7 +343,33 @@ export class GameRenderer {
       this.spriteCache.clear();
       this.prevMinionAtkCd.clear();
       this.militiaFoodFx.clear();
+      this.cardTextFitCache.clear();
     }
+  }
+
+  fitUpgradeCardText(text, maxWidth, font = '10px sans-serif') {
+    const raw = String(text || '');
+    if (!raw) return '';
+    const width = Math.max(1, Math.floor(Number(maxWidth) || 0));
+    const key = `${font}|${width}|${raw}`;
+    if (this.cardTextFitCache.has(key)) return this.cardTextFitCache.get(key);
+
+    const { ctx } = this;
+    ctx.save();
+    ctx.font = font;
+    let out = raw;
+    if (ctx.measureText(raw).width > width) {
+      const ellipsis = '...';
+      while (out.length > 0 && ctx.measureText(`${out}${ellipsis}`).width > width) {
+        out = out.slice(0, -1);
+      }
+      out = out ? `${out}${ellipsis}` : ellipsis;
+    }
+    ctx.restore();
+
+    if (this.cardTextFitCache.size > this.cardTextFitCacheMaxEntries) this.cardTextFitCache.clear();
+    this.cardTextFitCache.set(key, out);
+    return out;
   }
 
   sideLabel(side) {
@@ -7016,17 +7044,6 @@ export class GameRenderer {
     const category = upgradeCategory(card.type);
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
     const textX = card.x + 10;
-    const fitCardText = (text, maxWidth) => {
-      const raw = String(text || '');
-      if (!raw) return '';
-      if (ctx.measureText(raw).width <= maxWidth) return raw;
-      const ellipsis = '...';
-      let out = raw;
-      while (out.length > 0 && ctx.measureText(`${out}${ellipsis}`).width > maxWidth) {
-        out = out.slice(0, -1);
-      }
-      return out ? `${out}${ellipsis}` : ellipsis;
-    };
     ctx.fillStyle = style.panel;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
     ctx.fillStyle = style.glow;
@@ -7058,11 +7075,19 @@ export class GameRenderer {
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
     const cardLevel = Math.max(0, Number(sideState?.[card.type]) || 0);
-    const titleText = fitCardText(upgradeLabelForLevel(card.type, cardLevel), Math.max(20, card.w - 22));
+    const titleText = this.fitUpgradeCardText(
+      upgradeLabelForLevel(card.type, cardLevel),
+      Math.max(20, card.w - 22),
+      '10px sans-serif'
+    );
     ctx.fillText(titleText, textX, card.y - 5);
     ctx.fillStyle = style.hint;
     ctx.font = '8px sans-serif';
-    const hintText = fitCardText(upgradeHintForLevel(card.type, cardLevel), Math.max(18, card.w - 24));
+    const hintText = this.fitUpgradeCardText(
+      upgradeHintForLevel(card.type, cardLevel),
+      Math.max(18, card.w - 24),
+      '8px sans-serif'
+    );
     ctx.fillText(hintText, textX, card.y + 4);
     ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';

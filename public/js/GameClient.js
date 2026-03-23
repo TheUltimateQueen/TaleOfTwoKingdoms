@@ -1762,10 +1762,22 @@ export class GameClient {
     );
 
     const upgrades = Array.isArray(report?.upgrades) ? report.upgrades : [];
+    let pointCursor = 0;
     for (let i = 0; i < upgrades.length; i += 1) {
       const event = upgrades[i];
-      const px = chart.x + (Math.max(0, Number(event.t) || 0) / maxT) * chart.w;
-      const matchingPoint = points.find((point) => Math.abs((Number(point?.t) || 0) - (Number(event.t) || 0)) <= 0.55);
+      const eventT = Math.max(0, Number(event.t) || 0);
+      const px = chart.x + (eventT / maxT) * chart.w;
+      while (pointCursor + 1 < points.length && (Number(points[pointCursor + 1]?.t) || 0) <= eventT) {
+        pointCursor += 1;
+      }
+      let matchingPoint = points[pointCursor] || null;
+      if (pointCursor + 1 < points.length) {
+        const nextPoint = points[pointCursor + 1];
+        const currentDt = Math.abs((Number(matchingPoint?.t) || 0) - eventT);
+        const nextDt = Math.abs((Number(nextPoint?.t) || 0) - eventT);
+        if (nextDt < currentDt) matchingPoint = nextPoint;
+      }
+      if (Math.abs((Number(matchingPoint?.t) || 0) - eventT) > 0.55) matchingPoint = null;
       const yVal = event.side === 'right'
         ? Number(matchingPoint?.[rightGoldKey]) || 0
         : Number(matchingPoint?.[leftGoldKey]) || 0;

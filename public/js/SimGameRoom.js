@@ -1763,7 +1763,7 @@ class GameRoom {
     const preBuckets = this.buildDualMinionBuckets(ARROW_TARGET_BUCKET_W, MINION_TARGET_BUCKET_W);
     this.tickCannonBalls(dt, preBuckets.minion);
     this.tickArrows(dt, preBuckets.arrow);
-    this.tickMinions(dt, preBuckets.minion);
+    this.tickMinions(dt, preBuckets.minion, preBuckets.carrierCounts);
     const candleBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const candleHolders = this.collectAllCandleHolders();
     this.tickCandle(dt, candleBuckets, candleHolders);
