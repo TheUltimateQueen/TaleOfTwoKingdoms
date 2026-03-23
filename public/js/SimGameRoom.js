@@ -625,6 +625,7 @@ class GameRoom {
     this.damageEvents = [];
     this.lineEvents = [];
     this.sharedShotCd = SHOT_INTERVAL;
+    this.nextArrowPrioritySide = 'left';
     this.activePresidents = { left: [], right: [] };
     this.candleCarrierCounts = { left: 0, right: 0 };
     this.debugResourceRateMultiplier = 1;
@@ -1716,17 +1717,22 @@ class GameRoom {
     // Keep last special roll result visible for UI history; TTL controls recency only.
 
     if (this.sharedShotCd === 0) {
+      // Alternate arrow resolution priority each volley to reduce deterministic side bias.
+      // Arrows are processed in reverse array order, so we enqueue the priority side last.
+      const prioritySide = this.nextArrowPrioritySide === 'right' ? 'right' : 'left';
+      const otherSide = prioritySide === 'left' ? 'right' : 'left';
       if (this.archersPerSide > 1) {
         for (let slot = 0; slot < this.archersPerSide; slot += 1) {
-          this.addArrowFromPull('left', slot);
-          this.addArrowFromPull('right', slot);
+          this.addArrowFromPull(otherSide, slot);
+          this.addArrowFromPull(prioritySide, slot);
         }
         this.left.archerVolleyIndex = 0;
         this.right.archerVolleyIndex = 0;
       } else {
-        this.addArrowFromPull('left', 0);
-        this.addArrowFromPull('right', 0);
+        this.addArrowFromPull(otherSide, 0);
+        this.addArrowFromPull(prioritySide, 0);
       }
+      this.nextArrowPrioritySide = otherSide;
       this.sharedShotCd = volleyInterval;
       this.left.shotCd = this.sharedShotCd;
       this.right.shotCd = this.sharedShotCd;
