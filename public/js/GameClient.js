@@ -16,8 +16,8 @@ import {
   sideVictoryLabel,
 } from './themeConfig.js';
 
-const VOICE_GAP_MIN_MS = 2000;
-const VOICE_GAP_MAX_MS = 10000;
+const VOICE_TRIGGER_DELAY_MS = 30;
+const VOICE_CHAIN_DELAY_MS = 180;
 const HERO_VOICE_CLIPS = [
   '/Sounds/HeroVoice/Chacha.m4a',
   '/Sounds/HeroVoice/Haya.m4a',
@@ -301,7 +301,9 @@ export class GameClient {
     this.voiceUnlocked = false;
     this.voicePools = null;
     this.voiceState = null;
-    this.voicePresence = { hero: false, president: false };
+    this.voiceSpawnSeen = { hero: new Set(), president: new Set() };
+    this.voiceSpawnQueue = { hero: 0, president: 0 };
+    this.voiceRoundActive = false;
     this.gameOverLatched = false;
     this.gameOverLatchedAtMs = 0;
     this.gameOverRevealAtMs = 0;
@@ -2138,6 +2140,9 @@ export class GameClient {
       hero: { timerId: null, fallbackId: null, audio: null, playing: false, lastUrl: null },
       president: { timerId: null, fallbackId: null, audio: null, playing: false, lastUrl: null },
     };
+    this.voiceSpawnSeen = { hero: new Set(), president: new Set() };
+    this.voiceSpawnQueue = { hero: 0, president: 0 };
+    this.voiceRoundActive = false;
     this.refreshVoicePoolFromManifest('hero', HERO_VOICE_MANIFEST_URL);
     this.refreshVoicePoolFromManifest('president', PRESIDENT_VOICE_MANIFEST_URL);
   }
@@ -2182,10 +2187,6 @@ export class GameClient {
     this.refreshVoicePlayback();
   }
 
-  randomVoiceGapMs() {
-    return Math.round(VOICE_GAP_MIN_MS + Math.random() * (VOICE_GAP_MAX_MS - VOICE_GAP_MIN_MS));
-  }
-
   voiceClipDurationMs(clip) {
     if (!clip) return 0;
     const fromClip = Number(clip.durationSec);
@@ -2201,34 +2202,51 @@ export class GameClient {
     const snapshot = this.state.snapshot;
     const minions = Array.isArray(snapshot?.minions) ? snapshot.minions : [];
     const inPlayableRound = Boolean(snapshot?.started) && !snapshot?.gameOver;
-    let hasHero = false;
-    let hasPresident = false;
-    if (inPlayableRound) {
-      for (let i = 0; i < minions.length; i += 1) {
-        const m = minions[i];
-        if (!m || (Number(m.hp) || 0) <= 0) continue;
-        if (m.hero) hasHero = true;
-        if (m.president) hasPresident = true;
-        if (hasHero && hasPresident) break;
-      }
-    }
-    this.voicePresence.hero = hasHero;
-    this.voicePresence.president = hasPresident;
-    this.syncVoiceType('hero', hasHero);
-    this.syncVoiceType('president', hasPresident);
-  }
-
-  syncVoiceType(type, shouldRun) {
-    const state = this.voiceState?.[type];
-    if (!state) return;
-
-    if (!shouldRun || !this.voiceUnlocked) {
-      this.stopVoiceType(type);
+    if (!inPlayableRound || !this.voiceUnlocked) {
+      this.voiceRoundActive = false;
+      this.voiceSpawnSeen.hero.clear();
+      this.voiceSpawnSeen.president.clear();
+      this.voiceSpawnQueue.hero = 0;
+      this.voiceSpawnQueue.president = 0;
+      this.stopVoiceType('hero');
+      this.stopVoiceType('president');
       return;
     }
 
-    if (state.playing || state.timerId) return;
-    this.scheduleVoiceType(type, this.randomVoiceGapMs());
+    if (!this.voiceRoundActive) {
+      this.voiceRoundActive = true;
+      this.voiceSpawnSeen.hero.clear();
+      this.voiceSpawnSeen.president.clear();
+      this.voiceSpawnQueue.hero = 0;
+      this.voiceSpawnQueue.president = 0;
+    }
+
+    for (let i = 0; i < minions.length; i += 1) {
+      const m = minions[i];
+      if (!m || (Number(m.hp) || 0) <= 0) continue;
+      if (m.hero) {
+        const key = String(m.id ?? '');
+        if (key && !this.voiceSpawnSeen.hero.has(key)) {
+          this.voiceSpawnSeen.hero.add(key);
+          this.enqueueVoiceType('hero');
+        }
+      }
+      if (m.president) {
+        const key = String(m.id ?? '');
+        if (key && !this.voiceSpawnSeen.president.has(key)) {
+          this.voiceSpawnSeen.president.add(key);
+          this.enqueueVoiceType('president');
+        }
+      }
+    }
+  }
+
+  enqueueVoiceType(type) {
+    if (type !== 'hero' && type !== 'president') return;
+    this.voiceSpawnQueue[type] = Math.max(0, Number(this.voiceSpawnQueue[type]) || 0) + 1;
+    const state = this.voiceState?.[type];
+    if (!state || state.playing || state.timerId) return;
+    this.scheduleVoiceType(type, VOICE_TRIGGER_DELAY_MS);
   }
 
   scheduleVoiceType(type, delayMs) {
@@ -2244,8 +2262,9 @@ export class GameClient {
   shouldPlayVoiceType(type) {
     const snapshot = this.state.snapshot;
     if (!snapshot || !snapshot.started || snapshot.gameOver) return false;
-    if (type === 'hero') return Boolean(this.voicePresence?.hero);
-    if (type === 'president') return Boolean(this.voicePresence?.president);
+    if (type === 'hero' || type === 'president') {
+      return (Number(this.voiceSpawnQueue?.[type]) || 0) > 0;
+    }
     return false;
   }
 
@@ -2261,6 +2280,7 @@ export class GameClient {
   playVoiceType(type) {
     const state = this.voiceState?.[type];
     if (!state || !this.voiceUnlocked || !this.shouldPlayVoiceType(type)) return;
+    this.voiceSpawnQueue[type] = Math.max(0, (Number(this.voiceSpawnQueue[type]) || 0) - 1);
 
     const clip = this.pickVoiceClip(type, state.lastUrl);
     if (!clip) return;
@@ -2272,7 +2292,6 @@ export class GameClient {
     state.playing = true;
     state.lastUrl = clip.url;
 
-    const gapMs = this.randomVoiceGapMs();
     const clipDurationMs = this.voiceClipDurationMs(clip);
     const fallbackMs = clipDurationMs > 0 ? clipDurationMs : 12000;
     let settled = false;
@@ -2289,19 +2308,19 @@ export class GameClient {
       if (this.shouldPlayVoiceType(type)) this.scheduleVoiceType(type, nextDelayMs);
     };
 
-    audio.addEventListener('ended', () => settle(gapMs), { once: true });
-    audio.addEventListener('error', () => settle(gapMs), { once: true });
+    audio.addEventListener('ended', () => settle(VOICE_CHAIN_DELAY_MS), { once: true });
+    audio.addEventListener('error', () => settle(VOICE_CHAIN_DELAY_MS), { once: true });
 
     if (fallbackMs > 0) {
       state.fallbackId = window.setTimeout(() => {
-        settle(gapMs);
+        settle(VOICE_CHAIN_DELAY_MS);
       }, fallbackMs + 350);
     }
 
     const playPromise = audio.play();
     if (playPromise && typeof playPromise.catch === 'function') {
       playPromise.catch(() => {
-        settle(gapMs);
+        settle(VOICE_CHAIN_DELAY_MS);
       });
     }
   }
