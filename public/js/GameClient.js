@@ -481,6 +481,9 @@ export class GameClient {
       });
       this.postEconChart?.addEventListener('mousemove', (event) => this.handlePostChartHover(event));
       this.postEconChart?.addEventListener('mouseenter', (event) => this.handlePostChartHover(event));
+      this.postEconChart?.addEventListener('mouseleave', () => this.highlightUpgradeItem(null));
+      this.postUpgradeTimeline?.addEventListener('mousemove', (event) => this.handlePostUpgradeHover(event));
+      this.postUpgradeTimeline?.addEventListener('mouseleave', () => this.highlightUpgradeItem(null));
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -1728,6 +1731,27 @@ export class GameClient {
       )
     );
     container.scrollTop += (targetTop - container.scrollTop) * 0.4;
+    this.highlightUpgradeItem(nearest.el);
+  }
+
+  highlightUpgradeItem(targetEl) {
+    if (!this.postUpgradeTimeline) return;
+    // Remove highlight from all items
+    this.postUpgradeTimeline.querySelectorAll('.post-upgrade-item.highlighted').forEach(el => {
+      el.classList.remove('highlighted');
+    });
+    // Add highlight to target item
+    if (targetEl) {
+      targetEl.classList.add('highlighted');
+    }
+  }
+
+  handlePostUpgradeHover(event) {
+    if (this.isController || !this.postUpgradeTimeline) return;
+    const target = event.target.closest('.post-upgrade-item');
+    if (target) {
+      this.highlightUpgradeItem(target);
+    }
   }
 
   drawPostEconChart(report) {
