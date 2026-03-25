@@ -1112,6 +1112,13 @@ button:hover {
   color: #ffb3b8;
 }
 
+.post-upgrade-time {
+  color: #a8c4ef;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .post-upgrade-item.highlighted {
   border-color: #ffeb3b;
   background:
