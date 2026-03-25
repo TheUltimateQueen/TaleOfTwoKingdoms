@@ -238,8 +238,8 @@ const SPECIAL_SPAWN_QUEUE_ORDER = [
   'super',
 ];
 const SPECIAL_SPAWN_BASE_CHANCE = {
-  necrominion: 0.56,
-  gunner: 0.52,
+  necrominion: 0.40,
+  gunner: 0.60,
   rider: 0.5,
   digger: 0.5,
   monk: 0.46,
