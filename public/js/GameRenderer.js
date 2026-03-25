@@ -6840,7 +6840,64 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW * pct, 10);
     this.drawHealthBarNotches(hpX, hpY, hpW, 10, 6000);
 
+    // Draw treasure chest with total gold earned
+    const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
+    this.drawTreasureChest(side, x, y - wallH / 2 + 60, totalGold);
+
     this.drawTowerUpgradeBadges(side, x, y, sideState);
+  }
+
+  drawTreasureChest(side, x, y, totalGold) {
+    const { ctx } = this;
+    const chestW = 32;
+    const chestH = 24;
+    const chestX = x - chestW / 2;
+    const chestY = y;
+
+    // Draw chest base
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(chestX, chestY, chestW, chestH);
+
+    // Chest lid
+    ctx.fillStyle = '#A0522D';
+    ctx.fillRect(chestX + 2, chestY - 6, chestW - 4, 8);
+
+    // Chest lock
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(chestX + chestW / 2 - 2, chestY + 2, 4, 6);
+
+    // Draw coins based on total gold
+    const maxCoins = 12;
+    const coinsToShow = Math.min(maxCoins, Math.floor(totalGold / 50) + 1); // Show coins for every 50 gold, max 12
+
+    for (let i = 0; i < coinsToShow; i++) {
+      const coinX = chestX + 4 + (i % 4) * 6;
+      const coinY = chestY + 4 + Math.floor(i / 4) * 5;
+      const coinR = 2.5;
+
+      // Coin gradient
+      const coinGrad = ctx.createRadialGradient(coinX, coinY, 0, coinX, coinY, coinR);
+      coinGrad.addColorStop(0, '#FFD700');
+      coinGrad.addColorStop(0.7, '#FFA500');
+      coinGrad.addColorStop(1, '#FF8C00');
+
+      ctx.fillStyle = coinGrad;
+      ctx.beginPath();
+      ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coin shine
+      ctx.fillStyle = '#FFFFFF40';
+      ctx.beginPath();
+      ctx.arc(coinX - 0.8, coinY - 0.8, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw total gold text
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(totalGold.toLocaleString(), x, chestY - 12);
   }
 
   getUpgradeBadgeData(sideState) {
