@@ -4429,8 +4429,8 @@ export class GameRenderer {
     }
     // Balloons are intentionally painted first so the upgrade panel/cards remain readable above them.
     for (const minion of balloonMinions) this.drawMinionSprite(minion);
-    this.drawUpgradeChargeBar('left', 42, 220, 16, 270, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
-    this.drawUpgradeChargeBar('right', w - 58, 220, 16, 270, snapshot.right.upgradeCharge, snapshot.right.upgradeChargeMax);
+    this.drawUpgradeChargeBar('left', 20, 30, 200, 16, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
+    this.drawUpgradeChargeBar('right', w - 220, 30, 200, 16, snapshot.right.upgradeCharge, snapshot.right.upgradeChargeMax);
 
     this.drawUpgradePlaceholders(snapshot);
 
@@ -6989,20 +6989,31 @@ export class GameRenderer {
   drawUpgradeChargeBar(side, x, y, bw, bh, current, max) {
     const { ctx } = this;
     const pct = Math.max(0, Math.min(1, current / Math.max(1, max)));
-    const fillH = bh * pct;
+    const fillW = bw * pct;
 
+    // Background bar
     ctx.fillStyle = '#1f1a10d6';
     ctx.fillRect(x, y, bw, bh);
     ctx.strokeStyle = '#9a7a20';
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, bw, bh);
 
-    const goldGrad = ctx.createLinearGradient(0, y + bh, 0, y);
+    // Gold gradient fill - mirror direction based on side
+    const goldGrad = side === 'left'
+      ? ctx.createLinearGradient(x, 0, x + fillW, 0)  // Left to right for left side
+      : ctx.createLinearGradient(x + bw, 0, x + bw - fillW, 0); // Right to left for right side
+
     goldGrad.addColorStop(0, '#c98d2d');
     goldGrad.addColorStop(0.55, '#f4c95d');
     goldGrad.addColorStop(1, '#fff4bf');
     ctx.fillStyle = goldGrad;
-    ctx.fillRect(x + 2, y + bh - fillH + 1, bw - 4, Math.max(0, fillH - 2));
+
+    // Fill from the tower side inward
+    if (side === 'left') {
+      ctx.fillRect(x + 2, y + 2, Math.max(0, fillW - 4), bh - 4);
+    } else {
+      ctx.fillRect(x + bw - fillW + 2, y + 2, Math.max(0, fillW - 4), bh - 4);
+    }
 
     if (pct >= 1) {
       ctx.strokeStyle = '#fff4bf';
