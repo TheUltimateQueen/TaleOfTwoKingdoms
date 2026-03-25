@@ -1,5 +1,6 @@
 import {
   SHOT_INTERVAL,
+  specialSpawnBaseChanceForType,
   SHOT_POWER_LABELS,
   TEAM_COLORS,
   upgradeHintForLevel,
@@ -188,20 +189,6 @@ const ROW_TO_SPECIAL_TYPE = {
   super: 'super',
 };
 
-const SPECIAL_SPAWN_BASE_CHANCE = {
-  necrominion: 0.56,
-  gunner: 0.52,
-  rider: 0.5,
-  digger: 0.5,
-  monk: 0.46,
-  stonegolem: 0.02,
-  shield: 0.1,
-  hero: 0.1,
-  president: 0.41,
-  dragon: 0.33,
-  balloon: 0.14,
-  super: 0.3,
-};
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const STONE_GOLEM_SPAWN_EVERY_OFFSET = 6;
@@ -5964,7 +5951,7 @@ export class GameRenderer {
     const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
       ? overrideBase
-      : Number(SPECIAL_SPAWN_BASE_CHANCE[specialType]);
+      : specialSpawnBaseChanceForType(specialType);
     if (!Number.isFinite(base)) return null;
     const specialRateBonus = this.specialSpawnRateBonus(sideState);
     const tunedSpecialBonus = specialType === 'necrominion'

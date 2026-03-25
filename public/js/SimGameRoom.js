@@ -11,6 +11,7 @@ import {
   UPGRADE_TYPES,
   SHOT_POWER_TYPES,
 } from './simConstants.js';
+import { specialSpawnBaseChanceForType } from './constants.js';
 import {
   DEFAULT_THEME_MODE,
   defaultArcherName,
@@ -237,20 +238,6 @@ const SPECIAL_SPAWN_QUEUE_ORDER = [
   'balloon',
   'super',
 ];
-const SPECIAL_SPAWN_BASE_CHANCE = {
-  necrominion: 0.40,
-  gunner: 0.60,
-  rider: 0.5,
-  digger: 0.5,
-  monk: 0.46,
-  stonegolem: 0.02,
-  shield: 0.1,
-  hero: 0.1,
-  president: 0.41,
-  dragon: 0.33,
-  balloon: 0.14,
-  super: 0.3,
-};
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
 const CANDLE_WAX_MAX = 96;
 const CANDLE_MAX_HOLDERS = 8;
@@ -385,7 +372,7 @@ function normalizeDebugConfig(raw = null) {
     : {};
   const specialChanceOverrides = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
-    const fallback = clamp(Number(SPECIAL_SPAWN_BASE_CHANCE[type]) || 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
+    const fallback = clamp(specialSpawnBaseChanceForType(type) ?? 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
     const raw = Number(specialChanceOverridesSource[type]);
     specialChanceOverrides[type] = Number.isFinite(raw)
       ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
@@ -1025,7 +1012,7 @@ class GameRoom {
       side.debugSpecialSpawnRateMultiplier = clamp(Number(cfg.specialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
       side.debugSpecialChanceOverrides = {};
       for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
-        const fallback = clamp(Number(SPECIAL_SPAWN_BASE_CHANCE[type]) || 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
+        const fallback = clamp(specialSpawnBaseChanceForType(type) ?? 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
         const raw = Number(cfg?.specialChanceOverrides?.[type]);
         side.debugSpecialChanceOverrides[type] = Number.isFinite(raw)
           ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
@@ -4778,7 +4765,7 @@ class GameRoom {
     const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
       ? overrideBase
-      : Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
+      : specialSpawnBaseChanceForType(type);
     if (!Number.isFinite(base)) return 0;
     const specialRateBonus = this.statSpecialRateBonus(side);
     const tunedSpecialBonus = type === 'necrominion'

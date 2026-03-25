@@ -46,6 +46,26 @@ export const UPGRADE_HINTS = {
   superMinionLevel: '+super spawn rate',
 };
 
+export const SPECIAL_SPAWN_BASE_CHANCE = Object.freeze({
+  necrominion: 0.40,
+  gunner: 0.60,
+  rider: 0.5,
+  digger: 0.5,
+  monk: 0.46,
+  stonegolem: 0.02,
+  shield: 0.1,
+  hero: 0.1,
+  president: 0.41,
+  dragon: 0.33,
+  balloon: 0.14,
+  super: 0.3,
+});
+
+export function specialSpawnBaseChanceForType(type) {
+  const chance = Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
+  return Number.isFinite(chance) ? chance : null;
+}
+
 const STAGED_UPGRADE_COPY = {
   balloonLevel: {
     unlockLabel: 'Unlock Balloon',
