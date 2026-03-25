@@ -11566,10 +11566,11 @@ export class GameRenderer {
       }
     }
 
-    ctx.fillStyle = '#00000026';
-    ctx.beginPath();
-    ctx.ellipse(x, y + bodyH + 14, bodyW * 1.05, 8 + bodyH * 0.24, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Dragon shadow removed
+    // ctx.fillStyle = '#00000026';
+    // ctx.beginPath();
+    // ctx.ellipse(x, y + bodyH + 14, bodyW * 1.05, 8 + bodyH * 0.24, 0, 0, Math.PI * 2);
+    // ctx.fill();
 
     ctx.save();
     ctx.translate(x, y);
