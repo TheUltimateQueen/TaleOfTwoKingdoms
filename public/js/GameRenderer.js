@@ -6513,10 +6513,11 @@ export class GameRenderer {
     ctx.moveTo(px + 8, py + panelH - 9);
     ctx.lineTo(px + panelW - 8, py + panelH - 9);
     ctx.stroke();
-    ctx.fillStyle = '#aeb9ca';
-    ctx.font = '8px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
+    // Removed: Training cadence by spawn cycle label (not useful)
+    // ctx.fillStyle = '#aeb9ca';
+    // ctx.font = '8px sans-serif';
+    // ctx.textAlign = 'left';
+    // ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
   }
 
   drawSpecialRollOutcomeBar(x, y, w, h, chance, roll, success) {
