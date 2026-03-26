@@ -7606,7 +7606,7 @@ export class GameRenderer {
       ctx.fillText(
         ready ? `Upgrade Ready: choose in ${autoPickIn}s` : `Upgrade debt ${debtLeft} (${pct}%)`,
         (x0 + x1) / 2,
-        y - 34
+        y - 29
       );
     }
   }
