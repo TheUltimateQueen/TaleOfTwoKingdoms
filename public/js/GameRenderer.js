@@ -7948,8 +7948,8 @@ export class GameRenderer {
     ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Increase icon scale inside circle (almost full size now)
-    const iconScale = radius * 0.94;
+    // Increase icon scale inside circle (larger for visibility)
+    const iconScale = radius * 1.35;
     ctx.fillStyle = fg;
     if (powerType === 'multiShot') {
       for (let dx = -iconScale * 0.2; dx <= iconScale * 0.2; dx += iconScale * 0.2) {
