@@ -325,6 +325,7 @@ export class GameClient {
     this.postGameRenderedKey = null;
     this.postGamePreviewDataUrl = '';
     this.postUpgradeFeedEvents = [];
+    this.postActiveUpgradeIndex = -1;
     this.postUpgradeScrubRatio = 0;
     this.postUpgradeScrubRaf = 0;
     this.controllerRematch = {
@@ -1657,10 +1658,11 @@ export class GameClient {
     const upgrades = compactUpgradeFeedEvents(report?.upgrades);
     if (!upgrades.length) {
       this.postUpgradeFeedEvents = [];
+      this.postActiveUpgradeIndex = -1;
       this.postUpgradeTimeline.innerHTML = '<p class="sub">No upgrade activations captured.</p>';
       return;
     }
-    this.postUpgradeTimeline.innerHTML = upgrades.map((event) => {
+    this.postUpgradeTimeline.innerHTML = upgrades.map((event, index) => {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const level = Math.max(0, Number(event.level) || 0);
@@ -1680,7 +1682,7 @@ export class GameClient {
       const safeCode = escapeHtml(code);
       const safeEventTimeText = escapeHtml(eventTimeText);
       return `
-        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" title="${safeTitle}">
+        <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" data-event-index="${index}" title="${safeTitle}">
           <span class="post-upgrade-icon" style="color:${sideColor}">${safeIcon}</span>
           <span class="post-upgrade-label"><span class="post-upgrade-side">${safeSide}</span> ${safeLabel} Lv ${level}</span>
           <span class="post-upgrade-time">${safeCode} ${safeEventTimeText}</span>
@@ -1688,9 +1690,11 @@ export class GameClient {
       `;
     }).join('');
     this.postUpgradeFeedEvents = Array.from(this.postUpgradeTimeline.querySelectorAll('.post-upgrade-item')).map((el) => ({
+      index: Math.max(0, Number(el.dataset.eventIndex) || 0),
       t: Math.max(0, Number(el.dataset.eventTime) || 0),
       el,
     }));
+    this.setActivePostUpgradeIndex(-1);
   }
 
   handlePostChartHover(event) {
@@ -1744,6 +1748,14 @@ export class GameClient {
     if (targetEl) {
       targetEl.classList.add('highlighted');
     }
+    this.setActivePostUpgradeIndex(targetEl ? Number(targetEl.dataset.eventIndex) || 0 : -1);
+  }
+
+  setActivePostUpgradeIndex(index = -1) {
+    const normalized = Number.isFinite(Number(index)) ? Number(index) : -1;
+    if (this.postActiveUpgradeIndex === normalized) return;
+    this.postActiveUpgradeIndex = normalized;
+    if (this.postGameReportData) this.drawPostEconChart(this.postGameReportData);
   }
 
   handlePostUpgradeHover(event) {
@@ -1789,7 +1801,7 @@ export class GameClient {
       { areaFill: true, glow: true, lineWidth: 2.6, showLastDot: true }
     );
 
-    const upgrades = Array.isArray(report?.upgrades) ? report.upgrades : [];
+    const upgrades = compactUpgradeFeedEvents(report?.upgrades);
     let pointCursor = 0;
     for (let i = 0; i < upgrades.length; i += 1) {
       const event = upgrades[i];
@@ -1814,22 +1826,29 @@ export class GameClient {
       const color = event.side === 'right' ? '#ff9ba2' : '#8dd0ff';
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
-      ctx.strokeStyle = colorWithAlpha(color, 0.95);
-      ctx.lineWidth = 2;
+      const active = i === this.postActiveUpgradeIndex;
+      if (active) {
+        ctx.fillStyle = colorWithAlpha(color, 0.22);
+        ctx.beginPath();
+        ctx.arc(px, py, 13.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = colorWithAlpha(color, active ? 1 : 0.95);
+      ctx.lineWidth = active ? 3 : 2;
       ctx.beginPath();
-      ctx.arc(px, py, 8.5, 0, Math.PI * 2);
+      ctx.arc(px, py, active ? 10.5 : 8.5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.arc(px, py, active ? 8.5 : 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#07101d';
-      ctx.font = '11px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.font = `${active ? 12 : 11}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(icon, px, py + 3.5);
-      ctx.fillStyle = colorWithAlpha(color, 0.88);
-      ctx.font = '9px monospace';
-      ctx.fillText(code, px, py - 10);
+      ctx.fillText(icon, px, py + (active ? 4 : 3.5));
+      ctx.fillStyle = colorWithAlpha(color, active ? 1 : 0.88);
+      ctx.font = `${active ? 10 : 9}px monospace`;
+      ctx.fillText(code, px, py - (active ? 12.5 : 10));
     }
 
     ctx.save();
