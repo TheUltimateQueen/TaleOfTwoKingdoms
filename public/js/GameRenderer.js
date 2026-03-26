@@ -1,4 +1,5 @@
 import {
+  SPECIAL_SPAWN_QUEUE_ORDER,
   SHOT_INTERVAL,
   specialSpawnBaseChanceForType,
   SHOT_POWER_LABELS,
@@ -188,6 +189,9 @@ const ROW_TO_SPECIAL_TYPE = {
   balloon: 'balloon',
   super: 'super',
 };
+const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
+  Object.fromEntries(SPECIAL_SPAWN_QUEUE_ORDER.map((type, index) => [type, index]))
+);
 
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
@@ -6409,6 +6413,68 @@ export class GameRenderer {
     });
   }
 
+  nextBarracksDoorPreviewRow(rows = []) {
+    let bestRow = null;
+    let bestEta = Infinity;
+    let bestInSpawns = Infinity;
+    let bestPriority = Infinity;
+    for (const row of rows) {
+      if (!row || !row.unlocked || row.type === 'militia' || row.type === 'candle') continue;
+      const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
+      if (!specialType) continue;
+      const eta = Number.isFinite(row.etaSec) ? Math.max(0, row.etaSec) : Infinity;
+      const inSpawns = Number.isFinite(row.inSpawns) ? Math.max(0, row.inSpawns) : Infinity;
+      const priority = SPECIAL_SPAWN_QUEUE_PRIORITY[specialType] ?? Number.MAX_SAFE_INTEGER;
+      if (
+        eta < bestEta
+        || (eta === bestEta && inSpawns < bestInSpawns)
+        || (eta === bestEta && inSpawns === bestInSpawns && priority < bestPriority)
+      ) {
+        bestRow = row;
+        bestEta = eta;
+        bestInSpawns = inSpawns;
+        bestPriority = priority;
+      }
+    }
+    return bestRow;
+  }
+
+  drawBarracksDoorPreview(doorX, doorY, doorW, doorH, row, side = 'left') {
+    const { ctx } = this;
+    ctx.fillStyle = '#151e2e';
+    ctx.fillRect(doorX, doorY, doorW, doorH);
+    ctx.fillStyle = '#090d15';
+    ctx.fillRect(doorX + 1, doorY + doorH - 4, doorW - 2, 3);
+    if (!row) return;
+
+    const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
+    if (!specialType) return;
+    const mini = this.miniFailedSpecialMinion(specialType, side, row.level);
+    if (!mini) return;
+
+    const now = performance.now() * 0.001;
+    const bob = Math.sin(now * 2.2 + (side === 'right' ? 1.7 : 0.4)) * 0.8;
+    const scale = specialType === 'balloon'
+      ? 0.26
+      : (specialType === 'dragon' ? 0.28 : (specialType === 'stonegolem' ? 0.34 : 0.4));
+    const spriteX = doorX + doorW * 0.5;
+    const spriteY = specialType === 'balloon'
+      ? doorY + doorH - 1
+      : (specialType === 'dragon' ? doorY + doorH - 7 : doorY + doorH - 5);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(doorX + 1, doorY + 1, doorW - 2, doorH - 2);
+    ctx.clip();
+    ctx.translate(spriteX, spriteY + bob);
+    ctx.scale(scale, scale);
+    ctx.translate(-spriteX, -spriteY);
+    mini.x = spriteX;
+    mini.y = spriteY;
+    this.drawMinionSprite(mini, { showHud: false, allowEffects: false });
+    ctx.restore();
+  }
+
   drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
@@ -6416,7 +6482,7 @@ export class GameRenderer {
     const panelH = 304;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
-    const bx = side === 'left' ? 220 : world.w - 220;
+    const bx = side === 'left' ? 118 : world.w - 118;
     const by = world.groundY - 8;
     const specialRateLevel = Math.max(1, Number(sideState?.specialRateLevel) || 1);
     const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
@@ -6426,6 +6492,17 @@ export class GameRenderer {
     const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
     const rollChance = Number(sideState?.specialRollChance);
     const rollValue = Number(sideState?.specialRollValue);
+    const rows = this.barracksRows(
+      sideState,
+      side,
+      snapshot?.minions,
+      Array.isArray(snapshot?.candles)
+        ? snapshot.candles
+        : (snapshot?.candle ? [snapshot.candle] : []),
+      precomputedCounts,
+      Math.max(0, Number(snapshot?.t) || 0)
+    );
+    const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
 
     // Barracks building silhouette.
     ctx.fillStyle = side === 'left' ? '#213650cc' : '#4a2830cc';
@@ -6440,28 +6517,17 @@ export class GameRenderer {
     ctx.lineTo(bx, by - 124);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#151e2e';
-    ctx.fillRect(bx - 12, by - 42, 24, 34);
+    this.drawBarracksDoorPreview(bx - 12, by - 42, 24, 34, doorPreviewRow, side);
     ctx.fillStyle = sidePalette.primary;
     ctx.fillRect(bx - 2, by - 124, 4, 22);
     ctx.fillStyle = '#f5e6b9';
     ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(this.themeMode === 'themed' ? 'PANTRY' : 'BARRACKS', bx, by - 58);
+    ctx.fillText(sideBarracksLabel(side, this.themeMode), bx, by - 58);
 
     // Training board.
     const px = panelX - panelW / 2;
     const py = panelY;
-    const rows = this.barracksRows(
-      sideState,
-      side,
-      snapshot?.minions,
-      Array.isArray(snapshot?.candles)
-        ? snapshot.candles
-        : (snapshot?.candle ? [snapshot.candle] : []),
-      precomputedCounts,
-      Math.max(0, Number(snapshot?.t) || 0)
-    );
     const rowH = 17;
 
     ctx.fillStyle = '#0f1625d0';
@@ -10204,7 +10270,7 @@ export class GameRenderer {
     }
   }
 
-  miniFailedSpecialMinion(type, side = 'left') {
+  miniFailedSpecialMinion(type, side = 'left', level = null) {
     const base = {
       side,
       x: 0,
@@ -10252,11 +10318,12 @@ export class GameRenderer {
       necrominion: false,
       failedSpecialType: null,
     };
+    const previewLevel = Math.max(1, Number(level) || 1);
     if (type === 'dragon') {
       base.dragon = true;
       base.flying = true;
       base.r = 23;
-      base.level = 14;
+      base.level = Math.max(14, previewLevel);
     } else if (type === 'shield') {
       base.shieldBearer = true;
       base.r = 26;
@@ -10269,35 +10336,41 @@ export class GameRenderer {
     } else if (type === 'gunner') {
       base.gunner = true;
       base.r = 15;
-      base.level = 9;
+      base.level = Math.max(9, previewLevel);
     } else if (type === 'rider') {
       base.rider = true;
       base.riderChargeReady = true;
       base.r = 18;
-      base.level = 10;
+      base.level = Math.max(10, previewLevel);
     } else if (type === 'monk') {
       base.monk = true;
       base.r = 18;
-      base.level = 10;
+      base.level = Math.max(10, previewLevel);
     } else if (type === 'stonegolem') {
       base.stoneGolem = true;
       base.r = 30;
-      base.level = 14;
+      base.level = Math.max(14, previewLevel);
       base.tier = 2;
     } else if (type === 'hero') {
       base.hero = true;
       base.r = 23;
-      base.level = 16;
+      base.level = Math.max(16, previewLevel);
       base.tier = 2;
     } else if (type === 'president') {
       base.president = true;
       base.r = 18;
-      base.level = 12;
+      base.level = Math.max(12, previewLevel);
+    } else if (type === 'balloon') {
+      base.balloon = true;
+      base.flying = true;
+      base.r = 32;
+      base.balloonLevel = previewLevel;
+      base.level = previewLevel;
     } else if (type === 'super') {
       base.super = true;
       base.r = 20;
       base.tier = 2;
-      base.level = 14;
+      base.level = Math.max(14, previewLevel);
     } else {
       return null;
     }

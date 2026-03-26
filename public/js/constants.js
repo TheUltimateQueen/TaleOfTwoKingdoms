@@ -61,6 +61,21 @@ export const SPECIAL_SPAWN_BASE_CHANCE = Object.freeze({
   super: 0.3,
 });
 
+export const SPECIAL_SPAWN_QUEUE_ORDER = Object.freeze([
+  'dragon',
+  'shield',
+  'digger',
+  'necrominion',
+  'gunner',
+  'rider',
+  'monk',
+  'stonegolem',
+  'hero',
+  'president',
+  'balloon',
+  'super',
+]);
+
 export function specialSpawnBaseChanceForType(type) {
   const chance = Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
   return Number.isFinite(chance) ? chance : null;

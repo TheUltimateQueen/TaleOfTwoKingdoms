@@ -11,7 +11,7 @@ import {
   UPGRADE_TYPES,
   SHOT_POWER_TYPES,
 } from './simConstants.js';
-import { specialSpawnBaseChanceForType } from './constants.js';
+import { SPECIAL_SPAWN_QUEUE_ORDER, specialSpawnBaseChanceForType } from './constants.js';
 import {
   DEFAULT_THEME_MODE,
   defaultArcherName,
@@ -224,20 +224,6 @@ const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_ROLL_TTL = 6;
-const SPECIAL_SPAWN_QUEUE_ORDER = [
-  'dragon',
-  'shield',
-  'digger',
-  'necrominion',
-  'gunner',
-  'rider',
-  'monk',
-  'stonegolem',
-  'hero',
-  'president',
-  'balloon',
-  'super',
-];
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
 const CANDLE_WAX_MAX = 96;
 const CANDLE_MAX_HOLDERS = 8;
