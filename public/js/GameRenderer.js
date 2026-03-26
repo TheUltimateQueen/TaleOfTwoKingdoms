@@ -7070,8 +7070,12 @@ export class GameRenderer {
       const slotPower = Array.isArray(sideState?.pendingShotPowerBySlot)
         ? sideState.pendingShotPowerBySlot[idx]
         : null;
-      const activeSlotPower = slotPower?.power || sideState?.pendingShotPower;
-      const activeShots = slotPower?.shots ?? sideState?.pendingShotPowerShots;
+      const activeSlotPower = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.power
+        : (Array.isArray(sideState?.pendingShotPowerBySlot) ? null : sideState?.pendingShotPower);
+      const activeShots = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.shots
+        : (Array.isArray(sideState?.pendingShotPowerBySlot) ? 0 : sideState?.pendingShotPowerShots);
       if (activeSlotPower) {
         this.drawShotPowerIcon(activeSlotPower, archerX, archerY - 30, 12, side);
         ctx.fillStyle = '#ffffffcc';
@@ -7944,8 +7948,8 @@ export class GameRenderer {
     ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Increase icon scale inside circle
-    const iconScale = radius * 0.8;
+    // Increase icon scale inside circle (almost full size now)
+    const iconScale = radius * 0.94;
     ctx.fillStyle = fg;
     if (powerType === 'multiShot') {
       for (let dx = -iconScale * 0.2; dx <= iconScale * 0.2; dx += iconScale * 0.2) {
