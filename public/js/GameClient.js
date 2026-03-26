@@ -725,7 +725,7 @@ export class GameClient {
       if (this.isController || !Array.isArray(events)) return;
       for (const e of events) {
         this.sound.play(e.type);
-        this.renderer.emitHitParticles(e);
+        this.renderer.emitHitParticles({ ...e, world: this.state.world });
       }
     });
 
@@ -914,7 +914,7 @@ export class GameClient {
 
     for (const e of sfxEvents) {
       this.sound.play(e.type);
-      this.renderer.emitHitParticles(e);
+      this.renderer.emitHitParticles({ ...e, world: snapshot.world });
     }
     for (const e of damageEvents) this.renderer.emitDamageNumber(e.amount, e.x, e.y);
     for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);

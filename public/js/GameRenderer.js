@@ -305,6 +305,7 @@ export class GameRenderer {
     this.groundMinionBuffer = [];
     this.cardTextFitCache = new Map();
     this.cardTextFitCacheMaxEntries = 1024;
+    this.goldResourceTrails = [];
     this.treasurePileState = {
       left: { items: [], lastGold: 0 },
       right: { items: [], lastGold: 0 },
@@ -340,6 +341,7 @@ export class GameRenderer {
       this.prevMinionAtkCd.clear();
       this.militiaFoodFx.clear();
       this.cardTextFitCache.clear();
+      this.goldResourceTrails.length = 0;
       this.treasurePileState.left = { items: [], lastGold: 0 };
       this.treasurePileState.right = { items: [], lastGold: 0 };
     }
@@ -4353,6 +4355,77 @@ export class GameRenderer {
     ctx.restore();
   }
 
+  treasureChestAnchorX(side, towerX) {
+    return towerX + (side === 'left' ? -92 : 92);
+  }
+
+  treasureChestY(towerY) {
+    return towerY + 117;
+  }
+
+  spawnGoldResourceTrail(fromX, fromY, side, world, count = 2) {
+    const towerX = side === 'right' ? Number(world?.towerRightX) || 0 : Number(world?.towerLeftX) || 0;
+    const towerY = Number(world?.towerY) || 0;
+    const targetX = this.treasureChestAnchorX(side, towerX);
+    const targetY = this.treasureChestY(towerY) + 8;
+    for (let i = 0; i < count; i += 1) {
+      this.goldResourceTrails.push({
+        side,
+        fromX,
+        fromY,
+        toX: targetX + (Math.random() * 10 - 5),
+        toY: targetY + (Math.random() * 8 - 4),
+        age: -i * 0.04,
+        duration: 0.48 + Math.random() * 0.1,
+        arc: 30 + Math.random() * 18,
+        size: 3.2 + Math.random() * 1.3,
+      });
+    }
+  }
+
+  updateGoldResourceTrails(snapshot, world, dt) {
+    if (!snapshot || !world) return;
+    let write = 0;
+    for (let i = 0; i < this.goldResourceTrails.length; i += 1) {
+      const trail = this.goldResourceTrails[i];
+      trail.age += dt;
+      if (trail.age >= trail.duration) continue;
+      this.goldResourceTrails[write] = trail;
+      write += 1;
+    }
+    this.goldResourceTrails.length = write;
+  }
+
+  drawGoldResourceTrails() {
+    const { ctx } = this;
+    for (const trail of this.goldResourceTrails) {
+      if (trail.age < 0) continue;
+      const t = Math.max(0, Math.min(1, trail.age / Math.max(0.0001, trail.duration)));
+      const ease = 1 - Math.pow(1 - t, 3);
+      const x = trail.fromX + (trail.toX - trail.fromX) * ease;
+      const y = trail.fromY + (trail.toY - trail.fromY) * ease - Math.sin(ease * Math.PI) * trail.arc;
+      const alpha = 1 - Math.max(0, ease - 0.6) / 0.4;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, trail.size * 2.8);
+      grad.addColorStop(0, this.withAlpha('#fff3b0', alpha));
+      grad.addColorStop(0.55, this.withAlpha('#f3bf43', alpha * 0.95));
+      grad.addColorStop(1, this.withAlpha('#d1891d', 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, trail.size * 2.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#ffd86d', alpha);
+      ctx.beginPath();
+      ctx.arc(x, y, trail.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#fff8db', alpha * 0.9);
+      ctx.beginPath();
+      ctx.arc(x - trail.size * 0.22, y - trail.size * 0.24, trail.size * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   draw(snapshot, world) {
     if (!snapshot || !world) return;
 
@@ -4364,6 +4437,7 @@ export class GameRenderer {
     this.updateTowerShake(dt);
     this.updateGameOverCinematic(snapshot, world, now, dt);
     this.updateMilitiaFoodFx(snapshot.minions, dt);
+    this.updateGoldResourceTrails(snapshot, world, dt);
 
     const w = canvas.width;
     const h = canvas.height;
@@ -4433,6 +4507,7 @@ export class GameRenderer {
     this.drawUpgradePlaceholders(snapshot);
 
     for (const res of snapshot.resources) this.drawResourceNode(res);
+    this.drawGoldResourceTrails();
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
     if (Array.isArray(snapshot.cannonBalls)) {
       for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
@@ -4516,6 +4591,7 @@ export class GameRenderer {
     const px = event ? event.x : x;
     const py = event ? event.y : y;
     const pside = event ? event.side : side;
+    const eventWorld = event?.world || null;
     if (type === 'ghostfall') {
       this.emitDeathGhost(event);
       return;
@@ -4541,6 +4617,18 @@ export class GameRenderer {
       return;
     }
     const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;
+    if (type === 'resource') {
+      const worldW = Number(eventWorld?.w) || Number(this.canvas?.width) || 1600;
+      const centralBandMin = worldW * 0.33;
+      const centralBandMax = worldW * 0.67;
+      if (Number.isFinite(px) && px >= centralBandMin && px <= centralBandMax && (pside === 'left' || pside === 'right')) {
+        this.spawnGoldResourceTrail(px, py, pside, eventWorld || {
+          towerLeftX: 190,
+          towerRightX: 1410,
+          towerY: 350,
+        }, 2);
+      }
+    }
     if (type === 'towerhit') {
       const half = (this.canvas?.width || 1600) * 0.5;
       const towerSide = pside === 'left' || pside === 'right' ? pside : (px < half ? 'left' : 'right');
@@ -6611,7 +6699,7 @@ export class GameRenderer {
     const left = x - wallW / 2;
     const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
 
-    this.drawTreasureChest(side, x, y + wallH / 2 - 28, totalGold, 10);
+    this.drawTreasureChest(side, x, this.treasureChestY(y), totalGold, 10);
 
     ctx.fillStyle = themed
       ? (side === 'left' ? '#2f2318' : '#1f2836')
@@ -6848,7 +6936,7 @@ export class GameRenderer {
     const { ctx } = this;
     const chestW = 54;
     const chestH = 30;
-    const chestAnchorX = x + (side === 'left' ? -92 : 92);
+    const chestAnchorX = this.treasureChestAnchorX(side, x);
     const chestX = chestAnchorX - chestW / 2;
     const chestY = y;
     const pileCenterX = chestAnchorX;
