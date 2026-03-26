@@ -4459,8 +4459,8 @@ export class GameRenderer {
     }
 
     const barracksCounts = this.buildBarracksActiveCounts(snapshot);
-    this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left);
-    this.drawBarracks('right', snapshot.right, world, snapshot, barracksCounts.right);
+    const leftBarracksDoorPreview = this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left);
+    const rightBarracksDoorPreview = this.drawBarracks('right', snapshot.right, world, snapshot, barracksCounts.right);
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
@@ -4482,6 +4482,8 @@ export class GameRenderer {
       snapshot.right,
       rightPulls
     );
+    this.drawBarracksBuilding('left', world, leftBarracksDoorPreview);
+    this.drawBarracksBuilding('right', world, rightBarracksDoorPreview);
     for (let i = 0; i < leftPulls.length; i += 1) {
       const timing = this.archerShotTiming(snapshot.left, i, leftPulls.length, snapshot.mode);
       this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, timing.cd, TEAM_COLORS.left.ring, timing.interval);
@@ -6475,6 +6477,36 @@ export class GameRenderer {
     ctx.restore();
   }
 
+  drawBarracksBuilding(side, world, doorPreviewRow = null) {
+    const { ctx } = this;
+    const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
+    const towerX = side === 'right' ? (Number(world?.towerRightX) || 0) : (Number(world?.towerLeftX) || 0);
+    const towerY = Number(world?.towerY) || 0;
+    const bx = towerX;
+    const by = towerY + 148;
+    const bodyW = 76;
+    const bodyH = 58;
+    const doorW = 24;
+    const doorH = 32;
+
+    ctx.fillStyle = side === 'left' ? '#213650e8' : '#4a2830e8';
+    ctx.fillRect(bx - bodyW / 2, by - bodyH, bodyW, bodyH);
+    ctx.strokeStyle = sidePalette.dark;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx - bodyW / 2, by - bodyH, bodyW, bodyH);
+    ctx.fillStyle = side === 'left' ? '#304d70f2' : '#633541f2';
+    ctx.fillRect(bx - bodyW / 2 + 5, by - bodyH + 6, bodyW - 10, bodyH - 12);
+    ctx.strokeStyle = this.withAlpha('#f3e4bf', 0.28);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx - bodyW / 2 + 9, by - bodyH + 11, bodyW - 18, bodyH - 22);
+    this.drawBarracksDoorPreview(bx - doorW / 2, by - doorH, doorW, doorH, doorPreviewRow, side);
+
+    ctx.fillStyle = '#f5e6b9';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(sideBarracksLabel(side, this.themeMode), bx, by - bodyH + 14);
+  }
+
   drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
@@ -6482,8 +6514,6 @@ export class GameRenderer {
     const panelH = 304;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelY = world.groundY - panelH - 8;
-    const bx = side === 'left' ? 118 : world.w - 118;
-    const by = world.groundY - 8;
     const specialRateLevel = Math.max(1, Number(sideState?.specialRateLevel) || 1);
     const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
     const failType = typeof sideState?.specialFailType === 'string' ? sideState.specialFailType : null;
@@ -6503,27 +6533,6 @@ export class GameRenderer {
       Math.max(0, Number(snapshot?.t) || 0)
     );
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
-
-    // Barracks building silhouette.
-    ctx.fillStyle = side === 'left' ? '#213650cc' : '#4a2830cc';
-    ctx.fillRect(bx - 48, by - 88, 96, 80);
-    ctx.strokeStyle = sidePalette.dark;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(bx - 48, by - 88, 96, 80);
-    ctx.fillStyle = side === 'left' ? '#304d70d9' : '#633541d9';
-    ctx.beginPath();
-    ctx.moveTo(bx - 56, by - 88);
-    ctx.lineTo(bx + 56, by - 88);
-    ctx.lineTo(bx, by - 124);
-    ctx.closePath();
-    ctx.fill();
-    this.drawBarracksDoorPreview(bx - 12, by - 42, 24, 34, doorPreviewRow, side);
-    ctx.fillStyle = sidePalette.primary;
-    ctx.fillRect(bx - 2, by - 124, 4, 22);
-    ctx.fillStyle = '#f5e6b9';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(sideBarracksLabel(side, this.themeMode), bx, by - 58);
 
     // Training board.
     const px = panelX - panelW / 2;
@@ -6670,6 +6679,7 @@ export class GameRenderer {
     // ctx.font = '8px sans-serif';
     // ctx.textAlign = 'left';
     // ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
+    return doorPreviewRow;
   }
 
   drawSpecialRollOutcomeBar(x, y, w, h, chance, roll, success) {
