@@ -259,6 +259,11 @@ function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function stableHash(seed) {
+  const raw = Math.sin(seed * 12.9898 + 78.233) * 43758.5453123;
+  return raw - Math.floor(raw);
+}
+
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -300,6 +305,10 @@ export class GameRenderer {
     this.groundMinionBuffer = [];
     this.cardTextFitCache = new Map();
     this.cardTextFitCacheMaxEntries = 1024;
+    this.treasurePileState = {
+      left: { items: [], lastGold: 0 },
+      right: { items: [], lastGold: 0 },
+    };
     this.lastFrameAt = performance.now();
   }
 
@@ -331,6 +340,8 @@ export class GameRenderer {
       this.prevMinionAtkCd.clear();
       this.militiaFoodFx.clear();
       this.cardTextFitCache.clear();
+      this.treasurePileState.left = { items: [], lastGold: 0 };
+      this.treasurePileState.right = { items: [], lastGold: 0 };
     }
   }
 
@@ -6598,6 +6609,9 @@ export class GameRenderer {
     const wallH = 290;
     const baseY = y + 138;
     const left = x - wallW / 2;
+    const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
+
+    this.drawTreasureChest(side, x, y + wallH / 2 - 28, totalGold, 10);
 
     ctx.fillStyle = themed
       ? (side === 'left' ? '#2f2318' : '#1f2836')
@@ -6827,64 +6841,566 @@ export class GameRenderer {
     ctx.fillRect(hpX, hpY, hpW * pct, 10);
     this.drawHealthBarNotches(hpX, hpY, hpW, 10, 6000);
 
-    // Draw treasure chest with total gold earned
-    const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
-    this.drawTreasureChest(side, x, y - wallH / 2 + 60, totalGold);
-
     this.drawTowerUpgradeBadges(side, x, y, sideState);
   }
 
-  drawTreasureChest(side, x, y, totalGold) {
+  drawTreasureChest(side, x, y, totalGold, topCapY = -24) {
     const { ctx } = this;
-    const chestW = 32;
-    const chestH = 24;
-    const chestX = x - chestW / 2;
+    const chestW = 54;
+    const chestH = 30;
+    const chestAnchorX = x + (side === 'left' ? -92 : 92);
+    const chestX = chestAnchorX - chestW / 2;
     const chestY = y;
+    const pileCenterX = chestAnchorX;
+    const itemsPerLayer = 3.15;
+    const rowStep = 7.1;
+    const itemCount = Math.max(6, Math.floor(totalGold / 120) + 6);
+    const availablePileHeight = Math.max(28, chestY + 4 - topCapY);
+    const maxVisibleRows = Math.max(3, Math.floor(availablePileHeight / rowStep));
+    const visibleCount = Math.min(itemCount, Math.ceil(maxVisibleRows * itemsPerLayer));
+    const rows = Math.max(1, Math.ceil(visibleCount / itemsPerLayer));
+    const pileItems = this.ensureTreasurePileEntries(side, totalGold, visibleCount);
 
-    // Draw chest base
-    ctx.fillStyle = '#8B4513';
-    ctx.fillRect(chestX, chestY, chestW, chestH);
+    ctx.fillStyle = '#00000028';
+    ctx.beginPath();
+    ctx.ellipse(chestAnchorX, chestY + chestH + 6, chestW * 0.78, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Chest lid
-    ctx.fillStyle = '#A0522D';
-    ctx.fillRect(chestX + 2, chestY - 6, chestW - 4, 8);
+    ctx.fillStyle = side === 'left' ? '#d7b07b' : '#ddd7cf';
+    ctx.beginPath();
+    ctx.ellipse(pileCenterX, chestY + 6, 30, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = side === 'left' ? '#b98655' : '#b9b2a9';
+    ctx.beginPath();
+    ctx.ellipse(pileCenterX, chestY + 10, 24, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Chest lock
-    ctx.fillStyle = '#FFD700';
-    ctx.fillRect(chestX + chestW / 2 - 2, chestY + 2, 4, 6);
-
-    // Draw coins based on total gold
-    const maxCoins = 12;
-    const coinsToShow = Math.min(maxCoins, Math.floor(totalGold / 50) + 1); // Show coins for every 50 gold, max 12
-
-    for (let i = 0; i < coinsToShow; i++) {
-      const coinX = chestX + 4 + (i % 4) * 6;
-      const coinY = chestY + 4 + Math.floor(i / 4) * 5;
-      const coinR = 2.5;
-
-      // Coin gradient
-      const coinGrad = ctx.createRadialGradient(coinX, coinY, 0, coinX, coinY, coinR);
-      coinGrad.addColorStop(0, '#FFD700');
-      coinGrad.addColorStop(0.7, '#FFA500');
-      coinGrad.addColorStop(1, '#FF8C00');
-
-      ctx.fillStyle = coinGrad;
-      ctx.beginPath();
-      ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Coin shine
-      ctx.fillStyle = '#FFFFFF40';
-      ctx.beginPath();
-      ctx.arc(coinX - 0.8, coinY - 0.8, 0.8, 0, Math.PI * 2);
-      ctx.fill();
+    for (let i = visibleCount - 1; i >= 0; i -= 1) {
+      const row = Math.floor(i / itemsPerLayer);
+      const item = pileItems[i];
+      const baseSeed = item?.seed ?? (i + 1) * 19.7;
+      const spreadBias = item?.spreadBias ?? (stableHash(baseSeed + 2.3) * 2 - 1);
+      const layerSpread = Math.max(4, 23 - row * 0.58 + stableHash(baseSeed + 3.6) * 3.1);
+      const px = pileCenterX
+        + spreadBias * layerSpread
+        + (item?.jitterX ?? ((stableHash(baseSeed + 0.4) - 0.5) * 4.5))
+        + (side === 'left' ? 1 : -1) * row * 0.12;
+      const py = chestY + 8
+        - row * rowStep
+        - Math.abs(spreadBias) * (1.8 + row * 0.02)
+        + (item?.jitterY ?? ((stableHash(baseSeed + 0.9) - 0.5) * 1.8));
+      const scale = (item?.scale ?? (0.82 + stableHash(baseSeed + 1.5) * 0.44)) + Math.min(0.48, row * 0.022);
+      const itemTopY = py - 6.5 * scale;
+      if (itemTopY < topCapY) continue;
+      const kind = item?.kind || 'coin';
+      this.drawTreasurePileItem(kind, px, py, scale, baseSeed);
     }
 
-    // Draw total gold text
-    ctx.fillStyle = '#FFD700';
+    const innerGlow = ctx.createLinearGradient(chestAnchorX, chestY - 2, chestAnchorX, chestY + 14);
+    innerGlow.addColorStop(0, '#ffe8a8');
+    innerGlow.addColorStop(1, '#d0901e');
+    ctx.fillStyle = innerGlow;
+    ctx.beginPath();
+    ctx.ellipse(pileCenterX, chestY + 6, chestW * 0.28, chestH * 0.23, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#d5a754';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(chestX + 6, chestY + 2);
+    ctx.lineTo(chestX + chestW - 6, chestY + 2);
+    ctx.stroke();
+
+    const chestGrad = ctx.createLinearGradient(chestX, chestY, chestX, chestY + chestH);
+    chestGrad.addColorStop(0, '#b86e38');
+    chestGrad.addColorStop(0.55, '#8f4d26');
+    chestGrad.addColorStop(1, '#6f381d');
+    ctx.fillStyle = chestGrad;
+    ctx.fillRect(chestX, chestY, chestW, chestH);
+    ctx.strokeStyle = '#5f2c16';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(chestX, chestY, chestW, chestH);
+
+    ctx.fillStyle = '#dcb35b';
+    ctx.fillRect(chestX + 4, chestY + 5, chestW - 8, 4);
+    ctx.fillRect(chestX + 5, chestY + chestH - 8, chestW - 10, 3);
+    ctx.fillRect(chestX + 7, chestY + 3, 3, chestH - 6);
+    ctx.fillRect(chestX + chestW - 10, chestY + 3, 3, chestH - 6);
+    ctx.fillRect(chestAnchorX - 4, chestY + 4, 8, 11);
+
+    ctx.fillStyle = '#ffdf7c';
+    ctx.fillRect(chestAnchorX - 2, chestY + 6, 4, 7);
+    ctx.fillStyle = '#7c5418';
+    ctx.fillRect(chestAnchorX - 1, chestY + 7, 2, 4);
+
+    for (let spill = 0; spill < 4; spill += 1) {
+      const seed = (side === 'left' ? 701 : 1403) + spill * 17.9;
+      const spillX = chestX + 10 + spill * 9 + (stableHash(seed) - 0.5) * 4;
+      const spillY = chestY + chestH - 2 - stableHash(seed + 0.7) * 5;
+      const spillKind = stableHash(seed + 1.9) > 0.78 ? 'goldBar' : (spill % 3 === 0 ? 'coinStack' : 'coin');
+      this.drawTreasurePileItem(spillKind, spillX, spillY, 0.72 + stableHash(seed + 1.2) * 0.18, seed);
+    }
+
+    const chestLabel = totalGold.toLocaleString();
+    ctx.strokeStyle = '#4a2810';
+    ctx.lineWidth = 3;
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(totalGold.toLocaleString(), x, chestY - 12);
+    ctx.strokeText(chestLabel, chestAnchorX, chestY + chestH - 12);
+    ctx.fillStyle = '#ffe08a';
+    ctx.fillText(chestLabel, chestAnchorX, chestY + chestH - 12);
+  }
+
+  ensureTreasurePileEntries(side, totalGold, count) {
+    const state = this.treasurePileState?.[side];
+    if (!state) return [];
+    if ((totalGold < 80 && state.lastGold > 300) || totalGold + 120 < state.lastGold * 0.4) {
+      state.items = [];
+    }
+    while (state.items.length < count) {
+      state.items.push(this.createTreasurePileEntry(side, state.items.length));
+    }
+    state.lastGold = totalGold;
+    return state.items;
+  }
+
+  createTreasurePileEntry(side, index) {
+    const richness = Math.min(1, index / 16);
+    const roll = Math.random();
+    let kind = 'coin';
+    if (roll < 0.28) kind = 'coin';
+    else if (roll < 0.46) kind = 'coinStack';
+    else if (roll < 0.56) kind = 'goldBar';
+    else if (side === 'left') {
+      const breadKinds = ['bun', 'loaf'];
+      if (richness > 0.15) breadKinds.push('croissant', 'baguette');
+      if (richness > 0.45) breadKinds.push('pretzel', 'bagel', 'toast');
+      if (richness > 0.72) breadKinds.push('brioche');
+      kind = pickRandom(breadKinds);
+    } else {
+      const riceKinds = ['mochi', 'onigiri'];
+      if (richness > 0.15) riceKinds.push('riceCake', 'riceBowl');
+      if (richness > 0.45) riceKinds.push('riceSack', 'senbei', 'sushiRoll');
+      if (richness > 0.72) riceKinds.push('riceCrate');
+      kind = pickRandom(riceKinds);
+    }
+    return {
+      kind,
+      seed: Math.random() * 100000,
+      jitterX: (Math.random() - 0.5) * 4.5,
+      jitterY: (Math.random() - 0.5) * 1.8,
+      spreadBias: Math.random() * 2 - 1,
+      scale: 0.82 + Math.random() * 0.44,
+    };
+  }
+
+  drawTreasurePileItem(kind, x, y, scale, seed) {
+    const { ctx } = this;
+    ctx.save();
+    switch (kind) {
+      case 'coin': {
+        const rx = 4.1 * scale;
+        const ry = 2.1 * scale;
+        const grad = ctx.createLinearGradient(x, y - ry, x, y + ry);
+        grad.addColorStop(0, '#fff2ad');
+        grad.addColorStop(0.55, '#f3bf43');
+        grad.addColorStop(1, '#ba7b18');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#8d5e15';
+        ctx.lineWidth = Math.max(1, 0.85 * scale);
+        ctx.stroke();
+        ctx.fillStyle = this.withAlpha('#ffffff', 0.42);
+        ctx.beginPath();
+        ctx.ellipse(x - rx * 0.18, y - ry * 0.38, rx * 0.34, ry * 0.22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'coinStack': {
+        const layers = 2 + Math.floor(stableHash(seed + 0.9) * 3);
+        for (let i = 0; i < layers; i += 1) {
+          this.drawTreasurePileItem('coin', x, y - i * 2.1 * scale, scale * (1 - i * 0.05), seed + i * 3.1);
+        }
+        break;
+      }
+      case 'goldBar': {
+        ctx.translate(x, y);
+        ctx.rotate(-0.22 + stableHash(seed + 0.4) * 0.44);
+        ctx.fillStyle = '#d9a63b';
+        ctx.beginPath();
+        ctx.moveTo(-5.8 * scale, 2.8 * scale);
+        ctx.lineTo(-3.8 * scale, -2.8 * scale);
+        ctx.lineTo(3.8 * scale, -2.8 * scale);
+        ctx.lineTo(5.8 * scale, 2.8 * scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#f8da84';
+        ctx.beginPath();
+        ctx.moveTo(-3.2 * scale, -1.8 * scale);
+        ctx.lineTo(3.2 * scale, -1.8 * scale);
+        ctx.lineTo(4.4 * scale, 1.5 * scale);
+        ctx.lineTo(-4.4 * scale, 1.5 * scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#8f651e';
+        ctx.lineWidth = Math.max(1, 0.9 * scale);
+        ctx.stroke();
+        break;
+      }
+      case 'bun': {
+        const rx = 6.1 * scale;
+        const ry = 4 * scale;
+        ctx.fillStyle = '#c7864f';
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, 0.08, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#e4b277';
+        ctx.beginPath();
+        ctx.ellipse(x - rx * 0.08, y - ry * 0.18, rx * 0.72, ry * 0.54, 0.08, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#7a4321';
+        ctx.lineWidth = Math.max(1, scale);
+        ctx.stroke();
+        ctx.fillStyle = '#f4dfb0';
+        for (let i = 0; i < 4; i += 1) {
+          const sx = x + (stableHash(seed + i * 1.1) - 0.5) * rx * 1.1;
+          const sy = y - ry * 0.2 + (stableHash(seed + i * 2.3) - 0.5) * ry * 0.55;
+          ctx.beginPath();
+          ctx.ellipse(sx, sy, 0.7 * scale, 0.34 * scale, stableHash(seed + i * 3.7) * Math.PI, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'brioche': {
+        ctx.fillStyle = '#cd8748';
+        ctx.beginPath();
+        ctx.arc(x, y + 1.4 * scale, 3.9 * scale, 0, Math.PI * 2);
+        ctx.arc(x - 3.4 * scale, y - 0.8 * scale, 3.1 * scale, 0, Math.PI * 2);
+        ctx.arc(x + 3.4 * scale, y - 0.8 * scale, 3.1 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#e8b57d';
+        ctx.beginPath();
+        ctx.arc(x, y + 0.6 * scale, 2.7 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#7b4320';
+        ctx.lineWidth = Math.max(1, 0.85 * scale);
+        ctx.stroke();
+        break;
+      }
+      case 'loaf': {
+        const rx = 6.6 * scale;
+        const ry = 3.9 * scale;
+        ctx.fillStyle = '#b87340';
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#d89a61';
+        ctx.beginPath();
+        ctx.ellipse(x - rx * 0.06, y - ry * 0.18, rx * 0.72, ry * 0.52, 0.16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#6b3d1f';
+        ctx.lineWidth = Math.max(1, scale * 0.95);
+        ctx.stroke();
+        for (let i = -1; i <= 1; i += 1) {
+          ctx.beginPath();
+          ctx.moveTo(x + i * rx * 0.32 - 0.5 * scale, y - ry * 0.18);
+          ctx.lineTo(x + i * rx * 0.32 + 0.9 * scale, y + ry * 0.26);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'toast': {
+        const w = 9 * scale;
+        const h = 8.6 * scale;
+        ctx.fillStyle = '#d2a06b';
+        ctx.beginPath();
+        ctx.moveTo(x - w * 0.46, y + h * 0.42);
+        ctx.lineTo(x - w * 0.46, y - h * 0.05);
+        ctx.quadraticCurveTo(x - w * 0.34, y - h * 0.55, x, y - h * 0.55);
+        ctx.quadraticCurveTo(x + w * 0.34, y - h * 0.55, x + w * 0.46, y - h * 0.05);
+        ctx.lineTo(x + w * 0.46, y + h * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#e8c18e';
+        ctx.fillRect(x - w * 0.26, y - h * 0.08, w * 0.52, h * 0.34);
+        ctx.strokeStyle = '#80502a';
+        ctx.lineWidth = Math.max(1, 0.85 * scale);
+        ctx.stroke();
+        break;
+      }
+      case 'bagel': {
+        ctx.fillStyle = '#bf7b45';
+        ctx.beginPath();
+        ctx.arc(x, y, 5.2 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#82461f';
+        ctx.beginPath();
+        ctx.arc(x, y, 2.1 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#efd7a2';
+        for (let i = 0; i < 5; i += 1) {
+          ctx.beginPath();
+          ctx.ellipse(
+            x + (stableHash(seed + i * 1.4) - 0.5) * 6.4 * scale,
+            y + (stableHash(seed + i * 2.2) - 0.5) * 3.2 * scale,
+            0.7 * scale,
+            0.28 * scale,
+            stableHash(seed + i * 3.1) * Math.PI,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        break;
+      }
+      case 'baguette': {
+        const len = 15 * scale;
+        const h = 3.2 * scale;
+        const rot = -0.28 + stableHash(seed + 0.5) * 0.56;
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.fillStyle = '#c68548';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, len * 0.5, h, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#e1ae74';
+        ctx.beginPath();
+        ctx.ellipse(-len * 0.04, -h * 0.22, len * 0.33, h * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#76411f';
+        ctx.lineWidth = Math.max(1, scale * 0.85);
+        ctx.stroke();
+        for (let i = -2; i <= 2; i += 1) {
+          ctx.beginPath();
+          ctx.moveTo(i * len * 0.12 - 0.4 * scale, -h * 0.52);
+          ctx.lineTo(i * len * 0.12 + 0.9 * scale, h * 0.54);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'croissant': {
+        const rot = -0.45 + stableHash(seed + 0.7) * 0.9;
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.strokeStyle = '#c47a42';
+        ctx.lineWidth = Math.max(2.2, 3.4 * scale);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(0, 1.1 * scale, 4.6 * scale, Math.PI * 1.1, Math.PI * 1.93);
+        ctx.stroke();
+        ctx.strokeStyle = '#e7bd8a';
+        ctx.lineWidth = Math.max(1.1, 1.8 * scale);
+        ctx.beginPath();
+        ctx.arc(0, 1.1 * scale, 3.15 * scale, Math.PI * 1.13, Math.PI * 1.9);
+        ctx.stroke();
+        break;
+      }
+      case 'pretzel': {
+        ctx.strokeStyle = '#9c5c2f';
+        ctx.lineWidth = Math.max(1.8, 2.6 * scale);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(x - 2.1 * scale, y, 2.4 * scale, 0, Math.PI * 2);
+        ctx.arc(x + 2.1 * scale, y, 2.4 * scale, 0, Math.PI * 2);
+        ctx.moveTo(x - 4.5 * scale, y + 1.8 * scale);
+        ctx.quadraticCurveTo(x, y + 5.8 * scale, x + 4.5 * scale, y + 1.8 * scale);
+        ctx.stroke();
+        ctx.strokeStyle = '#d5a06d';
+        ctx.lineWidth = Math.max(1, 1.1 * scale);
+        ctx.beginPath();
+        ctx.moveTo(x - 2.2 * scale, y + 1.4 * scale);
+        ctx.lineTo(x + 2.2 * scale, y + 1.4 * scale);
+        ctx.stroke();
+        break;
+      }
+      case 'mochi': {
+        const tint = stableHash(seed + 1.2);
+        const fill = tint < 0.33 ? '#f7f3ff' : (tint < 0.66 ? '#ffdbe5' : '#d7f1d2');
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.ellipse(x - 2.7 * scale, y + 0.2 * scale, 3.2 * scale, 2.6 * scale, 0.14, 0, Math.PI * 2);
+        ctx.ellipse(x + 2.4 * scale, y - 0.2 * scale, 3.1 * scale, 2.5 * scale, -0.08, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#c7d6df';
+        ctx.lineWidth = Math.max(1, 0.9 * scale);
+        ctx.stroke();
+        break;
+      }
+      case 'onigiri': {
+        const w = 8.4 * scale;
+        const h = 8.8 * scale;
+        ctx.fillStyle = '#fbfeff';
+        ctx.beginPath();
+        ctx.moveTo(x, y - h * 0.52);
+        ctx.lineTo(x - w * 0.52, y + h * 0.38);
+        ctx.quadraticCurveTo(x, y + h * 0.66, x + w * 0.52, y + h * 0.38);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#ccdbe5';
+        ctx.lineWidth = Math.max(1, 0.9 * scale);
+        ctx.stroke();
+        ctx.fillStyle = '#1f3646';
+        ctx.fillRect(x - 2.1 * scale, y + 1.3 * scale, 4.2 * scale, 3.3 * scale);
+        ctx.fillStyle = this.withAlpha('#dff4ff', 0.74);
+        for (let i = 0; i < 5; i += 1) {
+          ctx.beginPath();
+          ctx.ellipse(
+            x + (stableHash(seed + i * 1.3) - 0.5) * 4.2 * scale,
+            y + (stableHash(seed + i * 2.1) - 0.6) * 3.8 * scale,
+            0.56 * scale,
+            0.22 * scale,
+            stableHash(seed + i * 3.1) * Math.PI,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        break;
+      }
+      case 'riceCake': {
+        ctx.strokeStyle = '#a78356';
+        ctx.lineWidth = Math.max(1, 0.85 * scale);
+        ctx.beginPath();
+        ctx.moveTo(x, y + 4.8 * scale);
+        ctx.lineTo(x, y - 4.6 * scale);
+        ctx.stroke();
+        const colors = ['#f6f2ec', '#ffc8d7', '#d8f0cf'];
+        for (let i = 0; i < 3; i += 1) {
+          ctx.fillStyle = colors[i];
+          ctx.beginPath();
+          ctx.arc(x, y - 3.2 * scale + i * 3.2 * scale, 2.2 * scale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#d8dee6';
+          ctx.lineWidth = Math.max(1, 0.75 * scale);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'senbei': {
+        ctx.fillStyle = '#d9b26b';
+        ctx.beginPath();
+        ctx.arc(x, y, 4.7 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#8c6232';
+        ctx.lineWidth = Math.max(1, 0.8 * scale);
+        ctx.stroke();
+        ctx.fillStyle = '#9a6c36';
+        for (let i = 0; i < 5; i += 1) {
+          ctx.beginPath();
+          ctx.arc(
+            x + (stableHash(seed + i * 1.4) - 0.5) * 5.2 * scale,
+            y + (stableHash(seed + i * 2.1) - 0.5) * 5.2 * scale,
+            0.48 * scale,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        break;
+      }
+      case 'riceBowl': {
+        ctx.fillStyle = '#f7fbff';
+        ctx.beginPath();
+        ctx.ellipse(x, y - 2.1 * scale, 5.4 * scale, 2.5 * scale, 0, Math.PI, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d9e5ee';
+        ctx.lineWidth = Math.max(1, 0.75 * scale);
+        ctx.stroke();
+        ctx.fillStyle = '#914b36';
+        ctx.beginPath();
+        ctx.moveTo(x - 5.7 * scale, y - 1.1 * scale);
+        ctx.quadraticCurveTo(x, y + 5.6 * scale, x + 5.7 * scale, y - 1.1 * scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#cf7051';
+        ctx.beginPath();
+        ctx.moveTo(x - 4.8 * scale, y);
+        ctx.quadraticCurveTo(x, y + 4.2 * scale, x + 4.8 * scale, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fbfeff';
+        ctx.beginPath();
+        ctx.ellipse(x, y - 2.6 * scale, 4.2 * scale, 1.9 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'sushiRoll': {
+        ctx.fillStyle = '#1c2f3d';
+        ctx.beginPath();
+        ctx.arc(x, y, 4.9 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f7fbff';
+        ctx.beginPath();
+        ctx.arc(x, y, 3.8 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = stableHash(seed + 1.6) > 0.5 ? '#ff8e82' : '#8fd67b';
+        ctx.beginPath();
+        ctx.arc(x, y, 1.9 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'riceSack': {
+        ctx.fillStyle = '#e5d0a5';
+        ctx.beginPath();
+        ctx.moveTo(x - 4.6 * scale, y + 5.2 * scale);
+        ctx.quadraticCurveTo(x - 6.2 * scale, y - 0.6 * scale, x - 2.2 * scale, y - 4.2 * scale);
+        ctx.lineTo(x + 2.2 * scale, y - 4.2 * scale);
+        ctx.quadraticCurveTo(x + 6.2 * scale, y - 0.6 * scale, x + 4.6 * scale, y + 5.2 * scale);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#9d7c48';
+        ctx.lineWidth = Math.max(1, 0.8 * scale);
+        ctx.stroke();
+        ctx.strokeStyle = '#7d5d2f';
+        ctx.beginPath();
+        ctx.moveTo(x - 2.8 * scale, y - 2.4 * scale);
+        ctx.lineTo(x + 2.8 * scale, y - 2.4 * scale);
+        ctx.stroke();
+        ctx.fillStyle = '#f8fdff';
+        for (let i = 0; i < 5; i += 1) {
+          ctx.beginPath();
+          ctx.ellipse(
+            x + (stableHash(seed + i * 1.2) - 0.5) * 4 * scale,
+            y - 4.6 * scale - stableHash(seed + i * 2.1) * 1.6 * scale,
+            0.68 * scale,
+            0.26 * scale,
+            stableHash(seed + i * 2.7) * Math.PI,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        break;
+      }
+      case 'riceCrate': {
+        ctx.fillStyle = '#c8a36d';
+        ctx.fillRect(x - 5.6 * scale, y - 4.4 * scale, 11.2 * scale, 8.8 * scale);
+        ctx.strokeStyle = '#886039';
+        ctx.lineWidth = Math.max(1, 0.8 * scale);
+        ctx.strokeRect(x - 5.6 * scale, y - 4.4 * scale, 11.2 * scale, 8.8 * scale);
+        ctx.strokeRect(x - 3.8 * scale, y - 2.8 * scale, 7.6 * scale, 5.6 * scale);
+        ctx.fillStyle = '#f7fcff';
+        for (let i = 0; i < 6; i += 1) {
+          ctx.beginPath();
+          ctx.ellipse(
+            x + (stableHash(seed + i * 1.5) - 0.5) * 7 * scale,
+            y - 4.8 * scale - stableHash(seed + i * 2.2) * 1.7 * scale,
+            0.7 * scale,
+            0.26 * scale,
+            stableHash(seed + i * 2.9) * Math.PI,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    ctx.restore();
   }
 
   getUpgradeBadgeData(sideState) {
