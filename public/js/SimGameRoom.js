@@ -410,6 +410,8 @@ function serializeSideState(side) {
     towerHp: roundTo(state.towerHp, 1),
     gold: roundTo(state.gold, 1),
     goldEarnedTotal: roundTo(state.goldEarnedTotal, 1),
+    arrowResourceGoldCollected: roundTo(state.arrowResourceGoldCollected, 1),
+    diggerResourceGoldCollected: roundTo(state.diggerResourceGoldCollected, 1),
     economyLevel: Math.max(0, Math.round(Number(state.economyLevel) || 0)),
     nextEcoCost: Math.max(0, Math.round(Number(state.nextEcoCost) || 0)),
     unitLevel: Math.max(0, Math.round(Number(state.unitLevel) || 0)),
@@ -501,6 +503,8 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     towerHp: TOWER_MAX_HP,
     gold: 0,
     goldEarnedTotal: 0,
+    arrowResourceGoldCollected: 0,
+    diggerResourceGoldCollected: 0,
     economyLevel: 0,
     nextEcoCost: 120,
     unitLevel: 1,
@@ -751,6 +755,8 @@ class GameRoom {
           towerDamageDealt: 0,
           towerDamageTaken: 0,
           minionKills: 0,
+          arrowResourceGoldCollected: 0,
+          diggerResourceGoldCollected: 0,
         },
         right: {
           arrowDamage: 0,
@@ -758,6 +764,8 @@ class GameRoom {
           towerDamageDealt: 0,
           towerDamageTaken: 0,
           minionKills: 0,
+          arrowResourceGoldCollected: 0,
+          diggerResourceGoldCollected: 0,
         },
       },
       luck: {
@@ -945,6 +953,8 @@ class GameRoom {
           towerDamageDealt: roundTo(totals.left?.towerDamageDealt, 2),
           towerDamageTaken: roundTo(totals.left?.towerDamageTaken, 2),
           minionKills: Math.max(0, Math.round(Number(totals.left?.minionKills) || 0)),
+          arrowResourceGoldCollected: roundTo(totals.left?.arrowResourceGoldCollected, 1),
+          diggerResourceGoldCollected: roundTo(totals.left?.diggerResourceGoldCollected, 1),
         },
         right: {
           arrowDamage: roundTo(totals.right?.arrowDamage, 2),
@@ -952,6 +962,8 @@ class GameRoom {
           towerDamageDealt: roundTo(totals.right?.towerDamageDealt, 2),
           towerDamageTaken: roundTo(totals.right?.towerDamageTaken, 2),
           minionKills: Math.max(0, Math.round(Number(totals.right?.minionKills) || 0)),
+          arrowResourceGoldCollected: roundTo(totals.right?.arrowResourceGoldCollected, 1),
+          diggerResourceGoldCollected: roundTo(totals.right?.diggerResourceGoldCollected, 1),
         },
       },
       luck: {
@@ -3125,10 +3137,12 @@ class GameRoom {
           if (a.side === 'left') {
             const gain = this.goldFromResource(this.left, res.value);
             this.grantGold('left', gain, true);
+            this.recordResourceGoldCollected('left', gain, 'arrow');
             this.addUpgradeCharge(this.left, gain);
           } else {
             const gain = this.goldFromResource(this.right, res.value);
             this.grantGold('right', gain, true);
+            this.recordResourceGoldCollected('right', gain, 'arrow');
             this.addUpgradeCharge(this.right, gain);
           }
           this.queueHitSfx('resource', res.x, res.y, a.side);
@@ -3400,6 +3414,7 @@ class GameRoom {
     const side = minion.side === 'right' ? this.right : this.left;
     const gain = this.goldFromResource(side, Number(res.value) || 0);
     this.grantGold(minion.side, gain, true);
+    this.recordResourceGoldCollected(minion.side, gain, 'digger');
     this.addUpgradeCharge(side, gain);
     this.queueHitSfx('resource', res.x, res.y, minion.side);
     this.queueHitSfx('powerup', minion.x, minion.y - Math.max(6, minion.r * 0.3), minion.side);
@@ -6976,6 +6991,21 @@ class GameRoom {
     side.gold += gain;
     if (countAsEarned) side.goldEarnedTotal = Math.max(0, (Number(side.goldEarnedTotal) || 0) + gain);
     return gain;
+  }
+
+  recordResourceGoldCollected(sideName, amount, source = 'arrow') {
+    const side = sideName === 'right' ? this.right : this.left;
+    const totals = this.matchReport?.totals?.[sideName === 'right' ? 'right' : 'left'];
+    const gain = Math.max(0, Number(amount) || 0);
+    if (!side || gain <= 0) return;
+    if (source === 'digger') {
+      side.diggerResourceGoldCollected = Math.max(0, (Number(side.diggerResourceGoldCollected) || 0) + gain);
+      if (totals) totals.diggerResourceGoldCollected = Math.max(0, (Number(totals.diggerResourceGoldCollected) || 0) + gain);
+    } else {
+      side.arrowResourceGoldCollected = Math.max(0, (Number(side.arrowResourceGoldCollected) || 0) + gain);
+      if (totals) totals.arrowResourceGoldCollected = Math.max(0, (Number(totals.arrowResourceGoldCollected) || 0) + gain);
+    }
+    this.postGameReportCache = null;
   }
 
   addUpgradeCharge(side, amount) {

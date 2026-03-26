@@ -1531,6 +1531,8 @@ export class GameClient {
           towerDamageDealt: Math.max(0, 6000 - rightTower),
           towerDamageTaken: Math.max(0, 6000 - leftTower),
           minionKills: 0,
+          arrowResourceGoldCollected: Number(snapshot?.left?.arrowResourceGoldCollected) || 0,
+          diggerResourceGoldCollected: Number(snapshot?.left?.diggerResourceGoldCollected) || 0,
         },
         right: {
           arrowDamage: 0,
@@ -1538,6 +1540,8 @@ export class GameClient {
           towerDamageDealt: Math.max(0, 6000 - leftTower),
           towerDamageTaken: Math.max(0, 6000 - rightTower),
           minionKills: 0,
+          arrowResourceGoldCollected: Number(snapshot?.right?.arrowResourceGoldCollected) || 0,
+          diggerResourceGoldCollected: Number(snapshot?.right?.diggerResourceGoldCollected) || 0,
         },
       },
       luck: {
@@ -1575,6 +1579,8 @@ export class GameClient {
       { title: 'Tower Damage', value: `<span class="team-west">${this.numberCompact(leftTotals.towerDamageDealt, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.towerDamageDealt, 0)}</span>` },
       { title: 'Total Damage', value: `<span class="team-west">${this.numberCompact(leftTotalDamage, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotalDamage, 0)}</span>` },
       { title: 'Minion Kills', value: `<span class="team-west">${this.numberCompact(leftTotals.minionKills, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.minionKills, 0)}</span>` },
+      { title: 'Arrow Gold', value: `<span class="team-west">${this.numberCompact(leftTotals.arrowResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.arrowResourceGoldCollected, 0)}</span>` },
+      { title: 'Digger Gold', value: `<span class="team-west">${this.numberCompact(leftTotals.diggerResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.diggerResourceGoldCollected, 0)}</span>` },
       {
         title: 'Luck % (Higher Better)',
         value: `<span class="team-west">${leftLuckText}</span> <span class="team-sep">vs</span> <span class="team-east">${rightLuckText}</span>`,
