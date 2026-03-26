@@ -121,6 +121,7 @@ export const SHOT_POWER_LABELS = {
   ultraShot: 'Ultra',
   pierceShot: 'Pierce',
   flameShot: 'Flame',
+  flareShot: 'Flare',
 };
 
 export const TEAM_COLORS = {

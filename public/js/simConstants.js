@@ -29,4 +29,4 @@ export const UPGRADE_TYPES = [
   'presidentExecutiveOrderLevel',
   'superMinionLevel',
 ];
-export const SHOT_POWER_TYPES = ['multiShot', 'ultraShot', 'pierceShot', 'flameShot'];
+export const SHOT_POWER_TYPES = ['multiShot', 'ultraShot', 'pierceShot', 'flameShot', 'flareShot'];

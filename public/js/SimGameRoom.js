@@ -28,6 +28,13 @@ import {
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
+
+// Shot power drop frequency (seconds)
+const SHOT_POWER_SPAWN_MIN_INTERVAL = 1.8; // minimum spacing between spawns
+const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
+const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
+const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
+
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
   arrowLevel: { base: 130, growth: 18, start: 1 },
@@ -447,6 +454,12 @@ function serializeSideState(side) {
     })),
     archerVolleyIndex: Math.max(0, Math.round(Number(state.archerVolleyIndex) || 0)),
     shotCd: roundTo(state.shotCd, 2),
+    pendingShotPowerBySlot: Array.isArray(state.pendingShotPowerBySlot)
+      ? state.pendingShotPowerBySlot.map((entry) => ({
+        power: entry?.power || null,
+        shots: Math.max(0, Math.round(Number(entry?.shots) || 0)),
+      }))
+      : [],
     pendingShotPower: state.pendingShotPower || null,
     pendingShotPowerShots: Math.max(0, Math.round(Number(state.pendingShotPowerShots) || 0)),
     arrowsFired: Math.max(0, Math.round(Number(state.arrowsFired) || 0)),
@@ -491,6 +504,24 @@ function launchFromPull(sideName, pullX, pullY) {
   return { angle, strength };
 }
 
+function syncPendingShotPowerState(side) {
+  if (!side || !Array.isArray(side.pendingShotPowerBySlot)) {
+    side.pendingShotPower = null;
+    side.pendingShotPowerShots = 0;
+    return;
+  }
+  let primaryPower = null;
+  let totalShots = 0;
+  for (const entry of side.pendingShotPowerBySlot) {
+    if (entry && Number.isFinite(entry.shots) && entry.shots > 0) {
+      if (!primaryPower) primaryPower = entry.power;
+      totalShots += entry.shots;
+    }
+  }
+  side.pendingShotPower = primaryPower;
+  side.pendingShotPowerShots = totalShots;
+}
+
 function makeSideState(sideName = 'left', archerCount = 1) {
   const clampedCount = Math.max(1, Math.min(2, Math.floor(archerCount)));
   const basePullX = sideName === 'right' ? 0.8 : -0.8;
@@ -499,6 +530,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     pullY: 0,
     archerAimY: ARCHER_ORIGIN_Y - idx * ARCHER_VERTICAL_GAP,
   }));
+
   return {
     towerHp: TOWER_MAX_HP,
     gold: 0,
@@ -536,6 +568,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     archerPulls,
     archerVolleyIndex: 0,
     shotCd: 1,
+    pendingShotPowerBySlot: archerPulls.map(() => ({ power: null, shots: 0 })),
     pendingShotPower: null,
     pendingShotPowerShots: 0,
     pendingSpecialSpawns: [],
@@ -1744,7 +1777,10 @@ class GameRoom {
     if (this.t >= this.nextShotPowerAt) {
       this.spawnMirroredShotPower();
       const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
-      this.nextShotPowerAt = this.t + Math.max(0.9, Math.max(5.2, 8.8 - this.t / 260) / mul);
+      this.nextShotPowerAt = this.t + Math.max(
+        SHOT_POWER_SPAWN_MIN_INTERVAL,
+        Math.max(SHOT_POWER_SPAWN_BASE_INTERVAL, SHOT_POWER_SPAWN_DECAY_RANGE - this.t / SHOT_POWER_SPAWN_DECAY_DIVISOR) / mul
+      );
     }
 
     this.syncUpgradeCards('left');
@@ -2953,6 +2989,10 @@ class GameRoom {
 
       if (a.y >= ARROW_STICK_GROUND_Y && a.vy > 0) {
         this.markArrowMiss(a);
+        if (a.powerType === 'flareShot' && a.mainArrow && !a.flareShotTriggered) {
+          a.flareShotTriggered = true;
+          this.spawnFlareShotCannonBall(a.side, a.x, ARROW_STICK_GROUND_Y);
+        }
         this.stickArrowInGround(a);
         continue;
       }
@@ -2966,9 +3006,20 @@ class GameRoom {
         if (dist2(a, power) <= hitR * hitR) {
           this.markArrowHit(a);
           const side = a.side === 'left' ? this.left : this.right;
-          side.pendingShotPower = power.type;
-          side.pendingShotPowerShots = 3;
-          this.queueHitSfx('powerup', power.x, power.y, a.side);
+          const slotIndex = Number.isFinite(a.archerSlot)
+            ? Math.max(0, Math.min(this.archersPerSide - 1, a.archerSlot))
+            : 0;
+          if (!Array.isArray(side.pendingShotPowerBySlot)) {
+            side.pendingShotPowerBySlot = Array.from({ length: this.archersPerSide }, () => ({ power: null, shots: 0 }));
+          }
+          side.pendingShotPowerBySlot[slotIndex] = {
+            power: power.type,
+            shots: 3 + Math.max(0, Number(side.powerLevel) || 0),
+          };
+          syncPendingShotPowerState(side);
+          this.queueHitSfx('powerup', power.x, power.y, a.side, {
+            targetArcherSlot: slotIndex,
+          });
           this.shotPowers.splice(p, 1);
         }
       }
@@ -3069,6 +3120,10 @@ class GameRoom {
           }
 
           this.markArrowHit(a);
+          if (a.powerType === 'flareShot' && a.mainArrow && !a.flareShotTriggered) {
+            a.flareShotTriggered = true;
+            this.spawnFlareShotCannonBall(a.side, minion.x, minion.y);
+          }
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
           if (minion.balloon && balloonHitCircleIndex === 0) damage *= 2;
@@ -5131,6 +5186,30 @@ class GameRoom {
     }
   }
 
+  spawnFlareShotCannonBall(sideName, x, y) {
+    const side = sideName === 'right' ? this.right : this.left;
+    if (!side) return;
+    const targetX = clamp(Number(x) || 0, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38);
+    const targetY = clamp(Number(y) || 0, TOWER_Y - 180, TOWER_Y + 212);
+    const baseArrow = this.statArrowDamage(side);
+    const baseDamage = Math.max(1, this.minionOutgoingDamage({ side: sideName }, baseArrow * 1.6));
+
+    this.queueHitSfx('powerup', targetX, targetY, sideName);
+    this.cannonBalls.push({
+      id: this.seq++,
+      side: sideName,
+      phase: 'mark',
+      x: targetX,
+      y: targetY,
+      r: 14,
+      dropDelay: GUNNER_SKY_CANNON_AIRSTRIKE_MARK_DELAY + Math.random() * 0.14,
+      impactX: targetX,
+      impactY: targetY,
+      baseDamage,
+      sourceSuper: false,
+    });
+  }
+
   resolveGunnerSkyCannonImpact(ball, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!ball) return;
     const sideName = ball.side === 'right' ? 'right' : 'left';
@@ -6475,7 +6554,10 @@ class GameRoom {
     let gravity = 980 - launch.strength * 220;
     let powerType = null;
     const powerScale = 1 + (side.powerLevel - 1) * 0.18;
-    const activePower = side.pendingShotPowerShots > 0 ? side.pendingShotPower : null;
+    const slotPowerEntry = Array.isArray(side.pendingShotPowerBySlot) && side.pendingShotPowerBySlot[slot]
+      ? side.pendingShotPowerBySlot[slot]
+      : { power: null, shots: 0 };
+    const activePower = slotPowerEntry.shots > 0 ? slotPowerEntry.power : null;
 
     if (activePower === 'multiShot') {
       count += 2 + Math.floor(powerScale * 2);
@@ -6497,6 +6579,9 @@ class GameRoom {
       flameSplash = 0.2 + powerScale * 0.07;
       flameBurn = 0.16 + powerScale * 0.06;
       powerType = 'flameShot';
+    } else if (activePower === 'flareShot') {
+      // Main arrow marks a flare location on hit and calls in a sky cannon impact.
+      powerType = 'flareShot';
     }
     count = Math.min(29, count);
     const angleSteps = [0];
@@ -6506,12 +6591,11 @@ class GameRoom {
       if (angleSteps.length < count) angleSteps.push(-step);
     }
     if (activePower) {
-      side.pendingShotPowerShots = Math.max(0, side.pendingShotPowerShots - 1);
-      if (side.pendingShotPowerShots === 0) side.pendingShotPower = null;
-    } else {
-      side.pendingShotPower = null;
-      side.pendingShotPowerShots = 0;
+      slotPowerEntry.shots = Math.max(0, (Number(slotPowerEntry.shots) || 0) - 1);
+      if (slotPowerEntry.shots === 0) slotPowerEntry.power = null;
     }
+
+    syncPendingShotPowerState(side);
 
     for (let i = 0; i < angleSteps.length; i += 1) {
       const angleStep = angleSteps[i];
@@ -6553,6 +6637,7 @@ class GameRoom {
         stuckAngle: null,
         stuckTtl: 0,
         stuckTtlMax: 0,
+        archerSlot: slot,
       });
     }
   }

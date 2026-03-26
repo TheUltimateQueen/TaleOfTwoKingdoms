@@ -30,5 +30,5 @@ module.exports = {
     'gunnerSkyCannonLevel',
     'superMinionLevel',
   ],
-  SHOT_POWER_TYPES: ['multiShot', 'ultraShot', 'pierceShot', 'flameShot'],
+  SHOT_POWER_TYPES: ['multiShot', 'ultraShot', 'pierceShot', 'flameShot', 'flareShot'],
 };

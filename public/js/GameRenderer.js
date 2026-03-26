@@ -310,6 +310,7 @@ export class GameRenderer {
     this.cardTextFitCache = new Map();
     this.cardTextFitCacheMaxEntries = 1024;
     this.goldResourceTrails = [];
+    this.powerupTrails = [];
     this.treasurePileState = {
       left: { items: [], lastGold: 0 },
       right: { items: [], lastGold: 0 },
@@ -346,6 +347,7 @@ export class GameRenderer {
       this.militiaFoodFx.clear();
       this.cardTextFitCache.clear();
       this.goldResourceTrails.length = 0;
+      this.powerupTrails.length = 0;
       this.treasurePileState.left = { items: [], lastGold: 0 };
       this.treasurePileState.right = { items: [], lastGold: 0 };
     }
@@ -4430,6 +4432,64 @@ export class GameRenderer {
     }
   }
 
+  spawnPowerupTrail(fromX, fromY, toX, toY, side, count = 2) {
+    for (let i = 0; i < count; i += 1) {
+      this.powerupTrails.push({
+        side,
+        fromX,
+        fromY,
+        toX: toX + (Math.random() * 16 - 8),
+        toY: toY + (Math.random() * 12 - 6),
+        age: -i * 0.04,
+        duration: 0.42 + Math.random() * 0.1,
+        arc: 20 + Math.random() * 16,
+        size: 2.6 + Math.random() * 1.3,
+      });
+    }
+  }
+
+  updatePowerupTrails(snapshot, world, dt) {
+    let write = 0;
+    for (let i = 0; i < this.powerupTrails.length; i += 1) {
+      const trail = this.powerupTrails[i];
+      trail.age += dt;
+      if (trail.age >= trail.duration) continue;
+      this.powerupTrails[write] = trail;
+      write += 1;
+    }
+    this.powerupTrails.length = write;
+  }
+
+  drawPowerupTrails() {
+    const { ctx } = this;
+    for (const trail of this.powerupTrails) {
+      if (trail.age < 0) continue;
+      const t = Math.max(0, Math.min(1, trail.age / Math.max(0.0001, trail.duration)));
+      const ease = 1 - Math.pow(1 - t, 3);
+      const x = trail.fromX + (trail.toX - trail.fromX) * ease;
+      const y = trail.fromY + (trail.toY - trail.fromY) * ease - Math.sin(ease * Math.PI) * trail.arc;
+      const alpha = 1 - Math.max(0, ease - 0.6) / 0.4;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, trail.size * 2.8);
+      grad.addColorStop(0, this.withAlpha('#c7dbff', alpha));
+      grad.addColorStop(0.55, this.withAlpha('#86d7ff', alpha * 0.95));
+      grad.addColorStop(1, this.withAlpha('#6cb5ff', 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, trail.size * 2.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#8dd8ff', alpha);
+      ctx.beginPath();
+      ctx.arc(x, y, trail.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#c2f5ff', alpha * 0.9);
+      ctx.beginPath();
+      ctx.arc(x - trail.size * 0.22, y - trail.size * 0.24, trail.size * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   draw(snapshot, world) {
     if (!snapshot || !world) return;
 
@@ -4442,6 +4502,7 @@ export class GameRenderer {
     this.updateGameOverCinematic(snapshot, world, now, dt);
     this.updateMilitiaFoodFx(snapshot.minions, dt);
     this.updateGoldResourceTrails(snapshot, world, dt);
+    this.updatePowerupTrails(snapshot, world, dt);
 
     const w = canvas.width;
     const h = canvas.height;
@@ -4514,6 +4575,7 @@ export class GameRenderer {
 
     for (const res of snapshot.resources) this.drawResourceNode(res);
     this.drawGoldResourceTrails();
+    this.drawPowerupTrails();
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
     if (Array.isArray(snapshot.cannonBalls)) {
       for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
@@ -4878,6 +4940,17 @@ export class GameRenderer {
       speed = 290;
       life = 0.42;
       gravity = 560;
+    }
+
+    if (type === 'powerup') {
+      const slot = Number.isFinite(event?.targetArcherSlot) ? event.targetArcherSlot : null;
+      const towerX = Number(eventWorld?.towerLeftX) || 190;
+      const towerY = Number(eventWorld?.towerY) || 350;
+      const targetX = pside === 'left' ? (Number(eventWorld?.towerLeftX) || 190) + 35 : (Number(eventWorld?.towerRightX) || 1410) - 35;
+      const targetY = slot !== null && slot >= 0
+        ? (towerY - 56 - (slot * 78))
+        : (towerY - 56);
+      this.spawnPowerupTrail(px, py, targetX, targetY, pside, 3);
     }
 
     const burstCount = this.scaledParticleCount(count, 2);
@@ -6993,6 +7066,19 @@ export class GameRenderer {
         ctx.lineTo(bx1 + Math.sin(aim) * 6, by1 - Math.cos(aim) * 6);
         ctx.stroke();
       }
+
+      const slotPower = Array.isArray(sideState?.pendingShotPowerBySlot)
+        ? sideState.pendingShotPowerBySlot[idx]
+        : null;
+      const activeSlotPower = slotPower?.power || sideState?.pendingShotPower;
+      const activeShots = slotPower?.shots ?? sideState?.pendingShotPowerShots;
+      if (activeSlotPower) {
+        this.drawShotPowerIcon(activeSlotPower, archerX, archerY - 30, 12, side);
+        ctx.fillStyle = '#ffffffcc';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${activeShots}x`, archerX, archerY - 18);
+      }
     }
 
     const hpW = 92;
@@ -7833,42 +7919,87 @@ export class GameRenderer {
     ctx.fillText('shoot to choose', card.x, card.y + 20);
   }
 
-  drawShotPower(power) {
+  drawShotPowerIcon(powerType, x, y, size = 16, side = 'left') {
     const { ctx } = this;
-    const palette = TEAM_COLORS[power.side];
-    let aura = '#ffffff22';
-    let fill = '#1f2338';
-    let border = palette.primary;
-    let text = '#fff3b2';
+    const radius = Math.max(10, size);
+    const outlineColor = side === 'right' ? '#ff6a6a' : '#4da7ff';
+    const fg = powerType === 'flameShot' ? '#ffae2b'
+      : powerType === 'pierceShot' ? '#80d1ff'
+      : powerType === 'ultraShot' ? '#b877ff'
+      : powerType === 'flareShot' ? '#ffd268'
+      : '#96ed79';
 
-    if (power.type === 'flameShot') {
-      aura = '#ff9a3a2a';
-      fill = '#3c2017';
-      border = '#ff9a4a';
-      text = '#ffe3b0';
-    }
+    ctx.save();
+    ctx.translate(x, y);
 
-    ctx.fillStyle = aura;
+    // Draw smaller base circle (0.9x gold resource) with side outline
+    ctx.fillStyle = '#1a1f2a';
     ctx.beginPath();
-    ctx.arc(power.x, power.y, power.r + 4, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = fill;
+    ctx.strokeStyle = outlineColor;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(power.x, power.y - power.r);
-    ctx.lineTo(power.x + power.r, power.y);
-    ctx.lineTo(power.x, power.y + power.r);
-    ctx.lineTo(power.x - power.r, power.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = border;
-    ctx.lineWidth = 2;
+    ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.fillStyle = text;
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(SHOT_POWER_LABELS[power.type] || 'Power', power.x, power.y + 3);
+    // Increase icon scale inside circle
+    const iconScale = radius * 0.8;
+    ctx.fillStyle = fg;
+    if (powerType === 'multiShot') {
+      for (let dx = -iconScale * 0.2; dx <= iconScale * 0.2; dx += iconScale * 0.2) {
+        ctx.beginPath();
+        ctx.arc(dx, 0, iconScale * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (powerType === 'ultraShot') {
+      ctx.beginPath();
+      ctx.moveTo(0, -iconScale * 0.4);
+      ctx.lineTo(iconScale * 0.2, 0);
+      ctx.lineTo(iconScale * 0.5, iconScale * 0.05);
+      ctx.lineTo(iconScale * 0.25, iconScale * 0.2);
+      ctx.lineTo(iconScale * 0.3, iconScale * 0.45);
+      ctx.lineTo(0, iconScale * 0.3);
+      ctx.lineTo(-iconScale * 0.3, iconScale * 0.45);
+      ctx.lineTo(-iconScale * 0.25, iconScale * 0.2);
+      ctx.lineTo(-iconScale * 0.5, iconScale * 0.05);
+      ctx.lineTo(-iconScale * 0.2, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else if (powerType === 'pierceShot') {
+      ctx.beginPath();
+      ctx.moveTo(-iconScale * 0.4, -iconScale * 0.2);
+      ctx.lineTo(iconScale * 0.45, 0);
+      ctx.lineTo(-iconScale * 0.4, iconScale * 0.2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (powerType === 'flameShot') {
+      ctx.beginPath();
+      ctx.moveTo(0, -iconScale * 0.45);
+      ctx.bezierCurveTo(iconScale * 0.45, -iconScale * 0.07, iconScale * 0.3, iconScale * 0.2, 0, iconScale * 0.45);
+      ctx.bezierCurveTo(-iconScale * 0.3, iconScale * 0.2, -iconScale * 0.45, -iconScale * 0.07, 0, -iconScale * 0.45);
+      ctx.fill();
+    } else if (powerType === 'flareShot') {
+      ctx.beginPath();
+      ctx.arc(0, 0, iconScale * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff9d3';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, iconScale * 0.35, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, iconScale * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  drawShotPower(power) {
+    this.drawShotPowerIcon(power.type, power.x, power.y, power.r * 0.9, power.side);
   }
 
   drawCannonBall(ball) {
