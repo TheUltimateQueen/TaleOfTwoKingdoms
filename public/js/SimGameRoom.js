@@ -107,6 +107,9 @@ const DRAGON_SUPER_BREATH_CHANNEL_TOWER_MULT = 0.16;
 const DRAGON_SUPER_BREATH_GROUND_SCORCH_TTL = 3.4;
 const DRAGON_SUPER_BREATH_GROUND_SCORCH_RADIUS = 108;
 const DRAGON_SUPER_BREATH_GROUND_SCORCH_ENEMY_DPS = 58;
+const FLAME_SHOT_SCORCH_TTL = 2.2;
+const FLAME_SHOT_SCORCH_RADIUS = 58;
+const FLAME_SHOT_SCORCH_ENEMY_DPS = 11;
 const MONK_HEAL_CIRCLE_INTERVAL = 10;
 const MONK_HEAL_CIRCLE_COOLDOWN_JITTER = 1.6;
 const MONK_HEAL_CIRCLE_RANGE_MULT = 1.12;
@@ -4486,6 +4489,28 @@ class GameRoom {
     const burnDamage = Math.max(1, baseDamage * (Number(arrow.flameBurn) || 0.18));
     this.dealDamageToMinion(target, burnDamage, arrow.side, 'arrow');
     target.hitFlashTtl = Math.max(Number(target.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+
+    if (!arrow.flameScorchPlaced) {
+      arrow.flameScorchPlaced = true;
+      this.candleScorches.push({
+        x: Number(target.x) || 0,
+        y: (Number(target.y) || 0) + Math.max(8, (Number(target.r) || 12) * 0.5),
+        r: FLAME_SHOT_SCORCH_RADIUS,
+        ttl: FLAME_SHOT_SCORCH_TTL,
+        smokeShieldTtl: 0,
+        smokeShieldMaxTtl: 0,
+        smokeShieldRx: 0,
+        smokeShieldRy: 0,
+        smokeShieldYOffset: 0,
+        side: arrow.side,
+        candleSide: arrow.side,
+        allyDps: 0,
+        enemyDps: FLAME_SHOT_SCORCH_ENEMY_DPS,
+        towerSide: null,
+        towerBurnDps: 0,
+        towerBurnTick: 0,
+      });
+    }
 
     const splashDamage = Math.max(1, baseDamage * (Number(arrow.flameSplash) || 0.24));
     const splashR = 68;
