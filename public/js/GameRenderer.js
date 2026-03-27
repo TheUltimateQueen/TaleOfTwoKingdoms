@@ -313,6 +313,24 @@ function stableHash(seed) {
   return raw - Math.floor(raw);
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * clamp01(t);
+}
+
+function easeOutCubic(t) {
+  const x = 1 - clamp01(t);
+  return 1 - x * x * x;
+}
+
+function easeInCubic(t) {
+  const x = clamp01(t);
+  return x * x * x;
+}
+
 export class GameRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -357,6 +375,12 @@ export class GameRenderer {
     this.upgradeGlyphImageCache = new Map();
     this.goldResourceTrails = [];
     this.powerupTrails = [];
+    this.barracksDoorActors = { left: null, right: null };
+    this.prevBarracksRollState = {
+      left: { ttl: 0, key: '' },
+      right: { ttl: 0, key: '' },
+    };
+    this.barracksDoorStatePrimed = false;
     this.treasurePileState = {
       left: { items: [], lastGold: 0 },
       right: { items: [], lastGold: 0 },
@@ -394,6 +418,12 @@ export class GameRenderer {
       this.cardTextFitCache.clear();
       this.goldResourceTrails.length = 0;
       this.powerupTrails.length = 0;
+      this.barracksDoorActors = { left: null, right: null };
+      this.prevBarracksRollState = {
+        left: { ttl: 0, key: '' },
+        right: { ttl: 0, key: '' },
+      };
+      this.barracksDoorStatePrimed = false;
       this.treasurePileState.left = { items: [], lastGold: 0 };
       this.treasurePileState.right = { items: [], lastGold: 0 };
     }
@@ -4566,8 +4596,11 @@ export class GameRenderer {
     }
 
     const barracksCounts = this.buildBarracksActiveCounts(snapshot);
-    const leftBarracksDoorPreview = this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left);
-    const rightBarracksDoorPreview = this.drawBarracks('right', snapshot.right, world, snapshot, barracksCounts.right);
+    const barracksUi = {
+      left: this.drawBarracks('left', snapshot.left, world, snapshot, barracksCounts.left),
+      right: this.drawBarracks('right', snapshot.right, world, snapshot, barracksCounts.right),
+    };
+    this.updateBarracksDoorActors(snapshot, barracksUi, dt);
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
@@ -4589,8 +4622,8 @@ export class GameRenderer {
       snapshot.right,
       rightPulls
     );
-    this.drawBarracksBuilding('left', world, leftBarracksDoorPreview);
-    this.drawBarracksBuilding('right', world, rightBarracksDoorPreview);
+    this.drawBarracksBuilding('left', world, barracksUi.left);
+    this.drawBarracksBuilding('right', world, barracksUi.right);
     for (let i = 0; i < leftPulls.length; i += 1) {
       const timing = this.archerShotTiming(snapshot.left, i, leftPulls.length, snapshot.mode);
       this.drawShotRing(world.towerLeftX, world.towerY - 185 - i * 60, timing.cd, TEAM_COLORS.left.ring, timing.interval);
@@ -6624,12 +6657,169 @@ export class GameRenderer {
     return bestRow;
   }
 
-  drawBarracksDoorPreview(doorX, doorY, doorW, doorH, row, side = 'left') {
+  barracksDoorScaleForType(specialType, actorMode = false) {
+    const base = specialType === 'balloon'
+      ? 0.26
+      : (specialType === 'dragon' ? 0.28 : (specialType === 'stonegolem' ? 0.34 : 0.4));
+    return actorMode && specialType === 'super' ? base * 0.95 : base;
+  }
+
+  barracksDoorSpriteY(doorY, doorH, specialType) {
+    if (specialType === 'balloon') return doorY + doorH - 1;
+    if (specialType === 'dragon') return doorY + doorH - 7;
+    return doorY + doorH - 5;
+  }
+
+  barracksRowForSpecialType(rows = [], specialType = null) {
+    if (!specialType) return null;
+    for (const row of rows) {
+      if ((ROW_TO_SPECIAL_TYPE[row?.type] || null) === specialType) return row;
+    }
+    return null;
+  }
+
+  updateBarracksDoorActors(snapshot, barracksUi = null, dt = 0) {
+    const sideNames = ['left', 'right'];
+    if (!this.barracksDoorStatePrimed) {
+      for (const side of sideNames) {
+        const sideState = snapshot?.[side] || null;
+        const rollType = typeof sideState?.specialRollType === 'string' ? sideState.specialRollType : null;
+        const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
+        const rollChance = Number(sideState?.specialRollChance);
+        const rollValue = Number(sideState?.specialRollValue);
+        this.prevBarracksRollState[side] = {
+          ttl: Math.max(0, Number(sideState?.specialRollTtl) || 0),
+          key: rollType && rollSuccess != null
+            ? `${rollType}:${rollSuccess ? 1 : 0}:${Number.isFinite(rollChance) ? rollChance.toFixed(4) : 'n'}:${Number.isFinite(rollValue) ? rollValue.toFixed(4) : 'n'}`
+            : '',
+        };
+      }
+      this.barracksDoorStatePrimed = true;
+      return;
+    }
+
+    for (const side of sideNames) {
+      const actor = this.barracksDoorActors[side];
+      if (actor) {
+        actor.age += Math.max(0, Number(dt) || 0);
+        if (actor.age >= actor.duration) this.barracksDoorActors[side] = null;
+      }
+
+      const sideState = snapshot?.[side] || null;
+      const rollTtl = Math.max(0, Number(sideState?.specialRollTtl) || 0);
+      const rollType = typeof sideState?.specialRollType === 'string' ? sideState.specialRollType : null;
+      const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
+      const rollChance = Number(sideState?.specialRollChance);
+      const rollValue = Number(sideState?.specialRollValue);
+      const rollKey = rollType && rollSuccess != null
+        ? `${rollType}:${rollSuccess ? 1 : 0}:${Number.isFinite(rollChance) ? rollChance.toFixed(4) : 'n'}:${Number.isFinite(rollValue) ? rollValue.toFixed(4) : 'n'}`
+        : '';
+      const prev = this.prevBarracksRollState[side] || { ttl: 0, key: '' };
+      const freshRoll = Boolean(
+        rollType
+        && rollSuccess != null
+        && rollTtl > 0
+        && (rollTtl > prev.ttl + 0.35 || (rollTtl >= 5.7 && rollKey && rollKey !== prev.key))
+      );
+      if (freshRoll) {
+        const row = this.barracksRowForSpecialType(barracksUi?.[side]?.rows, rollType);
+        this.barracksDoorActors[side] = {
+          side,
+          type: rollType,
+          level: Math.max(1, Number(row?.level) || 1),
+          success: Boolean(rollSuccess),
+          age: 0,
+          duration: rollSuccess ? 0.92 : 1.16,
+          seed: Math.random() * 1000,
+        };
+      }
+      this.prevBarracksRollState[side] = { ttl: rollTtl, key: rollKey };
+    }
+  }
+
+  drawBarracksDoorActor(doorX, doorY, doorW, doorH, actor, side = 'left', actorBounds = null) {
+    const specialType = typeof actor?.type === 'string' ? actor.type : null;
+    const mini = this.miniFailedSpecialMinion(specialType, side, actor?.level);
+    if (!mini) return;
+
+    const { ctx } = this;
+    const dir = side === 'left' ? 1 : -1;
+    const progress = clamp01(actor.age / Math.max(0.001, Number(actor.duration) || 1));
+    const scale = this.barracksDoorScaleForType(specialType, true);
+    const spriteBaseX = doorX + doorW * 0.5;
+    const spriteBaseY = this.barracksDoorSpriteY(doorY, doorH, specialType);
+    const stride = Math.abs(Math.sin(actor.age * (actor.success ? 20 : 17) + actor.seed * 0.13));
+    const frontY = Number.isFinite(actorBounds?.frontY) ? actorBounds.frontY : spriteBaseY;
+    let offsetX = 0;
+    let offsetY = stride * 0.9;
+    let alpha = 1;
+    let tilt = 0;
+    let squashX = 1;
+    let squashY = 1;
+    let flip = false;
+
+    if (actor.success) {
+      const runP = easeOutCubic(progress / 0.86);
+      const settleP = clamp01((progress - 0.66) / 0.34);
+      offsetX = dir * lerp(-2, 60, runP);
+      offsetY = lerp(0, frontY - spriteBaseY, runP) + Math.sin(runP * Math.PI * 3.4) * 0.35 + stride * 0.7;
+      alpha = 1 - settleP * 0.18;
+      tilt = dir * (0.05 + Math.sin(runP * Math.PI) * 0.03);
+      squashX = 1 + stride * 0.03;
+      squashY = 1 - stride * 0.02;
+    } else {
+      const runP = easeInCubic(progress);
+      offsetX = -dir * lerp(0, 76, runP);
+      offsetY = lerp(0, 3, runP) + stride * 0.72;
+      alpha = 1 - clamp01((progress - 0.68) / 0.32);
+      flip = true;
+      tilt = -dir * (0.08 + runP * 0.08);
+      squashX = 1 + stride * 0.035;
+      squashY = 1 - stride * 0.026;
+    }
+
+    const spriteX = spriteBaseX + offsetX;
+    const spriteY = spriteBaseY + offsetY;
+    mini.x = spriteX;
+    mini.y = spriteY;
+    mini.speed = actor.success ? 96 : 84;
+    mini.id = Math.round(actor.seed * 1000);
+
+    const shadowW = Math.max(6, 24 * scale);
+    const shadowH = Math.max(2.2, 8 * scale);
+
+    ctx.save();
+    const clipX = Number.isFinite(actorBounds?.clipX) ? actorBounds.clipX : (doorX - 14);
+    const clipY = Number.isFinite(actorBounds?.clipY) ? actorBounds.clipY : (doorY + 1);
+    const clipW = Number.isFinite(actorBounds?.clipW) ? actorBounds.clipW : (doorW + 28);
+    const clipH = Number.isFinite(actorBounds?.clipH) ? actorBounds.clipH : (doorH + 8);
+    ctx.beginPath();
+    ctx.rect(clipX, clipY, clipW, clipH);
+    ctx.clip();
+    ctx.globalAlpha = clamp01(alpha);
+    ctx.fillStyle = this.withAlpha('#000000', actor.success ? 0.16 : 0.14);
+    ctx.beginPath();
+    ctx.ellipse(spriteX, doorY + doorH - 1.5, shadowW, shadowH, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.translate(spriteX, spriteY);
+    if (flip) ctx.scale(-1, 1);
+    ctx.rotate(tilt);
+    ctx.scale(scale * squashX, scale * squashY);
+    ctx.translate(-spriteX, -spriteY);
+    this.drawMinionSprite(mini, { showHud: false, allowEffects: false });
+    ctx.restore();
+  }
+
+  drawBarracksDoorPreview(doorX, doorY, doorW, doorH, row, side = 'left', actor = null, actorBounds = null) {
     const { ctx } = this;
     ctx.fillStyle = '#151e2e';
     ctx.fillRect(doorX, doorY, doorW, doorH);
     ctx.fillStyle = '#090d15';
     ctx.fillRect(doorX + 1, doorY + doorH - 4, doorW - 2, 3);
+    if (actor) {
+      this.drawBarracksDoorActor(doorX, doorY, doorW, doorH, actor, side, actorBounds);
+      return;
+    }
     if (!row) return;
 
     const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
@@ -6639,13 +6829,9 @@ export class GameRenderer {
 
     const now = performance.now() * 0.001;
     const bob = Math.sin(now * 2.2 + (side === 'right' ? 1.7 : 0.4)) * 0.8;
-    const scale = specialType === 'balloon'
-      ? 0.26
-      : (specialType === 'dragon' ? 0.28 : (specialType === 'stonegolem' ? 0.34 : 0.4));
+    const scale = this.barracksDoorScaleForType(specialType);
     const spriteX = doorX + doorW * 0.5;
-    const spriteY = specialType === 'balloon'
-      ? doorY + doorH - 1
-      : (specialType === 'dragon' ? doorY + doorH - 7 : doorY + doorH - 5);
+    const spriteY = this.barracksDoorSpriteY(doorY, doorH, specialType);
 
     ctx.save();
     ctx.beginPath();
@@ -6660,7 +6846,7 @@ export class GameRenderer {
     ctx.restore();
   }
 
-  drawBarracksBuilding(side, world, doorPreviewRow = null) {
+  drawBarracksBuilding(side, world, barracksUi = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
     const towerX = side === 'right' ? (Number(world?.towerRightX) || 0) : (Number(world?.towerLeftX) || 0);
@@ -6682,7 +6868,28 @@ export class GameRenderer {
     ctx.strokeStyle = this.withAlpha('#f3e4bf', 0.28);
     ctx.lineWidth = 1;
     ctx.strokeRect(bx - bodyW / 2 + 9, by - bodyH + 11, bodyW - 18, bodyH - 22);
-    this.drawBarracksDoorPreview(bx - doorW / 2, by - doorH, doorW, doorH, doorPreviewRow, side);
+    const actorClipPaddingNear = 44;
+    const actorClipPaddingFar = 94;
+    const actorClipX = side === 'left'
+      ? bx - bodyW / 2 - actorClipPaddingNear
+      : bx - bodyW / 2 - actorClipPaddingFar;
+    const actorClipW = bodyW + actorClipPaddingNear + actorClipPaddingFar;
+    this.drawBarracksDoorPreview(
+      bx - doorW / 2,
+      by - doorH,
+      doorW,
+      doorH,
+      barracksUi?.doorPreviewRow || null,
+      side,
+      this.barracksDoorActors[side] || null,
+      {
+        clipX: actorClipX,
+        clipY: by - bodyH - 4,
+        clipW: actorClipW,
+        clipH: bodyH + 18,
+        frontY: by - 5,
+      }
+    );
 
     ctx.fillStyle = '#f5e6b9';
     ctx.font = 'bold 9px sans-serif';
@@ -6879,7 +7086,7 @@ export class GameRenderer {
     // ctx.font = '8px sans-serif';
     // ctx.textAlign = 'left';
     // ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
-    return doorPreviewRow;
+    return { rows, doorPreviewRow };
   }
 
   drawSpecialRollOutcomeBar(x, y, w, h, chance, roll, success) {
