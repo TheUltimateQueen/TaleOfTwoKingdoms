@@ -4633,24 +4633,6 @@ export class GameRenderer {
     const gameOverCinematicActive = this.isGameOverCinematicActive(now);
     if (gameOverCinematicActive) this.drawTowerCollapseCinematic(world, now);
 
-    if (snapshot.gameOver && !gameOverCinematicActive) {
-      const leftAcc = arrowAccuracy(snapshot.left);
-      const rightAcc = arrowAccuracy(snapshot.right);
-      const leftName = this.sideLabel('left');
-      const rightName = this.sideLabel('right');
-      ctx.fillStyle = '#00000099';
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#fff';
-      ctx.font = '56px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${this.winnerLabel(snapshot.winner)} Wins`, w / 2, h / 2 - 12);
-      ctx.font = '24px sans-serif';
-      ctx.fillText(`${leftName} Arrow Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows fired)`, w / 2, h / 2 + 34);
-      ctx.fillText(`${rightName} Arrow Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows fired)`, w / 2, h / 2 + 68);
-      ctx.font = '20px sans-serif';
-      ctx.fillText('Arrow Accuracy = hits / arrows fired', w / 2, h / 2 + 98);
-      ctx.fillText('Host can press Restart Match to play again with same room', w / 2, h / 2 + 128);
-    }
   }
 
   emitHitParticles(typeOrEvent, x, y, side) {

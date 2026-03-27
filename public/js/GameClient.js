@@ -33,6 +33,7 @@ const PRESIDENT_VOICE_CLIPS = [
 const HERO_VOICE_MANIFEST_URL = '/api/audio/hero-voices';
 const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
 const GAME_OVER_CINEMATIC_MS = 4000;
+const POST_GAME_PANEL_FADE_MS = 4000;
 const HOST_TICK_MS = 1000 / 30;
 const HOST_STATE_EMIT_MS = 50;
 const LOCAL_KEYBOARD_AIM_SPEED = 0.51;
@@ -420,6 +421,7 @@ export class GameClient {
     this.rightHud = document.getElementById('rightHud');
     this.centerHud = document.getElementById('centerHud');
     this.postGamePanel = document.getElementById('postGamePanel');
+    this.postGamePanelHideTimeout = null;
     this.postGameTitle = document.getElementById('postGameTitle');
     this.postGameStats = document.getElementById('postGameStats');
     this.postGameExplain = document.getElementById('postGameExplain');
@@ -1361,11 +1363,15 @@ export class GameClient {
   postCanvasContext(canvas) {
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const width = Math.max(320, Math.round(rect.width || canvas.width || 320));
-    const height = Math.max(160, Math.round(rect.height || canvas.height || 180));
+    const baseWidth = Math.max(1, Number(canvas.getAttribute('width')) || canvas.width || 320);
+    const baseHeight = Math.max(1, Number(canvas.getAttribute('height')) || canvas.height || 180);
+    const aspect = baseHeight / baseWidth;
+    const width = Math.max(320, Math.round(canvas.clientWidth || rect.width || baseWidth));
+    const height = Math.max(160, Math.round(width * aspect));
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const targetW = Math.max(1, Math.round(width * dpr));
     const targetH = Math.max(1, Math.round(height * dpr));
+    if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
     if (canvas.width !== targetW || canvas.height !== targetH) {
       canvas.width = targetW;
       canvas.height = targetH;
@@ -1833,28 +1839,28 @@ export class GameClient {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
       const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const active = i === this.postActiveUpgradeIndex;
-      if (active) {
-        ctx.fillStyle = colorWithAlpha(color, 0.22);
-        ctx.beginPath();
-        ctx.arc(px, py, 13.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.strokeStyle = colorWithAlpha(color, active ? 1 : 0.95);
-      ctx.lineWidth = active ? 3 : 2;
+      const highlightGold = '#ffeb3b';
+      const baseRadius = 8.5;
+      const innerRadius = 6.5;
+
+      // No size change: active state just changes stroke color.
+      ctx.strokeStyle = active ? highlightGold : colorWithAlpha(color, 0.95);
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(px, py, active ? 10.5 : 8.5, 0, Math.PI * 2);
+      ctx.arc(px, py, baseRadius, 0, Math.PI * 2);
       ctx.stroke();
+
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px, py, active ? 8.5 : 7, 0, Math.PI * 2);
+      ctx.arc(px, py, innerRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#07101d';
-      ctx.font = `${active ? 12 : 11}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.font = '12px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(icon, px, py + (active ? 4 : 3.5));
-      ctx.fillStyle = colorWithAlpha(color, active ? 1 : 0.88);
-      ctx.font = `${active ? 10 : 9}px monospace`;
-      ctx.fillText(code, px, py - (active ? 12.5 : 10));
+      ctx.fillText(icon, px, py + 4);
+      ctx.fillStyle = colorWithAlpha(color, 0.88);
+      ctx.font = '9px monospace';
+      ctx.fillText(code, px, py - 10);
     }
 
     ctx.save();
@@ -2667,7 +2673,31 @@ export class GameClient {
       && (snapshot?.started || this.gameOverLatched)
     );
     const wasHidden = this.postGamePanel.classList.contains('hidden');
-    this.postGamePanel.classList.toggle('hidden', !canShow);
+
+    if (this.postGamePanelHideTimeout) {
+      clearTimeout(this.postGamePanelHideTimeout);
+      this.postGamePanelHideTimeout = null;
+    }
+
+    if (canShow) {
+      if (wasHidden) {
+        this.postGamePanel.classList.remove('hidden');
+        // Force layout so transition can run.
+        void this.postGamePanel.offsetWidth;
+      }
+      this.postGamePanel.classList.add('showing');
+    } else {
+      this.postGamePanel.classList.remove('showing');
+      if (!wasHidden) {
+        this.postGamePanelHideTimeout = setTimeout(() => {
+          if (!this.postGamePanel.classList.contains('showing')) {
+            this.postGamePanel.classList.add('hidden');
+          }
+          this.postGamePanelHideTimeout = null;
+        }, POST_GAME_PANEL_FADE_MS);
+      }
+    }
+
     if (!canShow || !snapshot) {
       this.postGameReportData = null;
       this.postGameRenderedKey = null;
@@ -2751,8 +2781,9 @@ export class GameClient {
         this.nextGameOverBoomAtMs = now + 420 + Math.random() * 170;
       }
 
-      if (!this.isController && this.centerHud && !revealReady) {
-        this.centerHud.textContent = 'Tower collapsing...';
+      if (!this.isController && this.centerHud) {
+        this.centerHud.textContent = '';
+        this.centerHud.style.opacity = '1';
       }
 
       this.setPostGamePanel(revealReady, snapshot);
@@ -2866,10 +2897,7 @@ export class GameClient {
     this.leftHud.textContent = `${leftRoster || sideDisplayName('left', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | KillGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
     this.rightHud.textContent = `${rightRoster || sideDisplayName('right', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | KillGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
     if (s.gameOver) {
-      const leftSummary = arrowAccuracySummary(sideDisplayName('left', this.state.themeMode), s.left);
-      const rightSummary = arrowAccuracySummary(sideDisplayName('right', this.state.themeMode), s.right);
-      const localHint = this.localKeyboardTestActive ? ' | Keyboard Mode' : '';
-      this.centerHud.textContent = `Final | Winner ${sideVictoryLabel(s.winner, this.state.themeMode)}${localHint} | ${leftSummary} | ${rightSummary}`;
+      this.centerHud.textContent = '';
       return;
     }
     const localHint = this.localKeyboardTestActive ? ` | ${this.keyboardControlsLegendText()}` : '';
