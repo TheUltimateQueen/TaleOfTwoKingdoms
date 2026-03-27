@@ -101,6 +101,30 @@ const UPGRADE_CATEGORY_BY_TYPE = {
   superMinionLevel: 'special',
 };
 
+const UPGRADE_TWEMOJI_GLYPHS = {
+  resourceLevel: { src: '/icons/twemoji/1f4b0.svg', scale: 2.08, yOffset: 0.03 },
+  bountyLevel: { src: '/icons/twemoji/1f3af.svg', scale: 1.98, yOffset: 0.02 },
+  specialRateLevel: { src: '/icons/twemoji/2728.svg', scale: 2.02, yOffset: 0.01 },
+  balloonLevel: { src: '/icons/twemoji/1f388.svg', scale: 2.08, yOffset: 0.01 },
+  dragonLevel: { src: '/icons/twemoji/1f409.svg', scale: 2, yOffset: 0.02 },
+  dragonSuperBreathLevel: { src: '/icons/twemoji/1f525.svg', scale: 2.04, yOffset: 0.02 },
+  monkHealCircleLevel: { src: '/icons/twemoji/1f49a.svg', scale: 1.98, yOffset: 0.02 },
+  necroExpertSummonerLevel: { src: '/icons/twemoji/2620.svg', scale: 1.9, yOffset: 0.02 },
+  riderSuperHorseLevel: { src: '/icons/twemoji/1f40e.svg', scale: 2, yOffset: 0.02 },
+  diggerGoldFinderLevel: { src: '/icons/twemoji/26cf.svg', scale: 1.88, yOffset: 0.01 },
+  gunnerSkyCannonLevel: { src: '/icons/twemoji/1f4a3.svg', scale: 2, yOffset: 0.01 },
+  presidentExecutiveOrderLevel: { src: '/icons/twemoji/1f4dc.svg', scale: 1.94, yOffset: 0.02 },
+  superMinionLevel: { src: '/icons/twemoji/2b50.svg', scale: 1.98, yOffset: 0.01 },
+};
+
+const SHOT_POWER_TWEMOJI_GLYPHS = {
+  multiShot: { src: '/icons/twemoji/1f531.svg', scale: 1.56, yOffset: 0.05 },
+  ultraShot: { src: '/icons/twemoji/1f4a5.svg', scale: 1.54, yOffset: 0.02 },
+  pierceShot: { src: '/icons/twemoji/1f5e1.svg', scale: 1.5, yOffset: 0.03 },
+  flameShot: { src: '/icons/twemoji/1f525.svg', scale: 1.5, yOffset: 0.03 },
+  flareShot: { src: '/icons/twemoji/2600.svg', scale: 1.48, yOffset: 0.02 },
+};
+
 const UPGRADE_CATEGORY_STYLE = {
   arrow: {
     tag: 'ARROW',
@@ -189,6 +213,24 @@ const ROW_TO_SPECIAL_TYPE = {
   balloon: 'balloon',
   super: 'super',
 };
+
+const BARRACKS_ROW_GLYPH_BY_TYPE = {
+  militia: 'unitLevel',
+  necro: 'necroExpertSummonerLevel',
+  gunner: 'gunnerSkyCannonLevel',
+  rider: 'riderSuperHorseLevel',
+  digger: 'diggerGoldFinderLevel',
+  monk: 'monkHealCircleLevel',
+  stonegolem: 'unitHpLevel',
+  shield: 'shieldDarkMetalLevel',
+  hero: 'powerLevel',
+  president: 'presidentExecutiveOrderLevel',
+  balloon: 'balloonLevel',
+  dragon: 'dragonLevel',
+  super: 'superMinionLevel',
+  candle: 'dragonSuperBreathLevel',
+};
+
 const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
   Object.fromEntries(SPECIAL_SPAWN_QUEUE_ORDER.map((type, index) => [type, index]))
 );
@@ -309,6 +351,7 @@ export class GameRenderer {
     this.groundMinionBuffer = [];
     this.cardTextFitCache = new Map();
     this.cardTextFitCacheMaxEntries = 1024;
+    this.upgradeGlyphImageCache = new Map();
     this.goldResourceTrails = [];
     this.powerupTrails = [];
     this.treasurePileState = {
@@ -5685,6 +5728,7 @@ export class GameRenderer {
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
+    ctx.globalAlpha = 0.95;
     ctx.fillStyle = this.withAlpha(palette.soft, 1);
     ctx.beginPath();
     ctx.arc(ex, ey, 2.5 + strength * 3.5, 0, Math.PI * 2);
@@ -5702,6 +5746,7 @@ export class GameRenderer {
 
     const px = ox + Math.cos(angle) * 40;
     const py = oy + Math.sin(angle) * 40;
+    ctx.globalAlpha = guideOpacity;
     ctx.fillStyle = this.withAlpha('#ffffff', 1);
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
@@ -5716,6 +5761,27 @@ export class GameRenderer {
     const g = (n >> 8) & 255;
     const b = n & 255;
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  mixColor(hexA, hexB = '#ffffff', weightB = 0.5) {
+    const parseHex = (hex) => {
+      const clean = String(hex || '').replace('#', '');
+      const normalized = clean.length === 3
+        ? clean.split('').map(ch => ch + ch).join('')
+        : clean.padEnd(6, '0').slice(0, 6);
+      const n = Number.parseInt(normalized, 16);
+      return {
+        r: (n >> 16) & 255,
+        g: (n >> 8) & 255,
+        b: n & 255,
+      };
+    };
+    const a = parseHex(hexA);
+    const b = parseHex(hexB);
+    const wb = Math.max(0, Math.min(1, Number(weightB) || 0));
+    const wa = 1 - wb;
+    const toHex = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return `#${toHex(a.r * wa + b.r * wb)}${toHex(a.g * wa + b.g * wb)}${toHex(a.b * wa + b.b * wb)}`;
   }
 
   drawHealthBarNotches(x, y, w, h, maxHp) {
@@ -5800,6 +5866,18 @@ export class GameRenderer {
     ctx.lineJoin = 'round';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+
+    const emojiSpec = UPGRADE_TWEMOJI_GLYPHS[type] || null;
+    if (emojiSpec) {
+      const image = this.getUpgradeGlyphImage(emojiSpec.src);
+      if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        const drawSize = Math.max(10, s * emojiSpec.scale);
+        const offsetY = s * emojiSpec.yOffset;
+        ctx.drawImage(image, -drawSize / 2, offsetY - drawSize / 2, drawSize, drawSize);
+        ctx.restore();
+        return;
+      }
+    }
 
     switch (type) {
       case 'arrowLevel': {
@@ -6097,6 +6175,18 @@ export class GameRenderer {
     }
 
     ctx.restore();
+  }
+
+  getUpgradeGlyphImage(src) {
+    if (!src) return null;
+    let image = this.upgradeGlyphImageCache.get(src) || null;
+    if (image) return image;
+    image = new Image();
+    image.decoding = 'async';
+    image.loading = 'eager';
+    image.src = src;
+    this.upgradeGlyphImageCache.set(src, image);
+    return image;
   }
 
   spawnEveryForSide(sideState) {
@@ -6677,11 +6767,11 @@ export class GameRenderer {
       if (failType && failTtl > 0) this.drawSpecialRollTypeBadge(failType, px + panelW - 20, py + 56, side);
     }
 
-    const colLabelX = px + 24;
-    const colStatusX = px + 62;
-    const colChanceX = px + 86;
-    const colMetaX = px + 116;
-    const barX = px + 162;
+    const colLabelX = px + 28;
+    const colStatusX = px + 66;
+    const colChanceX = px + 90;
+    const colMetaX = px + 120;
+    const barX = px + 166;
     const barYOff = -8;
     const barW = 78;
     const barH = 6;
@@ -6693,10 +6783,21 @@ export class GameRenderer {
       ctx.fillStyle = i % 2 === 0 ? '#162033a8' : '#121a2ba8';
       ctx.fillRect(px + 6, ry - 10, panelW - 12, rowH - 1);
 
-      ctx.fillStyle = row.color;
+      const rowGlyph = BARRACKS_ROW_GLYPH_BY_TYPE[row.type] || 'unitLevel';
+      const iconX = px + 16;
+      const iconY = ry - 2;
+      ctx.fillStyle = '#0a101bdd';
       ctx.beginPath();
-      ctx.arc(px + 16, ry - 2, 3.5, 0, Math.PI * 2);
+      ctx.arc(iconX, iconY, 7.4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = this.mixColor(row.color, '#ffffff', 0.84);
+      ctx.beginPath();
+      ctx.arc(iconX, iconY, 6.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = this.withAlpha('#f3f7ff', 0.38);
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+      this.drawUpgradeGlyph(rowGlyph, iconX, iconY, 5.8, '#1f2230');
 
       ctx.fillStyle = '#eaf0fc';
       ctx.font = '9px sans-serif';
@@ -7699,7 +7800,7 @@ export class GameRenderer {
     const cols = 2;
     const iconStepX = 21;
     const iconStepY = 20;
-    const iconR = 8;
+    const iconR = 10;
     const groupGap = 8;
     const startX = x + badgeDir * 30;
     let startY = y - 126;
@@ -7719,17 +7820,17 @@ export class GameRenderer {
 
         ctx.fillStyle = '#09101ddd';
         ctx.beginPath();
-        ctx.arc(bx, by, iconR + 2.5, 0, Math.PI * 2);
+        ctx.arc(bx, by, iconR + 2.75, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = badge.color;
+        ctx.fillStyle = this.mixColor(badge.color, '#ffffff', 0.82);
         ctx.beginPath();
         ctx.arc(bx, by, iconR, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = this.withAlpha(group.style.border, 0.86);
         ctx.lineWidth = 1.15;
         ctx.stroke();
-        this.drawUpgradeGlyph(badge.type, bx, by, 6.2, '#1f2230');
+        this.drawUpgradeGlyph(badge.type, bx, by, 8.2, '#1f2230');
 
         if (badge.count > 1) {
           const tx = bx + badgeDir * 9;
@@ -7883,16 +7984,16 @@ export class GameRenderer {
     const iconY = card.y - card.h / 2 + 10.5;
     ctx.fillStyle = '#0c1526d4';
     ctx.beginPath();
-    ctx.arc(iconX, iconY, 8.8, 0, Math.PI * 2);
+    ctx.arc(iconX, iconY, 10.8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = style.badge;
+    ctx.fillStyle = this.mixColor(style.badge, '#ffffff', 0.82);
     ctx.beginPath();
-    ctx.arc(iconX, iconY, 7, 0, Math.PI * 2);
+    ctx.arc(iconX, iconY, 9.1, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = this.withAlpha(style.border, 0.92);
     ctx.lineWidth = 1.1;
     ctx.stroke();
-    this.drawUpgradeGlyph(card.type, iconX, iconY, 5.8, '#1f2230');
+    this.drawUpgradeGlyph(card.type, iconX, iconY, 8, '#1f2230');
 
     ctx.fillStyle = style.hint;
     ctx.font = 'bold 7px sans-serif';
@@ -7949,7 +8050,19 @@ export class GameRenderer {
     ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Increase icon scale inside circle (larger for visibility)
+    const emojiSpec = SHOT_POWER_TWEMOJI_GLYPHS[powerType] || null;
+    if (emojiSpec) {
+      const image = this.getUpgradeGlyphImage(emojiSpec.src);
+      if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        const drawSize = Math.max(12, radius * emojiSpec.scale);
+        const offsetY = radius * emojiSpec.yOffset;
+        ctx.drawImage(image, -drawSize / 2, offsetY - drawSize / 2, drawSize, drawSize);
+        ctx.restore();
+        return;
+      }
+    }
+
+    // Fallback custom shapes while SVG is still loading.
     const iconScale = radius * 1.35;
     ctx.fillStyle = fg;
     if (powerType === 'multiShot') {
