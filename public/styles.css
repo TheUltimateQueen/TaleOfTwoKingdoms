@@ -1100,8 +1100,25 @@ button:hover {
 }
 
 .post-upgrade-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
   font-size: 14px;
   font-weight: 700;
+}
+
+.post-upgrade-icon-img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.post-upgrade-icon-glyph {
+  display: block;
+  line-height: 1;
 }
 
 .post-upgrade-label {

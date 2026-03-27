@@ -136,6 +136,21 @@ const POST_UPGRADE_ICONS = {
   presidentExecutiveOrderLevel: '📜',
   superMinionLevel: '⭐',
 };
+const POST_UPGRADE_TWEMOJI = {
+  resourceLevel: { src: '/icons/twemoji/1f4b0.svg', scale: 1.98, yOffset: 0.03 },
+  bountyLevel: { src: '/icons/twemoji/1f3af.svg', scale: 1.9, yOffset: 0.02 },
+  specialRateLevel: { src: '/icons/twemoji/2728.svg', scale: 1.94, yOffset: 0.01 },
+  balloonLevel: { src: '/icons/twemoji/1f388.svg', scale: 1.98, yOffset: 0.01 },
+  dragonLevel: { src: '/icons/twemoji/1f409.svg', scale: 1.9, yOffset: 0.02 },
+  dragonSuperBreathLevel: { src: '/icons/twemoji/1f525.svg', scale: 1.94, yOffset: 0.02 },
+  monkHealCircleLevel: { src: '/icons/twemoji/1f49a.svg', scale: 1.9, yOffset: 0.02 },
+  necroExpertSummonerLevel: { src: '/icons/twemoji/2620.svg', scale: 1.82, yOffset: 0.02 },
+  riderSuperHorseLevel: { src: '/icons/twemoji/1f40e.svg', scale: 1.92, yOffset: 0.02 },
+  diggerGoldFinderLevel: { src: '/icons/twemoji/26cf.svg', scale: 1.8, yOffset: 0.01 },
+  gunnerSkyCannonLevel: { src: '/icons/twemoji/1f4a3.svg', scale: 1.92, yOffset: 0.01 },
+  presidentExecutiveOrderLevel: { src: '/icons/twemoji/1f4dc.svg', scale: 1.86, yOffset: 0.02 },
+  superMinionLevel: { src: '/icons/twemoji/2b50.svg', scale: 1.9, yOffset: 0.01 },
+};
 const POST_UPGRADE_FEED_MAX_EVENTS = 40;
 const POST_GAME_BREAD_PUNS = [
   'Bread won. Rice is now in loaf spirits.',
@@ -329,6 +344,7 @@ export class GameClient {
     this.postActiveUpgradeIndex = -1;
     this.postUpgradeScrubRatio = 0;
     this.postUpgradeScrubRaf = 0;
+    this.postGameIconImageCache = new Map();
     this.controllerRematch = {
       gameOver: false,
       requested: false,
@@ -1665,6 +1681,52 @@ export class GameClient {
     }).join('');
   }
 
+  getPostGameIconImage(src) {
+    if (!src) return null;
+    let image = this.postGameIconImageCache.get(src) || null;
+    if (!image) {
+      image = new Image();
+      image.decoding = 'async';
+      image.loading = 'eager';
+      image.addEventListener('load', () => {
+        if (this.postGameReportData) this.drawPostEconChart(this.postGameReportData);
+      });
+      image.src = src;
+      this.postGameIconImageCache.set(src, image);
+    }
+    return image;
+  }
+
+  renderPostUpgradeIconMarkup(type, sideColor) {
+    const emojiSpec = POST_UPGRADE_TWEMOJI[type] || null;
+    if (emojiSpec?.src) {
+      const safeSrc = escapeHtml(emojiSpec.src);
+      return `<img class="post-upgrade-icon-img" src="${safeSrc}" alt="" loading="lazy" decoding="async">`;
+    }
+    const fallbackIcon = POST_UPGRADE_ICONS[type] || (POST_UPGRADE_CODES[type] || 'UP');
+    const safeFallbackIcon = escapeHtml(fallbackIcon);
+    return `<span class="post-upgrade-icon-glyph" style="color:${sideColor}">${safeFallbackIcon}</span>`;
+  }
+
+  drawPostUpgradeChartIcon(ctx, type, x, y) {
+    const emojiSpec = POST_UPGRADE_TWEMOJI[type] || null;
+    if (emojiSpec?.src) {
+      const image = this.getPostGameIconImage(emojiSpec.src);
+      if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        const iconBase = 6.6;
+        const drawSize = Math.max(11, iconBase * emojiSpec.scale);
+        const offsetY = iconBase * emojiSpec.yOffset;
+        ctx.drawImage(image, x - drawSize / 2, y + offsetY - drawSize / 2, drawSize, drawSize);
+        return;
+      }
+    }
+    const fallbackIcon = POST_UPGRADE_ICONS[type] || (POST_UPGRADE_CODES[type] || 'UP');
+    ctx.fillStyle = '#07101d';
+    ctx.font = '12px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(fallbackIcon, x, y + 4);
+  }
+
   renderPostUpgradeFeed(report) {
     if (!this.postUpgradeTimeline) return;
     const upgrades = compactUpgradeFeedEvents(report?.upgrades);
@@ -1676,7 +1738,6 @@ export class GameClient {
     }
     this.postUpgradeTimeline.innerHTML = upgrades.map((event, index) => {
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
-      const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const level = Math.max(0, Number(event.level) || 0);
       const priorLevel = Math.max(0, level - 1);
       const label = upgradeLabelForLevel(event.type, priorLevel);
@@ -1688,14 +1749,14 @@ export class GameClient {
       const eventTime = Math.max(0, Number(event.t) || 0).toFixed(2);
       const title = `${sideLong} ${label} (Level ${level}) at ${eventTimeText}`;
       const safeTitle = escapeHtml(title);
-      const safeIcon = escapeHtml(icon);
       const safeSide = escapeHtml(side);
       const safeLabel = escapeHtml(label);
       const safeCode = escapeHtml(code);
       const safeEventTimeText = escapeHtml(eventTimeText);
+      const iconMarkup = this.renderPostUpgradeIconMarkup(event.type, sideColor);
       return `
         <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" data-event-index="${index}" title="${safeTitle}">
-          <span class="post-upgrade-icon" style="color:${sideColor}">${safeIcon}</span>
+          <span class="post-upgrade-icon">${iconMarkup}</span>
           <span class="post-upgrade-label"><span class="post-upgrade-side">${safeSide}</span> ${safeLabel} Lv ${level}</span>
           <span class="post-upgrade-time">${safeCode} ${safeEventTimeText}</span>
         </article>
@@ -1837,7 +1898,6 @@ export class GameClient {
       const py = Math.max(chart.y + 14, Math.min(chart.y + chart.h - 10, pyBase - 12 - (i % 2) * 10));
       const color = event.side === 'right' ? '#ff9ba2' : '#8dd0ff';
       const code = POST_UPGRADE_CODES[event.type] || 'UP';
-      const icon = POST_UPGRADE_ICONS[event.type] || '⬆️';
       const active = i === this.postActiveUpgradeIndex;
       const highlightGold = '#ffeb3b';
       const baseRadius = 8.5;
@@ -1854,10 +1914,7 @@ export class GameClient {
       ctx.beginPath();
       ctx.arc(px, py, innerRadius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#07101d';
-      ctx.font = '12px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(icon, px, py + 4);
+      this.drawPostUpgradeChartIcon(ctx, event.type, px, py);
       ctx.fillStyle = colorWithAlpha(color, 0.88);
       ctx.font = '9px monospace';
       ctx.fillText(code, px, py - 10);
