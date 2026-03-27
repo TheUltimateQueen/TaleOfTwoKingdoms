@@ -721,7 +721,7 @@ button:hover {
   border: 1px solid #a9c3e455;
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity 4000ms ease, transform 4000ms ease;
+  transition: opacity 250ms ease, transform 250ms ease;
   background:
     radial-gradient(circle at 9% 0%, #8cc5ff26 0%, transparent 34%),
     radial-gradient(circle at 92% 5%, #ffb7bd1f 0%, transparent 32%),
@@ -742,6 +742,7 @@ button:hover {
 #postGamePanel.showing {
   opacity: 1;
   transform: translateY(0);
+  transition: opacity 4000ms ease, transform 4000ms ease;
 }
 
 .post-game-overlay {

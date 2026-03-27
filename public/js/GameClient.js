@@ -33,7 +33,7 @@ const PRESIDENT_VOICE_CLIPS = [
 const HERO_VOICE_MANIFEST_URL = '/api/audio/hero-voices';
 const PRESIDENT_VOICE_MANIFEST_URL = '/api/audio/president-voices';
 const GAME_OVER_CINEMATIC_MS = 4000;
-const POST_GAME_PANEL_FADE_MS = 4000;
+const POST_GAME_PANEL_HIDE_MS = 250;
 const HOST_TICK_MS = 1000 / 30;
 const HOST_STATE_EMIT_MS = 50;
 const LOCAL_KEYBOARD_AIM_SPEED = 0.51;
@@ -2694,7 +2694,7 @@ export class GameClient {
             this.postGamePanel.classList.add('hidden');
           }
           this.postGamePanelHideTimeout = null;
-        }, POST_GAME_PANEL_FADE_MS);
+        }, POST_GAME_PANEL_HIDE_MS);
       }
     }
 
