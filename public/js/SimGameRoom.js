@@ -6739,7 +6739,7 @@ class GameRoom {
     let visualPower = power;
     let spawnY = TOWER_Y + (Math.random() * 110 - 55);
     if (failedSpecialType) {
-      hp *= 1.5;
+      hp *= 1.1;
       visualPower += 2;
     }
 
