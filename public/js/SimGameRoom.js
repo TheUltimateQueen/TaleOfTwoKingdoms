@@ -3545,6 +3545,9 @@ class GameRoom {
       balloon.balloonBombImpactPending = false;
       return;
     }
+    // Consume the pending flag up front so chained balloon deaths cannot
+    // re-enter the same impact while this explosion is still resolving.
+    balloon.balloonBombImpactPending = false;
     const blastRadius = Math.max(1, Number(balloon.balloonBombBlastRadius) || 0);
     const damage = Math.max(0, Number(balloon.balloonBombDamage) || 0);
     const enemySideName = balloon.balloonBombEnemySideName === 'left' ? 'left' : 'right';
@@ -3573,7 +3576,6 @@ class GameRoom {
     if (dx * dx + dy * dy <= (blastRadius + 44) * (blastRadius + 44)) {
       this.applyMinionTowerDamage(balloon, enemySideName, damage * towerDamageMult, enemyTowerX, enemyTowerY);
     }
-    balloon.balloonBombImpactPending = false;
     // Keep a short post-impact visual phase so the blast is readable.
     balloon.balloonBombFromX = impactX;
     balloon.balloonBombFromY = impactY;
@@ -6080,7 +6082,7 @@ class GameRoom {
 
   killMinion(index, killerSide = null, options = {}) {
     const minion = this.minions[index];
-    if (!minion) return;
+    if (!minion || minion.removed) return;
 
     const {
       goldScalar = 1,
@@ -6097,6 +6099,9 @@ class GameRoom {
     // If a balloon already dropped a bomb, ensure it still detonates even if the
     // carrier dies before the bomb timer reaches zero.
     if (minion.balloon && minion.balloonBombImpactPending) {
+      // Mark it removed before resolving the blast so a chained enemy balloon
+      // explosion cannot target and kill this same minion again mid-stack.
+      minion.removed = true;
       this.resolveBalloonBombImpact(minion);
     }
 
@@ -6105,7 +6110,8 @@ class GameRoom {
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
     this.queueMinionDeathGhost(minion, killerSide);
     minion.removed = true;
-    this.minions.splice(index, 1);
+    const currentIndex = this.minions.indexOf(minion);
+    if (currentIndex >= 0) this.minions.splice(currentIndex, 1);
 
     if (triggerExplosion && minion.explosive) {
       this.explodeMinion(
