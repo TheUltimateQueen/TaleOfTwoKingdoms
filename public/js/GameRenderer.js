@@ -4620,13 +4620,37 @@ export class GameRenderer {
       const pull = leftPulls[i];
       const leftAim = worldAimAngle('left', pull.pullX, pull.pullY);
       const leftStrength = launchStrengthFromPull('left', pull.pullX, pull.pullY);
-      this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength);
+      const slotPower = Array.isArray(snapshot.left?.pendingShotPowerBySlot)
+        ? snapshot.left.pendingShotPowerBySlot[i]
+        : null;
+      const activePower = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.power
+        : (Array.isArray(snapshot.left?.pendingShotPowerBySlot) ? null : snapshot.left?.pendingShotPower);
+      const activeShots = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.shots
+        : (Array.isArray(snapshot.left?.pendingShotPowerBySlot) ? 0 : snapshot.left?.pendingShotPowerShots);
+      this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength, {
+        shotPowerType: activePower,
+        shotPowerShots: activeShots,
+      });
     }
     for (let i = 0; i < rightPulls.length; i += 1) {
       const pull = rightPulls[i];
       const rightAim = worldAimAngle('right', pull.pullX, pull.pullY);
       const rightStrength = launchStrengthFromPull('right', pull.pullX, pull.pullY);
-      this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength);
+      const slotPower = Array.isArray(snapshot.right?.pendingShotPowerBySlot)
+        ? snapshot.right.pendingShotPowerBySlot[i]
+        : null;
+      const activePower = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.power
+        : (Array.isArray(snapshot.right?.pendingShotPowerBySlot) ? null : snapshot.right?.pendingShotPower);
+      const activeShots = (slotPower && Number(slotPower?.shots) > 0)
+        ? slotPower.shots
+        : (Array.isArray(snapshot.right?.pendingShotPowerBySlot) ? 0 : snapshot.right?.pendingShotPowerShots);
+      this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength, {
+        shotPowerType: activePower,
+        shotPowerShots: activeShots,
+      });
     }
     this.drawColliderDebugOverlay(snapshot, world);
 
@@ -4924,14 +4948,13 @@ export class GameRenderer {
       gravity = 560;
     }
 
-    if (type === 'powerup') {
-      const slot = Number.isFinite(event?.targetArcherSlot) ? event.targetArcherSlot : null;
-      const towerX = Number(eventWorld?.towerLeftX) || 190;
+    if (type === 'powerup' && Number.isFinite(event?.targetArcherSlot)) {
+      const slot = Math.max(0, Number(event.targetArcherSlot) || 0);
       const towerY = Number(eventWorld?.towerY) || 350;
-      const targetX = pside === 'left' ? (Number(eventWorld?.towerLeftX) || 190) + 35 : (Number(eventWorld?.towerRightX) || 1410) - 35;
-      const targetY = slot !== null && slot >= 0
-        ? (towerY - 56 - (slot * 78))
-        : (towerY - 56);
+      const targetX = pside === 'left'
+        ? (Number(eventWorld?.towerLeftX) || 190) + 35
+        : (Number(eventWorld?.towerRightX) || 1410) - 35;
+      const targetY = towerY - 56 - (slot * 78);
       this.spawnPowerupTrail(px, py, targetX, targetY, pside, 3);
     }
 
@@ -5639,6 +5662,8 @@ export class GameRenderer {
     const guideOpacity = Number.isFinite(options.opacity)
       ? Math.max(0, Math.min(1, options.opacity))
       : 0.45;
+    const shotPowerType = options.shotPowerType || null;
+    const shotPowerShots = Math.max(0, Number(options.shotPowerShots) || 0);
     const len = 90 + strength * 180;
     const lineW = 1.5 + strength * 3.5;
     const ex = ox + Math.cos(angle) * len;
@@ -5664,6 +5689,16 @@ export class GameRenderer {
     ctx.beginPath();
     ctx.arc(ex, ey, 2.5 + strength * 3.5, 0, Math.PI * 2);
     ctx.fill();
+
+    if (shotPowerType) {
+      this.drawShotPowerIcon(shotPowerType, ex, ey, 10, side);
+      if (shotPowerShots > 0) {
+        ctx.fillStyle = this.withAlpha('#ffffff', 0.92);
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${shotPowerShots}x`, ex, ey - 14);
+      }
+    }
 
     const px = ox + Math.cos(angle) * 40;
     const py = oy + Math.sin(angle) * 40;
@@ -7049,22 +7084,6 @@ export class GameRenderer {
         ctx.stroke();
       }
 
-      const slotPower = Array.isArray(sideState?.pendingShotPowerBySlot)
-        ? sideState.pendingShotPowerBySlot[idx]
-        : null;
-      const activeSlotPower = (slotPower && Number(slotPower?.shots) > 0)
-        ? slotPower.power
-        : (Array.isArray(sideState?.pendingShotPowerBySlot) ? null : sideState?.pendingShotPower);
-      const activeShots = (slotPower && Number(slotPower?.shots) > 0)
-        ? slotPower.shots
-        : (Array.isArray(sideState?.pendingShotPowerBySlot) ? 0 : sideState?.pendingShotPowerShots);
-      if (activeSlotPower) {
-        this.drawShotPowerIcon(activeSlotPower, archerX, archerY - 30, 12, side);
-        ctx.fillStyle = '#ffffffcc';
-        ctx.font = '10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${activeShots}x`, archerX, archerY - 18);
-      }
     }
 
     const hpW = 92;
