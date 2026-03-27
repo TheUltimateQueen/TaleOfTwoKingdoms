@@ -125,6 +125,8 @@ const SHOT_POWER_TWEMOJI_GLYPHS = {
   flareShot: { src: '/icons/twemoji/2600.svg', scale: 1.48, yOffset: 0.02 },
 };
 
+const BARRACKS_LOCK_TWEMOJI = '/icons/twemoji/1f512.svg';
+
 const UPGRADE_CATEGORY_STYLE = {
   arrow: {
     tag: 'ARROW',
@@ -6819,8 +6821,14 @@ export class GameRenderer {
         ctx.fillStyle = '#9fc8ef';
         ctx.fillText(`${rowChancePct}%`, colChanceX, ry + 1);
       } else if (!row.unlocked && row.type !== 'militia') {
-        ctx.fillStyle = '#7f8aa0';
-        ctx.fillText('LOCK', colChanceX, ry + 1);
+        const lockImage = this.getUpgradeGlyphImage(BARRACKS_LOCK_TWEMOJI);
+        if (lockImage?.complete && lockImage.naturalWidth > 0 && lockImage.naturalHeight > 0) {
+          const lockSize = 9;
+          ctx.drawImage(lockImage, colChanceX, ry - 8, lockSize, lockSize);
+        } else {
+          ctx.fillStyle = '#7f8aa0';
+          ctx.fillText('LOCK', colChanceX, ry + 1);
+        }
       }
       ctx.fillStyle = '#c7d4e9';
       const active = Math.max(0, Number(row.activeCount) || 0);

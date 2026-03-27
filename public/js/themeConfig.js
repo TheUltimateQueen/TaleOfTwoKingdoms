@@ -73,7 +73,7 @@ const UNIT_LABELS = {
     balloon: 'Balloon',
     super: 'Super',
     candle: 'Candle',
-    stonegolem: 'Stone Golem',
+    stonegolem: 'Golem',
     special: 'Special',
   },
   [THEME_MODE_THEMED]: {
@@ -91,7 +91,7 @@ const UNIT_LABELS = {
     balloon: 'Balloon',
     super: 'Super',
     candle: 'Candle',
-    stonegolem: 'Stone Golem',
+    stonegolem: 'Golem',
     special: 'Special',
   },
 };
