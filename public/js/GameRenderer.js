@@ -5771,7 +5771,7 @@ export class GameRenderer {
     ctx.fill();
 
     if (shotPowerType) {
-      this.drawShotPowerIcon(shotPowerType, ex, ey, 10, side);
+      this.drawShotPowerIcon(shotPowerType, ex, ey, 12, side);
       if (shotPowerShots > 0) {
         ctx.fillStyle = this.withAlpha('#ffffff', 0.92);
         ctx.font = '10px sans-serif';
@@ -8246,6 +8246,7 @@ export class GameRenderer {
   drawShotPowerIcon(powerType, x, y, size = 16, side = 'left') {
     const { ctx } = this;
     const radius = Math.max(10, size);
+    const iconSizeMultiplier = 1.5;
     const outlineColor = side === 'right' ? '#ff6a6a' : '#4da7ff';
     const fg = powerType === 'flameShot' ? '#ffae2b'
       : powerType === 'pierceShot' ? '#80d1ff'
@@ -8272,7 +8273,7 @@ export class GameRenderer {
     if (emojiSpec) {
       const image = this.getUpgradeGlyphImage(emojiSpec.src);
       if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
-        const drawSize = Math.max(12, radius * emojiSpec.scale);
+        const drawSize = Math.max(12, radius * emojiSpec.scale * iconSizeMultiplier);
         const offsetY = radius * emojiSpec.yOffset;
         ctx.drawImage(image, -drawSize / 2, offsetY - drawSize / 2, drawSize, drawSize);
         ctx.restore();
@@ -8281,7 +8282,7 @@ export class GameRenderer {
     }
 
     // Fallback custom shapes while SVG is still loading.
-    const iconScale = radius * 1.35;
+    const iconScale = radius * 1.35 * iconSizeMultiplier;
     ctx.fillStyle = fg;
     if (powerType === 'multiShot') {
       for (let dx = -iconScale * 0.2; dx <= iconScale * 0.2; dx += iconScale * 0.2) {
