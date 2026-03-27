@@ -126,6 +126,7 @@ const SHOT_POWER_TWEMOJI_GLYPHS = {
 };
 
 const BARRACKS_LOCK_TWEMOJI = '/icons/twemoji/1f512.svg';
+const TREASURE_PILE_ITEM_SCALE_MULT = 2;
 
 const UPGRADE_CATEGORY_STYLE = {
   arrow: {
@@ -7254,10 +7255,11 @@ export class GameRenderer {
         - Math.abs(spreadBias) * (1.8 + row * 0.02)
         + (item?.jitterY ?? ((stableHash(baseSeed + 0.9) - 0.5) * 1.8));
       const scale = (item?.scale ?? (0.82 + stableHash(baseSeed + 1.5) * 0.44)) + Math.min(0.48, row * 0.022);
-      const itemTopY = py - 6.5 * scale;
+      const drawScale = scale * TREASURE_PILE_ITEM_SCALE_MULT;
+      const itemTopY = py - 6.5 * drawScale;
       if (itemTopY < topCapY) continue;
       const kind = item?.kind || 'coin';
-      this.drawTreasurePileItem(kind, px, py, scale, baseSeed);
+      this.drawTreasurePileItem(kind, px, py, drawScale, baseSeed);
     }
 
     const innerGlow = ctx.createLinearGradient(chestAnchorX, chestY - 2, chestAnchorX, chestY + 14);
