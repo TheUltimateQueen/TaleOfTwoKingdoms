@@ -1,3 +1,5 @@
+import { SPECIAL_UNIT_UPGRADE_RULES_BY_TYPE } from './specialUnitUpgradeConfig.js';
+
 export const SHOT_INTERVAL = 1;
 
 export const UPGRADE_LABELS = {
@@ -81,26 +83,16 @@ export function specialSpawnBaseChanceForType(type) {
   return Number.isFinite(chance) ? chance : null;
 }
 
-const STAGED_UPGRADE_COPY = {
-  balloonLevel: {
-    unlockLabel: 'Unlock Balloon',
-    upgradedLabel: 'Balloon+',
-    unlockHint: 'BA1 unlocks sky balloons',
-    upgradedHint: '+balloon hp/dmg/spawn rate',
-  },
-  dragonLevel: {
-    unlockLabel: 'Unlock Dragon',
-    upgradedLabel: 'Dragon+',
-    unlockHint: 'DR1 unlocks dragons',
-    upgradedHint: '+dragon spawn rate',
-  },
-  superMinionLevel: {
-    unlockLabel: 'Unlock Super',
-    upgradedLabel: 'Super+',
-    unlockHint: 'SU1 unlocks super minions',
-    upgradedHint: '+super spawn rate',
-  },
-};
+const STAGED_UPGRADE_COPY = Object.freeze(
+  Object.fromEntries(
+    Object.entries(SPECIAL_UNIT_UPGRADE_RULES_BY_TYPE).map(([type, rule]) => [type, {
+      unlockLabel: rule.unlockLabel,
+      upgradedLabel: rule.repeatLabel,
+      unlockHint: rule.unlockHint,
+      upgradedHint: rule.repeatHint,
+    }])
+  )
+);
 
 export function upgradeLabelForLevel(type, level = null) {
   const staged = STAGED_UPGRADE_COPY[type];

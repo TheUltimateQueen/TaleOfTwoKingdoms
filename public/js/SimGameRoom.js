@@ -25,6 +25,11 @@ import {
   presidentBattleLines,
   presidentRallyLine,
 } from './themeConfig.js';
+import {
+  REPEAT_SPECIAL_UPGRADE_CONFIG,
+  REPEAT_SPECIAL_UPGRADE_TYPES,
+  SPECIAL_UNIT_UPGRADE_RULES,
+} from './specialUnitUpgradeConfig.js';
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
@@ -49,13 +54,13 @@ const UPGRADE_COST_RULES = {
   balloonLevel: { base: 252, growth: 28, start: 0 },
   dragonLevel: { base: 236, growth: 26, start: 0 },
   dragonSuperBreathLevel: { base: 328, growth: 0, start: 0 },
-  shieldDarkMetalLevel: { base: 304, growth: 0, start: 0 },
-  monkHealCircleLevel: { base: 286, growth: 0, start: 0 },
-  necroExpertSummonerLevel: { base: 274, growth: 0, start: 0 },
-  riderSuperHorseLevel: { base: 298, growth: 0, start: 0 },
-  diggerGoldFinderLevel: { base: 282, growth: 0, start: 0 },
-  gunnerSkyCannonLevel: { base: 294, growth: 0, start: 0 },
-  presidentExecutiveOrderLevel: { base: 306, growth: 0, start: 0 },
+  shieldDarkMetalLevel: { base: 304, growth: 22, start: 0 },
+  monkHealCircleLevel: { base: 286, growth: 18, start: 0 },
+  necroExpertSummonerLevel: { base: 274, growth: 18, start: 0 },
+  riderSuperHorseLevel: { base: 298, growth: 20, start: 0 },
+  diggerGoldFinderLevel: { base: 282, growth: 18, start: 0 },
+  gunnerSkyCannonLevel: { base: 294, growth: 20, start: 0 },
+  presidentExecutiveOrderLevel: { base: 306, growth: 20, start: 0 },
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
 const UPGRADE_PATH_BY_TYPE = {
@@ -84,14 +89,14 @@ const UPGRADE_LEVEL_CAPS = {
   volleyLevel: 4,
   balloonLevel: 4,
   dragonSuperBreathLevel: 1,
-  shieldDarkMetalLevel: 1,
-  monkHealCircleLevel: 1,
-  necroExpertSummonerLevel: 1,
-  riderSuperHorseLevel: 1,
-  diggerGoldFinderLevel: 1,
-  gunnerSkyCannonLevel: 1,
-  presidentExecutiveOrderLevel: 1,
 };
+const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
+  Object.fromEntries(
+    Object.values(SPECIAL_UNIT_UPGRADE_RULES)
+      .filter((rule) => typeof rule?.specialType === 'string' && rule.specialType)
+      .map((rule) => [rule.specialType, rule])
+  )
+);
 const DRAGON_SUPER_BREATH_INTERVAL = 5;
 const DRAGON_SUPER_BREATH_COOLDOWN_JITTER = 1.25;
 const DRAGON_SUPER_BREATH_RANGE = 300;
@@ -325,6 +330,23 @@ function presidentPodiumTargetX(sideName = 'left') {
 
 function randomFrom(list) {
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function weightedRandomFrom(entries = []) {
+  let total = 0;
+  for (const entry of entries) {
+    const weight = Math.max(0, Number(entry?.weight) || 0);
+    total += weight;
+  }
+  if (!(total > 0)) return entries.length ? randomFrom(entries) : null;
+  let roll = Math.random() * total;
+  for (const entry of entries) {
+    const weight = Math.max(0, Number(entry?.weight) || 0);
+    if (weight <= 0) continue;
+    roll -= weight;
+    if (roll <= 0) return entry;
+  }
+  return entries[entries.length - 1] || null;
 }
 
 function presidentExecutiveOrderCooldown() {
@@ -4871,9 +4893,12 @@ class GameRoom {
       : specialRateBonus;
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
     let chance = base + tunedSpecialBonus;
-    if (type === 'dragon') chance += Math.max(0, (Number(side?.dragonLevel) || 0) - 1) * 0.014;
+    const typeRule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[type] || null;
+    if (typeRule?.upgradeType) {
+      const repeatLevel = Math.max(0, (Number(side?.[typeRule.upgradeType]) || 0) - 1);
+      chance += repeatLevel * Math.max(0, Number(typeRule.repeatChancePerLevel) || 0);
+    }
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
-    if (type === 'super') chance += Math.max(0, (Number(side?.superMinionLevel) || 0) - 1) * 0.018;
     return clamp(chance, 0, 0.99);
   }
 
@@ -6779,6 +6804,7 @@ class GameRoom {
     const isPresident = spawnType === 'president';
     const isBalloon = spawnType === 'balloon';
     const isSuper = spawnType === 'super';
+    const repeatScaling = this.specialRepeatScalingForSpawnType(side, spawnType);
     const balloonSpawnLevel = isBalloon ? Math.max(1, Number(side.balloonLevel) || 1) : 0;
     const explosive = false;
     let radius = 16;
@@ -6911,6 +6937,12 @@ class GameRoom {
       spawnY = TOWER_Y - 124 + (Math.random() * 70 - 35);
     }
 
+    if (repeatScaling.repeatLevels > 0) {
+      hp *= repeatScaling.hpMult;
+      dmg *= repeatScaling.dmgMult;
+      visualPower += repeatScaling.repeatLevels * 2;
+    }
+
     const created = {
       id: this.seq++,
       side: sideName,
@@ -6979,7 +7011,7 @@ class GameRoom {
       shieldBearer: isShieldBearer,
       shieldPushCd: isShieldBearer ? (1.2 + Math.random() * 2.2) : 0,
       shieldPushTtl: 0,
-      shieldPushScale: isShieldBearer ? SHIELD_PUSH_SCALE : 1,
+      shieldPushScale: isShieldBearer ? (SHIELD_PUSH_SCALE * repeatScaling.shieldPushMult) : 1,
       shieldGuardPose: isShieldBearer ? 0 : 0,
       shieldGuardTarget: isShieldBearer ? 0 : 0,
       shieldBaseY: isShieldBearer ? spawnY : null,
@@ -7020,8 +7052,8 @@ class GameRoom {
       digBaseY: isDigger ? spawnY : null,
       monk: isMonk,
       monkAge: 0,
-      monkHealBase: isMonk ? Math.max(34, hp * 0.46) : 0,
-      monkHealRange: isMonk ? (172 + side.powerLevel * 5 + side.unitHpLevel * 4) : 0,
+      monkHealBase: isMonk ? (Math.max(34, hp * 0.46) * repeatScaling.monkHealMult) : 0,
+      monkHealRange: isMonk ? ((172 + side.powerLevel * 5 + side.unitHpLevel * 4) * repeatScaling.monkRangeMult) : 0,
       monkHealCd: isMonk ? 0.94 : 0,
       monkHealScale: isMonk ? 1 : 0,
       monkHealMinScale: isMonk ? 0.24 : 0,
@@ -7046,7 +7078,7 @@ class GameRoom {
       presidentPodiumX: isPresident ? presidentPodiumTargetX(sideName) : null,
       presidentPodiumY: isPresident ? (TOWER_Y + 18 + (Math.random() * 24 - 12)) : null,
       presidentAuraRadius: isPresident ? (178 + side.powerLevel * 8) : 0,
-      presidentAuraMult: isPresident ? (1.22 + Math.min(0.14, side.powerLevel * 0.02)) : 1,
+      presidentAuraMult: isPresident ? ((1.22 + Math.min(0.14, side.powerLevel * 0.02)) * repeatScaling.presidentAuraMult) : 1,
       presidentSpeechCd: isPresident ? (1 + Math.random() * 1.4) : 0,
       presidentExecutiveOrderUpgraded: isPresident && (Number(side.presidentExecutiveOrderLevel) || 0) > 0,
       presidentExecutiveOrderCd: isPresident ? presidentExecutiveOrderCooldown() : 0,
@@ -7183,6 +7215,15 @@ class GameRoom {
     return count;
   }
 
+  countUnlockedRepeatSpecialUnits(side) {
+    let count = 0;
+    for (const rule of Object.values(SPECIAL_UNIT_UPGRADE_RULES)) {
+      if (!rule?.hasInitialUnlock || !rule?.upgradeType) continue;
+      if ((Number(side?.[rule.upgradeType]) || 0) > 0) count += 1;
+    }
+    return count;
+  }
+
   isUpgradeUnlocked(side, type) {
     if (type === 'balloonLevel') {
       const specialCount = this.countSpecialMinionUpgrades(side);
@@ -7192,6 +7233,173 @@ class GameRoom {
     }
     if (type === 'dragonSuperBreathLevel') return (Number(side?.dragonLevel) || 0) > 0;
     return true;
+  }
+
+  isRepeatSpecialUpgradeType(type) {
+    return REPEAT_SPECIAL_UPGRADE_TYPES.includes(type);
+  }
+
+  isRegularUpgradeCardEligible(side, type) {
+    if (!this.isUpgradeUnlocked(side, type)) return false;
+    if (this.isRepeatSpecialUpgradeType(type) && (Number(side?.[type]) || 0) > 0) return false;
+    if (this.isUpgradeCapped(side, type)) return false;
+    return true;
+  }
+
+  isRepeatSpecialBucketUnlocked(side) {
+    return this.countUnlockedRepeatSpecialUnits(side) >= Math.max(1, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.minUnlockedUnits) || 1);
+  }
+
+  repeatSpecialEligibleRules(side, excludedTypes = new Set()) {
+    if (!this.isRepeatSpecialBucketUnlocked(side)) return [];
+    return Object.values(SPECIAL_UNIT_UPGRADE_RULES).filter((rule) => (
+      rule?.repeatEligible
+      && rule?.hasInitialUnlock
+      && typeof rule?.upgradeType === 'string'
+      && !excludedTypes.has(rule.upgradeType)
+      && (Number(side?.[rule.upgradeType]) || 0) > 0
+      && !this.isUpgradeCapped(side, rule.upgradeType)
+    ));
+  }
+
+  repeatSpecialExpectedSpawnSeconds(side, rule) {
+    if (!side || !rule?.specialType) return Infinity;
+    const spawnEvery = Math.max(0.0001, this.statSpawnEvery(side));
+    switch (rule.specialType) {
+      case 'necrominion':
+        return spawnEvery * this.statNecroEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'necrominion'));
+      case 'gunner':
+        return spawnEvery * this.statGunnerEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'gunner'));
+      case 'rider':
+        return spawnEvery * this.statRiderEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'rider'));
+      case 'digger':
+        return spawnEvery * this.statDiggerEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'digger'));
+      case 'monk':
+        return spawnEvery * this.statMonkEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'monk'));
+      case 'stonegolem':
+        if (!this.stoneGolemSpawnUnlocked(side)) return Infinity;
+        return spawnEvery * this.statStoneGolemEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'stonegolem'));
+      case 'shield':
+        return spawnEvery * this.statShieldEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'shield'));
+      case 'hero':
+        if (!side?.towerDamagedOnce) return Infinity;
+        return spawnEvery * this.statHeroEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'hero'));
+      case 'president':
+        return spawnEvery * this.statPresidentEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'president'));
+      case 'balloon':
+        return spawnEvery * this.statBalloonEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'balloon'));
+      case 'dragon':
+        return spawnEvery * this.statDragonEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'dragon'));
+      case 'super':
+        return spawnEvery * this.statSuperEvery(side) / Math.max(0.0001, this.statSpecialSuccessChance(side, 'super'));
+      case 'candle':
+        return spawnEvery * this.statCandleEvery(side) / Math.max(0.0001, this.statCandleSpawnChance(side));
+      default:
+        return Infinity;
+    }
+  }
+
+  repeatSpecialDynamicFactor(side, rule, eligibleRules = []) {
+    const expected = this.repeatSpecialExpectedSpawnSeconds(side, rule);
+    if (!Number.isFinite(expected) || expected <= 0) return 1;
+    const expectedList = eligibleRules
+      .map((entry) => this.repeatSpecialExpectedSpawnSeconds(side, entry))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => a - b);
+    if (!expectedList.length) return 1;
+    const median = expectedList[Math.floor(expectedList.length / 2)] || expected;
+    if (!(median > 0)) return 1;
+    const ratio = median / expected;
+    const exponent = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.dynamicWeightExponent) || 0);
+    const scaled = exponent > 0 ? Math.pow(Math.max(0.0001, ratio), exponent) : 1;
+    return clamp(
+      scaled,
+      Number(REPEAT_SPECIAL_UPGRADE_CONFIG.dynamicWeightMin) || 0.82,
+      Number(REPEAT_SPECIAL_UPGRADE_CONFIG.dynamicWeightMax) || 1.18
+    );
+  }
+
+  repeatSpecialLeaderPenalty(side, rule, eligibleRules = []) {
+    const levels = eligibleRules
+      .map((entry) => Math.max(0, Number(side?.[entry.upgradeType]) || 0))
+      .filter((value) => Number.isFinite(value));
+    if (!levels.length) return 1;
+    const minLevel = Math.min(...levels);
+    const currentLevel = Math.max(0, Number(side?.[rule.upgradeType]) || 0);
+    const ahead = Math.max(0, currentLevel - minLevel);
+    const penaltyPerLevel = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.leaderPenaltyPerLevelAhead) || 0);
+    return Math.max(
+      Number(REPEAT_SPECIAL_UPGRADE_CONFIG.leaderPenaltyFloor) || 0.85,
+      1 - ahead * penaltyPerLevel
+    );
+  }
+
+  specialRepeatScalingForSpawnType(side, spawnType) {
+    const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[spawnType] || null;
+    if (!rule?.upgradeType) {
+      return {
+        repeatLevels: 0,
+        hpMult: 1,
+        dmgMult: 1,
+        monkHealMult: 1,
+        monkRangeMult: 1,
+        shieldPushMult: 1,
+        presidentAuraMult: 1,
+      };
+    }
+    const repeatLevels = Math.max(0, (Number(side?.[rule.upgradeType]) || 0) - 1);
+    const scaling = rule.repeatScaling || {};
+    return {
+      repeatLevels,
+      hpMult: Math.pow(Number(scaling.hpMultPerLevel) || 1, repeatLevels),
+      dmgMult: Math.pow(Number(scaling.dmgMultPerLevel) || 1, repeatLevels),
+      monkHealMult: Math.pow(Number(scaling.monkHealMultPerLevel) || 1, repeatLevels),
+      monkRangeMult: Math.pow(Number(scaling.monkRangeMultPerLevel) || 1, repeatLevels),
+      shieldPushMult: Math.pow(Number(scaling.shieldPushMultPerLevel) || 1, repeatLevels),
+      presidentAuraMult: Math.pow(Number(scaling.presidentAuraMultPerLevel) || 1, repeatLevels),
+    };
+  }
+
+  buildUpgradeCardCandidates(side, excludedTypes = new Set()) {
+    const candidates = [];
+    const regularWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.regularUpgradeWeight) || 0);
+    for (const type of UPGRADE_TYPES) {
+      if (excludedTypes.has(type)) continue;
+      if (!this.isRegularUpgradeCardEligible(side, type)) continue;
+      candidates.push({
+        type,
+        source: 'random',
+        path: this.upgradePathForType(type),
+        weight: regularWeight,
+      });
+    }
+
+    const repeatRules = this.repeatSpecialEligibleRules(side, excludedTypes);
+    if (repeatRules.length) {
+      const bucketWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.bucketWeight) || 0);
+      const weightedRules = repeatRules.map((rule) => {
+        const base = Math.max(0.05, Number(rule.baseOfferWeight) || 1);
+        const dynamic = this.repeatSpecialDynamicFactor(side, rule, repeatRules);
+        const leaderPenalty = this.repeatSpecialLeaderPenalty(side, rule, repeatRules);
+        return {
+          rule,
+          rawWeight: Math.max(0.0001, base * dynamic * leaderPenalty),
+        };
+      });
+      const rawTotal = weightedRules.reduce((sum, entry) => sum + entry.rawWeight, 0);
+      if (rawTotal > 0 && bucketWeight > 0) {
+        for (const entry of weightedRules) {
+          candidates.push({
+            type: entry.rule.upgradeType,
+            source: 'repeatSpecial',
+            path: 'special',
+            weight: bucketWeight * (entry.rawWeight / rawTotal),
+          });
+        }
+      }
+    }
+
+    return candidates;
   }
 
   spawnMirroredResource() {
@@ -7243,21 +7451,12 @@ class GameRoom {
     return UPGRADE_PATH_BY_TYPE[type] || 'misc';
   }
 
-  pickUpgradeType(side, excludedTypes = new Set(), excludedPaths = new Set()) {
-    const unlockedPool = UPGRADE_TYPES.filter((type) => this.isUpgradeUnlocked(side, type));
-    const uncappedPool = unlockedPool.filter((type) => !this.isUpgradeCapped(side, type));
-    const sourcePool = uncappedPool.length ? uncappedPool : (unlockedPool.length ? unlockedPool : UPGRADE_TYPES);
-
-    const withPathSpread = sourcePool.filter((type) => (
-      !excludedTypes.has(type)
-      && !excludedPaths.has(this.upgradePathForType(type))
-    ));
-    if (withPathSpread.length) return randomFrom(withPathSpread);
-
-    const uniqueTypePool = sourcePool.filter((type) => !excludedTypes.has(type));
-    if (uniqueTypePool.length) return randomFrom(uniqueTypePool);
-
-    return randomFrom(sourcePool);
+  pickUpgradeCardChoice(side, excludedTypes = new Set(), excludedPaths = new Set()) {
+    const allCandidates = this.buildUpgradeCardCandidates(side, excludedTypes);
+    const withPathSpread = allCandidates.filter((candidate) => !excludedPaths.has(candidate.path));
+    if (withPathSpread.length) return weightedRandomFrom(withPathSpread);
+    if (allCandidates.length) return weightedRandomFrom(allCandidates);
+    return null;
   }
 
   refillRegularCards(sideName) {
@@ -7269,10 +7468,11 @@ class GameRoom {
 
     for (let slot = 0; slot < 2; slot += 1) {
       if (!this.hasCardInSlot(sideName, slot)) {
-        const type = this.pickUpgradeType(side, usedTypes, usedPaths);
-        this.addUpgradeCard(sideName, slot, type, 'random');
-        usedTypes.add(type);
-        usedPaths.add(this.upgradePathForType(type));
+        const choice = this.pickUpgradeCardChoice(side, usedTypes, usedPaths);
+        if (!choice?.type) continue;
+        this.addUpgradeCard(sideName, slot, choice.type, choice.source || 'random');
+        usedTypes.add(choice.type);
+        usedPaths.add(choice.path || this.upgradePathForType(choice.type));
       }
     }
   }

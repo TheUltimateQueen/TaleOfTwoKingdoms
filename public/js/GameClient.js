@@ -3,6 +3,7 @@ import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
 import { SHOT_POWER_LABELS, TEAM_COLORS, upgradeLabelForLevel } from './constants.js';
 import { GameRoom as SimGameRoom } from './SimGameRoom.js';
+import { REPEAT_SPECIAL_UPGRADE_TYPES } from './specialUnitUpgradeConfig.js';
 import {
   DEFAULT_THEME_MODE,
   THEME_MODE_THEMED,
@@ -55,27 +56,21 @@ const BASE_TEAM_COLORS = {
   right: { ...TEAM_COLORS.right },
 };
 const TEST_SPECIAL_UPGRADE_KEYS = [
-  'balloonLevel',
+  ...REPEAT_SPECIAL_UPGRADE_TYPES,
   'dragonSuperBreathLevel',
-  'shieldDarkMetalLevel',
-  'monkHealCircleLevel',
-  'necroExpertSummonerLevel',
-  'riderSuperHorseLevel',
-  'diggerGoldFinderLevel',
-  'gunnerSkyCannonLevel',
-  'presidentExecutiveOrderLevel',
 ];
 const TEST_UPGRADE_MAX = {
   balloonLevel: 4,
-  volleyLevel: 4,
+  dragonLevel: 30,
+  superMinionLevel: 30,
   dragonSuperBreathLevel: 1,
-  shieldDarkMetalLevel: 1,
-  monkHealCircleLevel: 1,
-  necroExpertSummonerLevel: 1,
-  riderSuperHorseLevel: 1,
-  diggerGoldFinderLevel: 1,
-  gunnerSkyCannonLevel: 1,
-  presidentExecutiveOrderLevel: 1,
+  shieldDarkMetalLevel: 30,
+  monkHealCircleLevel: 30,
+  necroExpertSummonerLevel: 30,
+  riderSuperHorseLevel: 30,
+  diggerGoldFinderLevel: 30,
+  gunnerSkyCannonLevel: 30,
+  presidentExecutiveOrderLevel: 30,
 };
 const TEST_FORCED_SPECIAL_TYPES = new Set(['dragon', 'shield', 'digger', 'necrominion', 'gunner', 'rider', 'monk', 'stonegolem', 'hero', 'president', 'balloon', 'super']);
 const TEST_SPECIAL_LABELS = {
