@@ -8029,38 +8029,41 @@ export class GameRenderer {
       const group = groups[g];
       const rows = Math.ceil(group.items.length / cols);
 
-      for (let i = 0; i < group.items.length; i += 1) {
-        const badge = group.items[i];
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const bx = startX + badgeDir * col * iconStepX;
-        const by = startY + row * iconStepY;
+      for (let row = 0; row < rows; row += 1) {
+        const rowStart = row * cols;
+        const rowEnd = Math.min(group.items.length, rowStart + cols);
+        for (let i = rowEnd - 1; i >= rowStart; i -= 1) {
+          const badge = group.items[i];
+          const col = i % cols;
+          const bx = startX + badgeDir * col * iconStepX;
+          const by = startY + row * iconStepY;
 
-        ctx.fillStyle = '#09101ddd';
-        ctx.beginPath();
-        ctx.arc(bx, by, iconR + 2.9, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = this.mixColor(badge.color, '#ffffff', 0.82);
-        ctx.beginPath();
-        ctx.arc(bx, by, iconR, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = this.withAlpha(group.style.border, 0.86);
-        ctx.lineWidth = 1.15;
-        ctx.stroke();
-        this.drawUpgradeGlyph(badge.type, bx, by, 9.1, '#1f2230');
-
-        if (badge.count > 1) {
-          const tx = bx + badgeDir * 9;
-          const ty = by - 8;
-          ctx.fillStyle = '#18120cd8';
+          ctx.fillStyle = '#09101ddd';
           ctx.beginPath();
-          ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+          ctx.arc(bx, by, iconR + 2.9, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = '#ffe7a6';
-          ctx.font = 'bold 7px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${badge.count}`, tx, ty + 2.4);
+
+          ctx.fillStyle = this.mixColor(badge.color, '#ffffff', 0.82);
+          ctx.beginPath();
+          ctx.arc(bx, by, iconR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = this.withAlpha(group.style.border, 0.86);
+          ctx.lineWidth = 1.15;
+          ctx.stroke();
+          this.drawUpgradeGlyph(badge.type, bx, by, 9.1, '#1f2230');
+
+          if (badge.count > 1) {
+            const tx = bx + badgeDir * 9;
+            const ty = by - 8;
+            ctx.fillStyle = '#18120cd8';
+            ctx.beginPath();
+            ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffe7a6';
+            ctx.font = 'bold 7px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${badge.count}`, tx, ty + 2.4);
+          }
         }
       }
 
