@@ -272,18 +272,20 @@
       <section id="postGamePanel" class="card hidden">
         <div class="post-game-overlay"></div>
         <header class="post-head">
-          <div>
-            <h2 id="postGameTitle">Match Over</h2>
+          <div class="post-head-main">
+            <button id="postGameTitle" class="post-game-title-btn" type="button" title="Read title aloud">Match Over</button>
+            <div class="post-head-title-actions">
+              <button id="restartMatchBtn" type="button">Restart Match</button>
+            </div>
+            <p id="restartMsg" class="msg"></p>
             <p id="postGameStats" class="sub"></p>
-            <p id="postGameExplain" class="sub">Detailed battle analytics</p>
+            <p id="postGameExplain" class="sub"></p>
           </div>
           <div class="post-head-actions">
             <figure class="post-preview-card">
               <img id="postGamePreview" alt="Final battlefield snapshot" />
               <figcaption>Final Battlefield</figcaption>
             </figure>
-            <button id="restartMatchBtn" type="button">Restart Match</button>
-            <p id="restartMsg" class="msg"></p>
           </div>
         </header>
         <section id="postSummaryGrid" class="post-summary-grid" aria-label="Match summary metrics"></section>

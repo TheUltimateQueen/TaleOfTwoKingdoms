@@ -345,6 +345,9 @@ export class GameClient {
     this.postUpgradeScrubRatio = 0;
     this.postUpgradeScrubRaf = 0;
     this.postGameIconImageCache = new Map();
+    this.postGameTitleSpokenKey = '';
+    this.postGameTitleUtterance = null;
+    this.postGameSpeechPrimed = false;
     this.controllerRematch = {
       gameOver: false,
       requested: false,
@@ -481,6 +484,7 @@ export class GameClient {
       this.lobbyThemeUnthemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_UNTHEMED));
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
+      this.postGameTitle?.addEventListener('click', () => this.speakPostGameTitle({ force: true, userInitiated: true }));
       this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest());
       this.initTestSettingsUi();
       this.setCreateMode(this.state.createMode);
@@ -503,6 +507,7 @@ export class GameClient {
       this.postEconChart?.addEventListener('mouseleave', () => this.highlightUpgradeItem(null));
       this.postUpgradeTimeline?.addEventListener('mousemove', (event) => this.handlePostUpgradeHover(event));
       this.postUpgradeTimeline?.addEventListener('mouseleave', () => this.highlightUpgradeItem(null));
+      this.postGamePanel?.addEventListener('transitionend', (event) => this.handlePostGamePanelTransitionEnd(event));
     }
 
     this.joinBtn.addEventListener('click', () => {
@@ -1948,20 +1953,27 @@ export class GameClient {
     ];
     let lx = chart.x + 8;
     const ly = chart.y + 8;
+    const swatchSize = 10;
+    const labelPad = 6;
     ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     for (const item of legend) {
       ctx.fillStyle = item.color;
-      ctx.fillRect(lx, ly, 10, 10);
+      ctx.fillRect(lx, ly, swatchSize, swatchSize);
       ctx.fillStyle = 'rgba(225, 237, 255, 0.9)';
-      ctx.fillText(item.label, lx + 14, ly + 9);
-      lx += ctx.measureText(item.label).width + 30;
+      const labelX = lx + swatchSize + labelPad;
+      ctx.fillText(item.label, labelX, ly + swatchSize / 2);
+      lx += swatchSize + labelPad + ctx.measureText(item.label).width + 14;
     }
     ctx.restore();
 
-    ctx.fillStyle = '#bcd2f2';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = hasCumulative ? '#f2c14d' : '#bcd2f2';
     ctx.fillText(hasCumulative ? 'Cumulative Gold Earned' : 'Gold', chart.x, chart.y - 2);
+    ctx.fillStyle = '#bcd2f2';
     ctx.textAlign = 'right';
     ctx.fillText(`Max ${Math.round(maxGold)}`, chart.x + chart.w, chart.y - 2);
     ctx.textAlign = 'left';
@@ -2000,7 +2012,7 @@ export class GameClient {
       const rightAcc = arrowAccuracy(snapshot.right);
       this.postGameStats.innerHTML = `<span class="team-west">${sideDisplayName('left', this.state.themeMode)} Accuracy: ${leftAcc.rate}% (${leftAcc.hits} hits / ${leftAcc.fired} arrows)</span> <span class="team-sep">|</span> <span class="team-east">${sideDisplayName('right', this.state.themeMode)} Accuracy: ${rightAcc.rate}% (${rightAcc.hits} hits / ${rightAcc.fired} arrows)</span>`;
     }
-    if (this.postGameExplain) this.postGameExplain.textContent = 'Top stats include color-coded luck % (100% is expected luck). Chart below shows economy with upgrade spikes.';
+    if (this.postGameExplain) this.postGameExplain.textContent = '';
 
     this.renderPostSummary(snapshot, report);
     this.renderPostUpgradeFeed(report);
@@ -2236,11 +2248,33 @@ export class GameClient {
     const unlock = () => {
       this.sound.unlock();
       this.unlockVoiceAudio();
+      this.primePostGameSpeech();
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+  }
+
+  primePostGameSpeech() {
+    if (this.isController || this.postGameSpeechPrimed) return;
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    if (!synth || typeof SpeechSynthesisUtterance !== 'function') {
+      this.postGameSpeechPrimed = true;
+      return;
+    }
+    try {
+      synth.getVoices();
+      const utterance = new SpeechSynthesisUtterance(' ');
+      utterance.volume = 0;
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      synth.speak(utterance);
+      synth.cancel();
+    } catch {
+      // Ignore priming failures; manual title clicks still retry speech.
+    }
+    this.postGameSpeechPrimed = true;
   }
 
   setupVoiceAudio() {
@@ -2756,6 +2790,7 @@ export class GameClient {
     }
 
     if (!canShow || !snapshot) {
+      this.stopPostGameTitleSpeech();
       this.postGameReportData = null;
       this.postGameRenderedKey = null;
       this.postGamePreviewDataUrl = '';
@@ -2765,6 +2800,66 @@ export class GameClient {
     }
     if (wasHidden || !this.postGamePreviewDataUrl) this.capturePostGamePreview();
     this.renderPostGameDashboard(snapshot, wasHidden);
+  }
+
+  handlePostGamePanelTransitionEnd(event) {
+    if (this.isController || !this.postGamePanel) return;
+    if (!event || event.target !== this.postGamePanel) return;
+    if (event.propertyName && event.propertyName !== 'opacity') return;
+    if (!this.postGamePanel.classList.contains('showing')) return;
+    this.speakPostGameTitle();
+  }
+
+  speakPostGameTitle({ force = false, userInitiated = false } = {}) {
+    const reportKey = this.postGameRenderedKey || '';
+    const roomKey = this.state.roomId || 'room';
+    const spokenKey = `${roomKey}|${reportKey}`;
+    if (!force && (!reportKey || this.postGameTitleSpokenKey === spokenKey)) return;
+    const titleText = typeof this.postGameTitle?.textContent === 'string'
+      ? this.postGameTitle.textContent.trim()
+      : '';
+    if (!titleText) return;
+
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    if (!synth || typeof SpeechSynthesisUtterance !== 'function') {
+      if (!force || reportKey) this.postGameTitleSpokenKey = spokenKey;
+      return;
+    }
+
+    if (userInitiated) this.primePostGameSpeech();
+
+    try {
+      if (synth.speaking || synth.pending) synth.cancel();
+      const utterance = new SpeechSynthesisUtterance(titleText);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      this.postGameTitleUtterance = utterance;
+      utterance.addEventListener('end', () => {
+        if (this.postGameTitleUtterance === utterance) this.postGameTitleUtterance = null;
+      }, { once: true });
+      utterance.addEventListener('error', () => {
+        if (this.postGameTitleUtterance === utterance) this.postGameTitleUtterance = null;
+      }, { once: true });
+      synth.speak(utterance);
+    } catch {
+      return;
+    }
+
+    if (!force || reportKey) this.postGameTitleSpokenKey = spokenKey;
+  }
+
+  stopPostGameTitleSpeech({ resetSpokenKey = false } = {}) {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    if (this.postGameTitleUtterance && (synth?.speaking || synth?.pending)) {
+      try {
+        synth.cancel();
+      } catch {
+        // Ignore cancellation errors from interrupted speech state.
+      }
+    }
+    this.postGameTitleUtterance = null;
+    if (resetSpokenKey) this.postGameTitleSpokenKey = '';
   }
 
   capturePostGamePreview() {
@@ -2784,6 +2879,7 @@ export class GameClient {
   }
 
   resetGameOverPresentation() {
+    this.stopPostGameTitleSpeech({ resetSpokenKey: true });
     this.gameOverLatched = false;
     this.gameOverLatchedAtMs = 0;
     this.gameOverRevealAtMs = 0;

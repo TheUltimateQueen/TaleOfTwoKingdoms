@@ -768,10 +768,34 @@ button:hover {
   gap: 12px;
 }
 
-.post-head h2 {
+.post-game-title-btn {
   margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
   font-size: clamp(24px, 3.2vw, 38px);
   letter-spacing: 0.01em;
+}
+
+.post-game-title-btn:hover {
+  filter: brightness(1.08);
+}
+
+.post-head-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.post-head-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .post-head-actions {
@@ -783,6 +807,15 @@ button:hover {
 
 .post-head-actions .msg {
   margin: 0;
+}
+
+#restartMsg {
+  margin: 0;
+}
+
+#restartMatchBtn {
+  border-color: #7ccc9f;
+  background: linear-gradient(180deg, #2f7a56 0%, #255c42 100%);
 }
 
 .post-preview-card {
