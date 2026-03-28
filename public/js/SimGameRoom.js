@@ -232,6 +232,8 @@ const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
+const NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 0.5;
+const RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 2;
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_ROLL_TTL = 6;
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
@@ -4758,9 +4760,18 @@ class GameRoom {
     return clamp(mult, SPECIAL_COOLDOWN_END_MULT, SPECIAL_COOLDOWN_START_MULT);
   }
 
-  scaleSpecialCooldownEvery(baseEvery, side = null) {
+  scaleSpecialCooldownEvery(baseEvery, side = null, rampEffectScale = 1) {
     if (!Number.isFinite(baseEvery)) return baseEvery;
-    const scaled = Math.max(1, Math.round(baseEvery * this.statSpecialCooldownMultiplier()));
+    const globalMult = this.statSpecialCooldownMultiplier();
+    const effectScale = Math.max(0, Number(rampEffectScale) || 1);
+    const rampBase = SPECIAL_COOLDOWN_END_MULT;
+    const maxRampMult = rampBase + (SPECIAL_COOLDOWN_START_MULT - rampBase) * effectScale;
+    const adjustedMult = clamp(
+      rampBase + (globalMult - rampBase) * effectScale,
+      Math.min(rampBase, maxRampMult),
+      Math.max(rampBase, maxRampMult)
+    );
+    const scaled = Math.max(1, Math.round(baseEvery * adjustedMult));
     const mul = clamp(Number(side?.debugSpecialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
     return Math.max(1, Math.round(scaled / mul));
   }
@@ -4781,7 +4792,7 @@ class GameRoom {
   statRiderEvery(side) {
     const cavalryTech = Math.floor((side.unitLevel + side.spawnLevel + side.economyLevel) / 5);
     const baseEvery = Math.max(15, 23 - cavalryTech);
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.scaleSpecialCooldownEvery(baseEvery, side, RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE);
   }
 
   statDiggerEvery(side) {
@@ -4829,7 +4840,11 @@ class GameRoom {
     const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
     const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
     const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
-    return this.scaleSpecialCooldownEvery(NECRO_BASE_EVERY * necroEveryFactor, side);
+    return this.scaleSpecialCooldownEvery(
+      NECRO_BASE_EVERY * necroEveryFactor,
+      side,
+      NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE
+    );
   }
 
   statSuperEvery(side) {
