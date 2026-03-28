@@ -219,19 +219,19 @@ const ROW_TO_SPECIAL_TYPE = {
 
 const BARRACKS_ROW_GLYPH_BY_TYPE = {
   militia: 'unitLevel',
-  necro: 'necroExpertSummonerLevel',
-  gunner: 'gunnerSkyCannonLevel',
-  rider: 'riderSuperHorseLevel',
-  digger: 'diggerGoldFinderLevel',
-  monk: 'monkHealCircleLevel',
+  necro: 'unitLevel',
+  gunner: 'arrowLevel',
+  rider: 'unitLevel',
+  digger: 'unitHpLevel',
+  monk: 'powerLevel',
   stonegolem: 'unitHpLevel',
-  shield: 'shieldDarkMetalLevel',
+  shield: 'unitHpLevel',
   hero: 'powerLevel',
-  president: 'presidentExecutiveOrderLevel',
+  president: 'powerLevel',
   balloon: 'balloonLevel',
   dragon: 'dragonLevel',
   super: 'superMinionLevel',
-  candle: 'dragonSuperBreathLevel',
+  candle: 'powerLevel',
 };
 
 const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
@@ -6631,6 +6631,238 @@ export class GameRenderer {
     });
   }
 
+  barracksUpgradeLevel(sideState, type, base = 0) {
+    return Math.max(base, Number(sideState?.[type]) || 0);
+  }
+
+  barracksMetaChipsForRow(sideState, row) {
+    const s = sideState || {};
+    const unit = this.barracksUpgradeLevel(s, 'unitLevel', 1);
+    const hp = this.barracksUpgradeLevel(s, 'unitHpLevel', 1);
+    const arrow = this.barracksUpgradeLevel(s, 'arrowLevel', 1);
+    const power = this.barracksUpgradeLevel(s, 'powerLevel', 1);
+    const specialRate = this.barracksUpgradeLevel(s, 'specialRateLevel', 1);
+    const balloon = this.barracksUpgradeLevel(s, 'balloonLevel', 0);
+    const dragon = this.barracksUpgradeLevel(s, 'dragonLevel', 0);
+    const dragonBreath = this.barracksUpgradeLevel(s, 'dragonSuperBreathLevel', 0);
+    const sup = this.barracksUpgradeLevel(s, 'superMinionLevel', 0);
+    const chips = [];
+    const addChip = (text, category = 'misc', dim = false) => {
+      chips.push({
+        kind: 'text',
+        text,
+        category,
+        dim,
+      });
+    };
+    const addBaseChip = (parts, dim = false) => {
+      chips.push({
+        kind: 'stats',
+        parts,
+        dim,
+      });
+    };
+    const addGlyphChip = (glyphType, active = false, category = 'special', text = '') => {
+      if (!active) return;
+      chips.push({
+        kind: 'glyph',
+        glyphType,
+        active,
+        text,
+        category,
+        dim: !active,
+      });
+    };
+
+    switch (row?.type) {
+      case 'militia':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        break;
+      case 'necro':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        addGlyphChip('necroExpertSummonerLevel', this.barracksUpgradeLevel(s, 'necroExpertSummonerLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'necroExpertSummonerLevel', 0)}`, 'special');
+        break;
+      case 'gunner':
+        addBaseChip([
+          { type: 'arrowLevel', label: 'AR', value: arrow },
+          { type: 'unitLevel', label: 'AT', value: unit },
+        ]);
+        addGlyphChip('gunnerSkyCannonLevel', this.barracksUpgradeLevel(s, 'gunnerSkyCannonLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'gunnerSkyCannonLevel', 0)}`, 'special');
+        break;
+      case 'rider':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        addGlyphChip('riderSuperHorseLevel', this.barracksUpgradeLevel(s, 'riderSuperHorseLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'riderSuperHorseLevel', 0)}`, 'special');
+        break;
+      case 'digger':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        addGlyphChip('diggerGoldFinderLevel', this.barracksUpgradeLevel(s, 'diggerGoldFinderLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'diggerGoldFinderLevel', 0)}`, 'special');
+        break;
+      case 'monk':
+        addBaseChip([
+          { type: 'powerLevel', label: 'PW', value: power },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        addGlyphChip('monkHealCircleLevel', this.barracksUpgradeLevel(s, 'monkHealCircleLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'monkHealCircleLevel', 0)}`, 'special');
+        break;
+      case 'stonegolem':
+        addBaseChip([
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+          { type: 'powerLevel', label: 'PW', value: power },
+        ]);
+        addChip(
+          this.stoneGolemSpawnUnlocked(s) ? 'Gate open' : 'Gate 50% tower',
+          this.stoneGolemSpawnUnlocked(s) ? 'special' : 'misc',
+          !this.stoneGolemSpawnUnlocked(s)
+        );
+        break;
+      case 'shield':
+        addBaseChip([
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+          { type: 'powerLevel', label: 'PW', value: power },
+        ]);
+        addGlyphChip('shieldDarkMetalLevel', this.barracksUpgradeLevel(s, 'shieldDarkMetalLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'shieldDarkMetalLevel', 0)}`, 'special');
+        break;
+      case 'hero':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'powerLevel', label: 'PW', value: power },
+        ]);
+        addChip(s.towerDamagedOnce ? 'Gate open' : 'Gate first hit', s.towerDamagedOnce ? 'special' : 'misc', !s.towerDamagedOnce);
+        break;
+      case 'president':
+        addBaseChip([
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+          { type: 'powerLevel', label: 'PW', value: power },
+        ]);
+        addGlyphChip('presidentExecutiveOrderLevel', this.barracksUpgradeLevel(s, 'presidentExecutiveOrderLevel', 0) > 0);
+        addChip(`Lvl ${this.barracksUpgradeLevel(s, 'presidentExecutiveOrderLevel', 0)}`, 'special');
+        break;
+      case 'balloon':
+        addBaseChip([
+          { type: 'balloonLevel', label: 'BA', value: balloon },
+        ], balloon <= 0);
+        addChip(`Rate SR${specialRate}`, 'misc');
+        break;
+      case 'dragon':
+        addGlyphChip('dragonSuperBreathLevel', dragonBreath > 0);
+        addChip(`Lvl ${dragon}`, 'special', dragon <= 0);
+        break;
+      case 'super':
+        addBaseChip([
+          { type: 'unitLevel', label: 'AT', value: unit },
+          { type: 'unitHpLevel', label: 'HP', value: hp },
+        ]);
+        addChip(`Lvl ${sup}`, 'special', sup <= 0);
+        break;
+      case 'candle':
+        addBaseChip([
+          { type: 'powerLevel', label: 'PW', value: power },
+          { type: 'specialRateLevel', label: 'SR', value: specialRate },
+        ]);
+        break;
+      default:
+        break;
+    }
+
+    return chips;
+  }
+
+  drawBarracksMetaChips(x, y, maxWidth, chips = []) {
+    const { ctx } = this;
+    if (!Array.isArray(chips) || !chips.length || maxWidth <= 8) return;
+    ctx.save();
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let cx = x;
+    const right = x + maxWidth;
+    for (const chip of chips) {
+      const category = chip?.category || 'misc';
+      const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+      const text = typeof chip?.text === 'string' ? chip.text : '';
+      const glyphOnly = chip?.kind === 'glyph' && !text;
+      let chipW = glyphOnly
+        ? 14
+        : Math.ceil(ctx.measureText(text).width) + (chip?.kind === 'glyph' ? 20 : 8);
+      if (chip?.kind === 'stats') {
+        chipW = 10 + Math.ceil(ctx.measureText('Base').width);
+        const parts = Array.isArray(chip.parts) ? chip.parts : [];
+        for (const part of parts) {
+          const partLabel = `${part?.label ?? ''}`;
+          const partValue = `${part?.value ?? ''}`;
+          chipW += Math.ceil(ctx.measureText(partLabel).width);
+          chipW += Math.ceil(ctx.measureText(partValue).width) + 9;
+        }
+      }
+      if (cx + chipW > right) break;
+      const fillAlpha = chip?.dim ? 0.7 : 0.92;
+      const borderAlpha = chip?.dim ? 0.36 : 0.58;
+      const textColor = chip?.dim ? '#cbb8a8' : style.title;
+      const panelColor = chip?.kind === 'stats' ? '#141b27' : style.panel;
+      const borderColor = chip?.kind === 'stats' ? '#4d5d78' : style.border;
+      ctx.fillStyle = this.withAlpha(panelColor, fillAlpha);
+      ctx.fillRect(cx, y - 5, chipW, 10);
+      ctx.strokeStyle = this.withAlpha(borderColor, borderAlpha);
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(cx + 0.5, y - 4.5, chipW - 1, 9);
+      if (chip?.kind === 'glyph' && chip?.glyphType) {
+        ctx.save();
+        ctx.globalAlpha = chip?.dim ? 0.58 : 1;
+        this.drawUpgradeGlyph(chip.glyphType, cx + 7, y, 4.2, chip?.dim ? '#cbb8a8' : style.title);
+        ctx.restore();
+        if (!chip?.active) {
+          ctx.strokeStyle = this.withAlpha('#f2b0a4', 0.8);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(cx + 3.5, y + 3.5);
+          ctx.lineTo(cx + 10.5, y - 3.5);
+          ctx.stroke();
+        }
+      }
+      if (chip?.kind === 'stats') {
+        let tx = cx + 4;
+        ctx.fillStyle = chip?.dim ? '#aeb7c6' : '#d9e1ee';
+        ctx.fillText('Base', tx, y);
+        tx += Math.ceil(ctx.measureText('Base').width) + 6;
+        const parts = Array.isArray(chip.parts) ? chip.parts : [];
+        for (const part of parts) {
+          const partStyle = UPGRADE_CATEGORY_STYLE[upgradeCategory(part?.type)] || UPGRADE_CATEGORY_STYLE.misc;
+          const label = `${part?.label ?? ''}`;
+          const value = `${part?.value ?? ''}`;
+          ctx.fillStyle = chip?.dim ? '#aeb7c6' : (partStyle.badge || partStyle.title);
+          ctx.fillText(label, tx, y);
+          tx += Math.ceil(ctx.measureText(label).width);
+          ctx.fillStyle = chip?.dim ? '#d8dee9' : '#f4f7ff';
+          ctx.fillText(value, tx, y);
+          tx += Math.ceil(ctx.measureText(value).width) + 6;
+        }
+      } else if (text) {
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, cx + (chip?.kind === 'glyph' ? 16 : 4), y);
+      }
+      cx += chipW + 4;
+    }
+    ctx.restore();
+  }
+
   nextBarracksDoorPreviewRow(rows = []) {
     let bestRow = null;
     let bestEta = Infinity;
@@ -6900,10 +7132,6 @@ export class GameRenderer {
   drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
-    const panelW = 336;
-    const panelH = 304;
-    const panelX = side === 'left' ? 350 : world.w - 350;
-    const panelY = world.groundY - panelH - 8;
     const specialRateLevel = Math.max(1, Number(sideState?.specialRateLevel) || 1);
     const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
     const failType = typeof sideState?.specialFailType === 'string' ? sideState.specialFailType : null;
@@ -6923,11 +7151,16 @@ export class GameRenderer {
       Math.max(0, Number(snapshot?.t) || 0)
     );
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
+    const panelW = 336;
+    const rowH = 20;
+    const rowStartY = 76;
+    const panelH = rowStartY + rows.length * rowH + 12;
+    const panelX = side === 'left' ? 350 : world.w - 350;
+    const panelY = world.groundY - panelH - 8;
 
     // Training board.
     const px = panelX - panelW / 2;
     const py = panelY;
-    const rowH = 17;
 
     ctx.fillStyle = '#0f1625d0';
     ctx.fillRect(px, py, panelW, panelH);
@@ -6978,20 +7211,31 @@ export class GameRenderer {
     }
 
     const colLabelX = px + 28;
-    const colStatusX = px + 66;
-    const colChanceX = px + 90;
-    const colMetaX = px + 120;
-    const barX = px + 166;
-    const barYOff = -8;
-    const barW = 78;
+    const colStatusX = px + 80;
+    const colChanceX = px + 104;
+    const detailX = px + 28;
+    const detailW = 176;
+    const barX = px + 210;
+    const barW = 36;
     const barH = 6;
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
-      const ry = py + 76 + i * rowH;
+      const ry = py + rowStartY + i * rowH;
+      const line1Y = ry - 3;
+      const line2Y = ry + 7;
+      const barY = ry + 3;
+      const isLockedRow = !row.unlocked && row.type !== 'militia' && row.type !== 'candle';
+      const rowBg = isLockedRow
+        ? (i % 2 === 0 ? '#111723d8' : '#0e1520d8')
+        : (i % 2 === 0 ? '#162033a8' : '#121a2ba8');
+      const labelColor = isLockedRow ? '#b8b0a8' : '#eaf0fc';
+      const iconInner = isLockedRow
+        ? this.mixColor(row.color, '#7f8694', 0.62)
+        : this.mixColor(row.color, '#ffffff', 0.84);
 
-      ctx.fillStyle = i % 2 === 0 ? '#162033a8' : '#121a2ba8';
-      ctx.fillRect(px + 6, ry - 10, panelW - 12, rowH - 1);
+      ctx.fillStyle = rowBg;
+      ctx.fillRect(px + 6, ry - 12, panelW - 12, rowH - 1);
 
       const rowGlyph = BARRACKS_ROW_GLYPH_BY_TYPE[row.type] || 'unitLevel';
       const iconX = px + 16;
@@ -7000,7 +7244,7 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(iconX, iconY, 7.4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = this.mixColor(row.color, '#ffffff', 0.84);
+      ctx.fillStyle = iconInner;
       ctx.beginPath();
       ctx.arc(iconX, iconY, 6.05, 0, Math.PI * 2);
       ctx.fill();
@@ -7009,70 +7253,73 @@ export class GameRenderer {
       ctx.stroke();
       this.drawUpgradeGlyph(rowGlyph, iconX, iconY, 5.8, '#1f2230');
 
-      ctx.fillStyle = '#eaf0fc';
+      ctx.fillStyle = labelColor;
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(row.label, colLabelX, ry + 1);
-      let rowStatusTag = '[ ]';
+      ctx.fillText(row.label, colLabelX, line1Y);
+      let rowStatusTag = '...';
       let rowStatusColor = '#9da8ba';
-      if (row.lastRollSuccess === true) {
-        rowStatusTag = '[OK]';
+      if (isLockedRow) {
+        rowStatusTag = 'LOCK';
+        rowStatusColor = '#d8b59d';
+      } else if (row.lastRollSuccess === true) {
+        rowStatusTag = 'OK';
         rowStatusColor = '#8affcf';
       } else if (row.lastRollSuccess === false) {
-        rowStatusTag = '[X]';
+        rowStatusTag = 'NO';
         rowStatusColor = '#ffb9a9';
       }
       ctx.fillStyle = rowStatusColor;
-      ctx.fillText(rowStatusTag, colStatusX, ry + 1);
+      ctx.fillText(rowStatusTag, colStatusX, line1Y);
       const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
       if (rowChancePct != null && row.unlocked && row.type !== 'militia') {
         ctx.fillStyle = '#9fc8ef';
-        ctx.fillText(`${rowChancePct}%`, colChanceX, ry + 1);
+        ctx.fillText(`${rowChancePct}%`, colChanceX, line1Y);
       } else if (!row.unlocked && row.type !== 'militia') {
         const lockImage = this.getUpgradeGlyphImage(BARRACKS_LOCK_TWEMOJI);
         if (lockImage?.complete && lockImage.naturalWidth > 0 && lockImage.naturalHeight > 0) {
           const lockSize = 9;
-          ctx.drawImage(lockImage, colChanceX, ry - 8, lockSize, lockSize);
+          ctx.drawImage(lockImage, colChanceX, ry - 11, lockSize, lockSize);
         } else {
           ctx.fillStyle = '#7f8aa0';
-          ctx.fillText('LOCK', colChanceX, ry + 1);
+          ctx.fillText('LOCK', colChanceX, line1Y);
         }
       }
-      ctx.fillStyle = '#c7d4e9';
       const active = Math.max(0, Number(row.activeCount) || 0);
-      ctx.fillText(`L${row.level} A${active}`, colMetaX, ry + 1);
-      const specialUnitRow = row.type !== 'militia' && row.type !== 'candle';
-      const activeSpecialColor = specialUnitRow && active > 0 ? '#86ff9c' : null;
 
-      const barY = ry + barYOff;
       ctx.fillStyle = '#1f2940';
       ctx.fillRect(barX, barY, barW, barH);
       ctx.fillStyle = row.unlocked ? this.withAlpha(sidePalette.primary, 0.95) : '#6f7688';
       ctx.fillRect(barX, barY, barW * row.progress, barH);
+      this.drawBarracksMetaChips(detailX, line2Y - 1, detailW, this.barracksMetaChipsForRow(sideState, row));
 
-      ctx.textAlign = 'right';
+      const activeX = px + panelW - 128;
+      const statusX = px + panelW - 10;
+      let statusText = '';
+      let statusColor = '#b8c8e2';
       if (row.type === 'candle') {
         if (row.candleActive) {
-          ctx.fillStyle = '#ffe8a6';
-          ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
+          statusText = 'active';
+          statusColor = '#ffe8a6';
         } else {
-          ctx.fillStyle = '#b8c8e2';
-          ctx.fillText(`x${active} roll ${Math.max(0, Math.ceil(row.etaSec))}s`, px + panelW - 10, ry + 1);
+          statusText = `roll ${Math.max(0, Math.ceil(row.etaSec))}s`;
         }
-      } else if (!row.unlocked) {
-        ctx.fillStyle = activeSpecialColor || '#9da8ba';
-        ctx.fillText(`x${active} ${row.unlockHint || 'locked'}`, px + panelW - 10, ry + 1);
+      } else if (isLockedRow) {
+        statusText = `LOCKED ${row.unlockHint || ''}`.trim();
+        statusColor = '#d8b59d';
       } else if (row.every <= 1) {
-        ctx.fillStyle = activeSpecialColor || '#8affcf';
-        ctx.fillText(`active x${active}`, px + panelW - 10, ry + 1);
+        statusText = 'active';
+        statusColor = '#8affcf';
       } else {
         const eta = Math.max(0, Math.ceil(row.etaSec));
-        const tag = row.inSpawns === 1
-          ? `x${active} next ${eta}s`
-          : `x${active} ${row.inSpawns}sp ${eta}s`;
-        ctx.fillStyle = activeSpecialColor || (row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2');
-        ctx.fillText(tag, px + panelW - 10, ry + 1);
+        statusText = `next ${eta}s`;
+        statusColor = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
       }
+      ctx.textAlign = 'right';
+      ctx.fillStyle = active > 0 ? '#86ff9c' : '#94a2b8';
+      ctx.fillText(`${active}`, activeX, line1Y);
+      ctx.fillStyle = statusColor;
+      ctx.fillText(statusText, statusX, line1Y);
     }
 
     ctx.strokeStyle = '#f2e4b24a';
