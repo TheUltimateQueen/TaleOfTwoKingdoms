@@ -8246,7 +8246,7 @@ export class GameRenderer {
   drawShotPowerIcon(powerType, x, y, size = 16, side = 'left') {
     const { ctx } = this;
     const radius = Math.max(10, size);
-    const iconSizeMultiplier = 1.5;
+    const iconSizeMultiplier = 1.35;
     const outlineColor = side === 'right' ? '#ff6a6a' : '#4da7ff';
     const fg = powerType === 'flameShot' ? '#ffae2b'
       : powerType === 'pierceShot' ? '#80d1ff'
