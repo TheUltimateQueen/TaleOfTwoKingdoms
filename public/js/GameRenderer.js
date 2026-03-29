@@ -6715,8 +6715,8 @@ export class GameRenderer {
         break;
       case 'monk':
         addBaseChip([
-          { type: 'powerLevel', label: 'PW', value: power },
           { type: 'unitHpLevel', label: 'HP', value: hp },
+          { type: 'powerLevel', label: 'PW', value: power },
         ]);
         addGlyphChip('monkHealCircleLevel', this.barracksUpgradeLevel(s, 'monkHealCircleLevel', 0) > 0);
         addChip(`Lvl ${this.barracksUpgradeLevel(s, 'monkHealCircleLevel', 0)}`, 'special');
@@ -7151,12 +7151,12 @@ export class GameRenderer {
       Math.max(0, Number(snapshot?.t) || 0)
     );
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
-    const panelW = 336;
-    const rowH = 20;
+    const panelW = 346;
+    const rowH = 22;
     const rowStartY = 76;
     const panelH = rowStartY + rows.length * rowH + 12;
     const panelX = side === 'left' ? 350 : world.w - 350;
-    const panelY = world.groundY - panelH - 8;
+    const panelY = Math.max(8, world.groundY - panelH - 8);
 
     // Training board.
     const px = panelX - panelW / 2;
@@ -7211,20 +7211,20 @@ export class GameRenderer {
     }
 
     const colLabelX = px + 28;
-    const colStatusX = px + 80;
-    const colChanceX = px + 104;
+    const colStatusX = px + 112;
+    const colChanceX = px + 138;
     const detailX = px + 28;
-    const detailW = 176;
-    const barX = px + 210;
-    const barW = 36;
-    const barH = 6;
+    const detailW = 170;
+    const barX = px + 202;
+    const barW = 56;
+    const barH = 7;
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
       const ry = py + rowStartY + i * rowH;
-      const line1Y = ry - 3;
-      const line2Y = ry + 7;
-      const barY = ry + 3;
+      const line1Y = ry - 4;
+      const line2Y = ry + 6;
+      const barY = ry + 2;
       const isLockedRow = !row.unlocked && row.type !== 'militia' && row.type !== 'candle';
       const rowBg = isLockedRow
         ? (i % 2 === 0 ? '#111723d8' : '#0e1520d8')
@@ -7256,7 +7256,12 @@ export class GameRenderer {
       ctx.fillStyle = labelColor;
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(row.label, colLabelX, line1Y);
+      const fittedRowLabel = this.fitUpgradeCardText(
+        row.label,
+        Math.max(18, colStatusX - colLabelX - 6),
+        '9px sans-serif'
+      );
+      ctx.fillText(fittedRowLabel, colLabelX, line1Y);
       let rowStatusTag = '...';
       let rowStatusColor = '#9da8ba';
       if (isLockedRow) {
@@ -7293,8 +7298,8 @@ export class GameRenderer {
       ctx.fillRect(barX, barY, barW * row.progress, barH);
       this.drawBarracksMetaChips(detailX, line2Y - 1, detailW, this.barracksMetaChipsForRow(sideState, row));
 
-      const activeX = px + panelW - 128;
       const statusX = px + panelW - 10;
+      const statusLeftX = barX + barW + 12;
       let statusText = '';
       let statusColor = '#b8c8e2';
       if (row.type === 'candle') {
@@ -7315,11 +7320,34 @@ export class GameRenderer {
         statusText = `next ${eta}s`;
         statusColor = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
       }
+      const fittedStatusText = this.fitUpgradeCardText(
+        statusText,
+        Math.max(24, statusX - statusLeftX),
+        '9px sans-serif'
+      );
       ctx.textAlign = 'right';
-      ctx.fillStyle = active > 0 ? '#86ff9c' : '#94a2b8';
-      ctx.fillText(`${active}`, activeX, line1Y);
       ctx.fillStyle = statusColor;
-      ctx.fillText(statusText, statusX, line1Y);
+      ctx.fillText(fittedStatusText, statusX, line1Y);
+
+      // Labeled active-count badge so the count clearly maps to this row.
+      const activeBadgeText = `ACTIVE ${active}`;
+      ctx.save();
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const activeBadgePadX = 4;
+      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2;
+      const activeBadgeH = 10;
+      const activeBadgeX = px + panelW - activeBadgeW - 10;
+      const activeBadgeY = line2Y - activeBadgeH + 3;
+      ctx.fillStyle = active > 0 ? '#153526' : '#1a2334';
+      ctx.fillRect(activeBadgeX, activeBadgeY, activeBadgeW, activeBadgeH);
+      ctx.strokeStyle = active > 0 ? '#5fd78c' : '#5f7393';
+      ctx.lineWidth = 0.9;
+      ctx.strokeRect(activeBadgeX + 0.5, activeBadgeY + 0.5, activeBadgeW - 1, activeBadgeH - 1);
+      ctx.fillStyle = active > 0 ? '#8dffab' : '#b2c2d8';
+      ctx.fillText(activeBadgeText, activeBadgeX + activeBadgePadX, activeBadgeY + activeBadgeH * 0.52);
+      ctx.restore();
     }
 
     ctx.strokeStyle = '#f2e4b24a';
