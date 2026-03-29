@@ -234,6 +234,25 @@ const BARRACKS_ROW_GLYPH_BY_TYPE = {
   candle: 'powerLevel',
 };
 
+const BARRACKS_ROW_TWEMOJI_GLYPHS = {
+  militia: { src: '/icons/twemoji/1f5e1.svg', scale: 1.42, yOffset: 0.03 },
+  necro: { src: '/icons/twemoji/2620.svg', scale: 1.34, yOffset: 0.03 },
+  gunner: { src: '/icons/twemoji/1f4a3.svg', scale: 1.36, yOffset: 0.02 },
+  rider: { src: '/icons/twemoji/1f40e.svg', scale: 1.46, yOffset: 0.03 },
+  digger: { src: '/icons/twemoji/26cf.svg', scale: 1.36, yOffset: 0.03 },
+  monk: { src: '/icons/twemoji/1f49a.svg', scale: 1.34, yOffset: 0.02 },
+  stonegolem: { src: '/icons/twemoji/1f4a5.svg', scale: 1.36, yOffset: 0.02 },
+  shield: { src: '/icons/twemoji/1f512.svg', scale: 1.28, yOffset: 0.02 },
+  hero: { src: '/icons/twemoji/2b50.svg', scale: 1.3, yOffset: 0.02 },
+  president: { src: '/icons/twemoji/1f4dc.svg', scale: 1.3, yOffset: 0.02 },
+  balloon: { src: '/icons/twemoji/1f388.svg', scale: 1.38, yOffset: 0.02 },
+  dragon: { src: '/icons/twemoji/1f409.svg', scale: 1.38, yOffset: 0.02 },
+  super: { src: '/icons/twemoji/2728.svg', scale: 1.34, yOffset: 0.02 },
+  candle: { src: '/icons/twemoji/1f525.svg', scale: 1.33, yOffset: 0.02 },
+};
+const BARRACKS_ROW_TWEMOJI_SIZE_MULT = 2;
+const BARRACKS_ROW_TWEMOJI_Y_SHIFT = 2;
+
 const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
   Object.fromEntries(SPECIAL_SPAWN_QUEUE_ORDER.map((type, index) => [type, index]))
 );
@@ -6225,6 +6244,22 @@ export class GameRenderer {
     return image;
   }
 
+  drawBarracksRowGlyph(rowType, fallbackType, x, y, size = 6, color = '#1f2230') {
+    const spec = BARRACKS_ROW_TWEMOJI_GLYPHS[rowType] || null;
+    if (spec?.src) {
+      const image = this.getUpgradeGlyphImage(spec.src);
+      if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        const { ctx } = this;
+        const s = Math.max(3, Number(size) || 6);
+        const drawSize = Math.max(5, s * (Number(spec.scale) || 1.35) * BARRACKS_ROW_TWEMOJI_SIZE_MULT);
+        const offsetY = s * (Number(spec.yOffset) || 0) + BARRACKS_ROW_TWEMOJI_Y_SHIFT;
+        ctx.drawImage(image, x - drawSize / 2, y + offsetY - drawSize / 2, drawSize, drawSize);
+        return;
+      }
+    }
+    this.drawUpgradeGlyph(fallbackType, x, y, size, color);
+  }
+
   spawnEveryForSide(sideState) {
     return this.baseSpawnEveryForLevel(sideState?.spawnLevel);
   }
@@ -7156,7 +7191,9 @@ export class GameRenderer {
     const rowStartY = 76;
     const panelH = rowStartY + rows.length * rowH + 12;
     const panelX = side === 'left' ? 350 : world.w - 350;
-    const panelY = Math.max(8, world.groundY - panelH - 8);
+    const panelBottomPad = 10;
+    const viewportBottom = Number(world?.h) || Number(world?.groundY) || 0;
+    const panelY = Math.max(8, viewportBottom - panelH - panelBottomPad);
 
     // Training board.
     const px = panelX - panelW / 2;
@@ -7230,9 +7267,6 @@ export class GameRenderer {
         ? (i % 2 === 0 ? '#111723d8' : '#0e1520d8')
         : (i % 2 === 0 ? '#162033a8' : '#121a2ba8');
       const labelColor = isLockedRow ? '#b8b0a8' : '#eaf0fc';
-      const iconInner = isLockedRow
-        ? this.mixColor(row.color, '#7f8694', 0.62)
-        : this.mixColor(row.color, '#ffffff', 0.84);
 
       ctx.fillStyle = rowBg;
       ctx.fillRect(px + 6, ry - 12, panelW - 12, rowH - 1);
@@ -7240,18 +7274,7 @@ export class GameRenderer {
       const rowGlyph = BARRACKS_ROW_GLYPH_BY_TYPE[row.type] || 'unitLevel';
       const iconX = px + 16;
       const iconY = ry - 2;
-      ctx.fillStyle = '#0a101bdd';
-      ctx.beginPath();
-      ctx.arc(iconX, iconY, 7.4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = iconInner;
-      ctx.beginPath();
-      ctx.arc(iconX, iconY, 6.05, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = this.withAlpha('#f3f7ff', 0.38);
-      ctx.lineWidth = 0.9;
-      ctx.stroke();
-      this.drawUpgradeGlyph(rowGlyph, iconX, iconY, 5.8, '#1f2230');
+      this.drawBarracksRowGlyph(row.type, rowGlyph, iconX, iconY, 5.8, '#1f2230');
 
       ctx.fillStyle = labelColor;
       ctx.font = '9px sans-serif';
@@ -7329,14 +7352,15 @@ export class GameRenderer {
       ctx.fillStyle = statusColor;
       ctx.fillText(fittedStatusText, statusX, line1Y);
 
-      // Labeled active-count badge so the count clearly maps to this row.
-      const activeBadgeText = `ACTIVE ${active}`;
+      // Icon + count badge so the number clearly maps to this row's unit type.
+      const activeBadgeText = `${active}`;
       ctx.save();
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      const activeBadgePadX = 4;
-      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2;
+      const activeBadgePadX = 3;
+      const activeBadgeIconSlotW = 12;
+      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2 + activeBadgeIconSlotW;
       const activeBadgeH = 10;
       const activeBadgeX = px + panelW - activeBadgeW - 10;
       const activeBadgeY = line2Y - activeBadgeH + 3;
@@ -7345,8 +7369,15 @@ export class GameRenderer {
       ctx.strokeStyle = active > 0 ? '#5fd78c' : '#5f7393';
       ctx.lineWidth = 0.9;
       ctx.strokeRect(activeBadgeX + 0.5, activeBadgeY + 0.5, activeBadgeW - 1, activeBadgeH - 1);
+      const activeGlyphX = activeBadgeX + activeBadgePadX + activeBadgeIconSlotW * 0.5;
+      const activeGlyphY = activeBadgeY + activeBadgeH * 0.52;
+      this.drawBarracksRowGlyph(row.type, rowGlyph, activeGlyphX, activeGlyphY, 3.8, '#1f2230');
       ctx.fillStyle = active > 0 ? '#8dffab' : '#b2c2d8';
-      ctx.fillText(activeBadgeText, activeBadgeX + activeBadgePadX, activeBadgeY + activeBadgeH * 0.52);
+      ctx.fillText(
+        activeBadgeText,
+        activeBadgeX + activeBadgePadX + activeBadgeIconSlotW,
+        activeBadgeY + activeBadgeH * 0.52
+      );
       ctx.restore();
     }
 
