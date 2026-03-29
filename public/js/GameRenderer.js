@@ -9513,15 +9513,76 @@ export class GameRenderer {
   }
 
   drawGunnerSprite(minion, options = {}) {
-    if (this.drawThemedSpecialSprite(minion, 'gunner', options)) return;
+    if (!minion) return;
     const showHud = options.showHud !== false;
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
     const upgraded = Boolean(minion.gunnerSkyCannonUpgraded);
+    const themed = this.isThemedEmpires();
     const scale = minion.super ? 1.34 : 1;
     const bodyW = 22 * scale;
     const bodyH = 18 * scale;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const dir = sideName === 'left' ? 1 : -1;
+    const throwFromX = x + dir * bodyW * 0.74;
+    const throwFromY = y + bodyH * 0.06;
+    const throwLife = Math.max(
+      0,
+      Math.min(1, (Number(minion.balloonThrowTtl) || 0) / Math.max(0.01, Number(minion.balloonThrowMaxTtl) || 0.6))
+    );
+    const drawFoodThrowFx = () => {
+      if (cacheRender || throwLife <= 0.001) return;
+      if (!Number.isFinite(minion.balloonThrowToX) || !Number.isFinite(minion.balloonThrowToY)) return;
+      const fromX = throwFromX;
+      const fromY = throwFromY;
+      const toX = Number(minion.balloonThrowToX);
+      const toY = Number(minion.balloonThrowToY);
+      const flight = 1 - throwLife;
+      const arcLift = Math.max(16, bodyW * 0.92);
+      const midX = fromX + (toX - fromX) * 0.5;
+      const midY = Math.min(fromY, toY) - arcLift;
+      const px = (1 - flight) * (1 - flight) * fromX + 2 * (1 - flight) * flight * midX + flight * flight * toX;
+      const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
+      // Match balloon throw size logic, then render gunners at 2x that size.
+      const balloonThrowSize = Math.max(32, Number(minion.r) || 32) * 0.16;
+      const throwSize = balloonThrowSize * 2;
+      if (!themed) {
+        const rockR = throwSize * 0.9;
+        ctx.fillStyle = '#7f8895';
+        ctx.beginPath();
+        ctx.arc(px, py, rockR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = this.withAlpha('#adb5bf', 0.55);
+        ctx.beginPath();
+        ctx.arc(px - rockR * 0.24, py - rockR * 0.22, rockR * 0.46, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (sideName === 'left') {
+        ctx.fillStyle = '#d89a59';
+        ctx.beginPath();
+        ctx.ellipse(px, py, throwSize, throwSize * 0.69, -0.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#8a562b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px - throwSize * 0.31, py - throwSize * 0.14);
+        ctx.lineTo(px + throwSize * 0.13, py + throwSize * 0.2);
+        ctx.stroke();
+      } else {
+        const riceThrowR = throwSize * 0.95;
+        ctx.fillStyle = '#edf8ff';
+        ctx.beginPath();
+        ctx.arc(px, py, riceThrowR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#213644';
+        ctx.fillRect(px - riceThrowR * 0.3, py + riceThrowR * 0.26, riceThrowR * 0.6, riceThrowR * 0.34);
+      }
+    };
+    if (this.drawThemedSpecialSprite(minion, 'gunner', options)) {
+      drawFoodThrowFx();
+      return;
+    }
     if (!cacheRender) {
       const flashNorm = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
       const flashBucket = Math.max(0, Math.min(3, Math.round(flashNorm * 3)));
@@ -9539,6 +9600,7 @@ export class GameRenderer {
       });
       if (drewCached) {
         this.drawThemedSpecialLook(minion, 'gunner', { cacheRender, upgraded });
+        drawFoodThrowFx();
         if (showHud) {
           ctx.fillStyle = '#ffd7aa';
           ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
@@ -9550,9 +9612,6 @@ export class GameRenderer {
       }
     }
     const palette = TEAM_COLORS[minion.side];
-    const x = minion.x;
-    const y = minion.y;
-    const dir = sideName === 'left' ? 1 : -1;
     const flash = Math.max(0, Math.min(1, (minion.gunFlashTtl || 0) / 0.14));
 
     ctx.fillStyle = '#0000002a';
@@ -9697,6 +9756,7 @@ export class GameRenderer {
 
     ctx.restore();
     this.drawThemedSpecialLook(minion, 'gunner', { cacheRender, upgraded });
+    drawFoodThrowFx();
 
     if (showHud) {
       ctx.fillStyle = '#ffd7aa';

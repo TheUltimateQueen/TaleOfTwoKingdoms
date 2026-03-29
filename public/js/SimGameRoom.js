@@ -160,8 +160,10 @@ const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
 const GUNNER_FOOD_THROW_UNLOCK_LEVEL = 2;
 const GUNNER_FOOD_THROW_INTERVAL = 1.28;
 const GUNNER_FOOD_THROW_COOLDOWN_JITTER = 0.42;
-const GUNNER_FOOD_THROW_RANGE_MIN = 184;
-const GUNNER_FOOD_THROW_RANGE_MAX = 312;
+const GUNNER_FOOD_THROW_RANGE_MIN = 240;
+const GUNNER_FOOD_THROW_RANGE_MAX = 430;
+const GUNNER_FOOD_THROW_FLYING_RANGE_BONUS = 180;
+const GUNNER_FOOD_THROW_FLYING_RANGE_MAX = 620;
 const GUNNER_FOOD_THROW_DAMAGE_MULT = 0.56;
 const GUNNER_FOOD_THROW_FLYING_BONUS = 1.16;
 const BALLOON_BOMB_BASE_RADIUS = 72;
@@ -5161,10 +5163,16 @@ class GameRoom {
     if (!gunner || !gunner.gunner) return null;
     const originX = Number(gunner.x) || 0;
     const originY = Number(gunner.y) || 0;
-    const throwRange = clamp(
+    const groundRange = clamp(
       Math.max(GUNNER_FOOD_THROW_RANGE_MIN, (Number(gunner.gunRange) || 220) * 0.92),
       GUNNER_FOOD_THROW_RANGE_MIN,
       GUNNER_FOOD_THROW_RANGE_MAX
+    );
+    const groundRangeSq = groundRange * groundRange;
+    const flyingRange = clamp(
+      groundRange + GUNNER_FOOD_THROW_FLYING_RANGE_BONUS,
+      groundRange,
+      GUNNER_FOOD_THROW_FLYING_RANGE_MAX
     );
     let bestFlying = null;
     let bestFlyingSq = Infinity;
@@ -5175,7 +5183,7 @@ class GameRoom {
       gunner.side,
       originX,
       originY,
-      throwRange,
+      flyingRange,
       minionBuckets,
       bucketW,
       (other) => {
@@ -5190,6 +5198,7 @@ class GameRoom {
           }
           return;
         }
+        if (d2 > groundRangeSq) return;
         if (d2 < bestGroundSq) {
           bestGroundSq = d2;
           bestGround = other;
@@ -5204,7 +5213,7 @@ class GameRoom {
     if (!gunner || !gunner.gunner || !target || target.removed || target.side === gunner.side) return;
     const toX = Number(target.x) || Number(gunner.x) || 0;
     const toY = (Number(target.y) || Number(gunner.y) || 0) - Math.max(4, (Number(target.r) || 12) * 0.2);
-    const throwTtl = Math.max(0.45, Number(gunner.balloonThrowMaxTtl) || 0.6);
+    const throwTtl = Math.max(0.62, Number(gunner.balloonThrowMaxTtl) || 0.62);
     gunner.balloonThrowMaxTtl = throwTtl;
     gunner.balloonThrowTtl = throwTtl;
     gunner.balloonThrowToX = toX;
