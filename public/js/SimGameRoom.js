@@ -5340,10 +5340,10 @@ class GameRoom {
     const base = Math.max(0, Number(rider?.dmg) || 0);
     if (!rider || !rider.rider || !rider.riderChargeReady) return base;
 
-    rider.riderChargeReady = false;
     const originX = Number.isFinite(rider.riderChargeStartX) ? rider.riderChargeStartX : rider.x;
     const distance = Math.abs(rider.x - originX);
     const threshold = Math.max(90, Number(rider.riderChargeDistance) || 170);
+    rider.riderChargeReady = false;
     if (distance < threshold) return base;
 
     const baseMul = Math.max(1.4, Number(rider.riderChargeMul) || 2.2);
@@ -5352,9 +5352,25 @@ class GameRoom {
     return base * mul;
   }
 
+  riderChargeImpactReady(rider) {
+    if (!rider || !rider.rider || !rider.riderChargeReady) return false;
+    const originX = Number.isFinite(rider.riderChargeStartX) ? rider.riderChargeStartX : rider.x;
+    const distance = Math.abs((Number(rider.x) || 0) - (Number(originX) || 0));
+    const threshold = Math.max(90, Number(rider.riderChargeDistance) || 170);
+    return distance >= threshold;
+  }
+
   riderStrikeMinion(rider, target) {
+    const chargeImpact = this.riderChargeImpactReady(rider);
     const damage = this.riderHitDamage(rider, target?.x, target?.y);
     this.dealMinionDamage(rider, target, damage, 'melee');
+    if (!chargeImpact || !target || target.removed || target.side === rider?.side) return;
+    if ((Number(target.hp) || 0) <= 0) return;
+
+    const awayFromAllyTowerDir = rider.side === 'left' ? 1 : -1;
+    const riderLevel = Math.max(1, Math.floor(Number(rider?.level) || 1));
+    const landingDamage = 1 + Math.floor(Math.random() * riderLevel);
+    this.startStoneGolemFling(target, awayFromAllyTowerDir, landingDamage, rider.side, 0);
   }
 
   riderStrikeTower(rider, enemySideName, x, y) {
