@@ -7484,16 +7484,12 @@ export class GameRenderer {
     const themed = Boolean(style);
     const wallW = 118;
     const wallH = 290;
-    const baseY = y + 138;
     const left = x - wallW / 2;
     const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
 
     this.drawTreasureChest(side, x, this.treasureChestY(y), totalGold, 10);
 
-    ctx.fillStyle = themed
-      ? (side === 'left' ? '#2f2318' : '#1f2836')
-      : '#1f2b3f';
-    ctx.fillRect(left - 12, baseY - 22, wallW + 24, 32);
+    // Removed tower footing block for cleaner base silhouette.
 
     ctx.fillStyle = themed ? style.castleWall : palette.castle;
     ctx.fillRect(left, y - wallH / 2, wallW, wallH);
