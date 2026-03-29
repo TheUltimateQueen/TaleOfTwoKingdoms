@@ -157,6 +157,13 @@ const GUNNER_SKY_CANNON_BARRAGE_MIN_SHOTS = 2;
 const GUNNER_SKY_CANNON_BARRAGE_MAX_SHOTS = 5;
 const GUNNER_SKY_CANNON_BARRAGE_SHOT_DELAY = 0.24;
 const GUNNER_SKY_CANNON_BARRAGE_TOWER_APPROACH_MAX = 0.72;
+const GUNNER_FOOD_THROW_UNLOCK_LEVEL = 2;
+const GUNNER_FOOD_THROW_INTERVAL = 1.28;
+const GUNNER_FOOD_THROW_COOLDOWN_JITTER = 0.42;
+const GUNNER_FOOD_THROW_RANGE_MIN = 184;
+const GUNNER_FOOD_THROW_RANGE_MAX = 312;
+const GUNNER_FOOD_THROW_DAMAGE_MULT = 0.56;
+const GUNNER_FOOD_THROW_FLYING_BONUS = 1.16;
 const BALLOON_BOMB_BASE_RADIUS = 72;
 const BALLOON_BOMB_TOWER_DAMAGE_MULT = 0.82;
 const BALLOON_THROW_TOWER_DAMAGE_MULT = 0.44;
@@ -1127,7 +1134,10 @@ class GameRoom {
       if (m.monk) m.monkHealCircleUpgraded = (Number(side.monkHealCircleLevel) || 0) > 0;
       if (m.necrominion) m.necroExpertUpgraded = (Number(side.necroExpertSummonerLevel) || 0) > 0;
       if (m.gunner) {
-        m.gunnerSkyCannonUpgraded = (Number(side.gunnerSkyCannonLevel) || 0) > 0;
+        const gunnerLevel = Number(side.gunnerSkyCannonLevel) || 0;
+        m.gunnerSkyCannonUpgraded = gunnerLevel > 0;
+        m.gunnerFoodThrowUnlocked = gunnerLevel >= GUNNER_FOOD_THROW_UNLOCK_LEVEL;
+        if (!m.gunnerFoodThrowUnlocked) m.gunnerFoodThrowCd = 0;
         if (!m.gunnerSkyCannonUpgraded) m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
       }
       if (m.digger) m.diggerGoldFinder = (Number(side.diggerGoldFinderLevel) || 0) > 0;
@@ -3770,8 +3780,10 @@ class GameRoom {
         if (!Number.isFinite(m.gunnerSkyCannonCd)) {
           m.gunnerSkyCannonCd = GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER;
         }
+        if (!Number.isFinite(m.gunnerFoodThrowCd)) m.gunnerFoodThrowCd = 0;
         const sideState = m.side === 'right' ? this.right : this.left;
         m.gunnerSkyCannonUpgraded = (Number(sideState?.gunnerSkyCannonLevel) || 0) > 0;
+        m.gunnerFoodThrowUnlocked = (Number(sideState?.gunnerSkyCannonLevel) || 0) >= GUNNER_FOOD_THROW_UNLOCK_LEVEL;
         if ((Number(sideState?.gunnerSkyCannonLevel) || 0) > 0) {
           m.gunnerSkyCannonCd = Math.max(0, m.gunnerSkyCannonCd - dt);
         } else {
@@ -3946,6 +3958,7 @@ class GameRoom {
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
       const mySideState = m.side === 'right' ? this.right : this.left;
+      if (m.gunner) this.tickGunnerFoodThrow(m, dt, targetBuckets, MINION_TARGET_BUCKET_W);
       if (m.stoneGolem && this.tickStoneGolemBite(m, dt, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W)) {
         m.atkCd = Math.max(m.atkCd, 0.18);
         continue;
@@ -5144,6 +5157,102 @@ class GameRoom {
     );
   }
 
+  pickGunnerFoodThrowTarget(gunner, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!gunner || !gunner.gunner) return null;
+    const originX = Number(gunner.x) || 0;
+    const originY = Number(gunner.y) || 0;
+    const throwRange = clamp(
+      Math.max(GUNNER_FOOD_THROW_RANGE_MIN, (Number(gunner.gunRange) || 220) * 0.92),
+      GUNNER_FOOD_THROW_RANGE_MIN,
+      GUNNER_FOOD_THROW_RANGE_MAX
+    );
+    let bestFlying = null;
+    let bestFlyingSq = Infinity;
+    let bestGround = null;
+    let bestGroundSq = Infinity;
+
+    this.forEachEnemyMinionInRadius(
+      gunner.side,
+      originX,
+      originY,
+      throwRange,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.removed || other.side === gunner.side || other.id === gunner.id) return;
+        const dx = (Number(other.x) || 0) - originX;
+        const dy = (Number(other.y) || 0) - originY;
+        const d2 = dx * dx + dy * dy;
+        if (other.flying) {
+          if (d2 < bestFlyingSq) {
+            bestFlyingSq = d2;
+            bestFlying = other;
+          }
+          return;
+        }
+        if (d2 < bestGroundSq) {
+          bestGroundSq = d2;
+          bestGround = other;
+        }
+      }
+    );
+
+    return bestFlying || bestGround || null;
+  }
+
+  gunnerFoodThrowAtMinion(gunner, target) {
+    if (!gunner || !gunner.gunner || !target || target.removed || target.side === gunner.side) return;
+    const toX = Number(target.x) || Number(gunner.x) || 0;
+    const toY = (Number(target.y) || Number(gunner.y) || 0) - Math.max(4, (Number(target.r) || 12) * 0.2);
+    const throwTtl = Math.max(0.45, Number(gunner.balloonThrowMaxTtl) || 0.6);
+    gunner.balloonThrowMaxTtl = throwTtl;
+    gunner.balloonThrowTtl = throwTtl;
+    gunner.balloonThrowToX = toX;
+    gunner.balloonThrowToY = toY;
+
+    const flyingBonus = target.flying ? GUNNER_FOOD_THROW_FLYING_BONUS : 1;
+    const damage = Math.max(1, (Number(gunner.dmg) || 0) * GUNNER_FOOD_THROW_DAMAGE_MULT * flyingBonus);
+    this.dealMinionDamage(gunner, target, damage, 'gunshot');
+    target.hitFlashTtl = Math.max(Number(target.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
+    this.queueHitSfx('foodburst', toX, toY, gunner.side, {
+      foodType: gunner.side === 'left' ? 'bread' : 'rice',
+      heavy: false,
+    });
+    if ((Number(target.hp) || 0) <= 0) this.killMinionByRef(target, gunner.side, { goldScalar: 0.82 });
+  }
+
+  tickGunnerFoodThrow(gunner, dt, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!gunner || !gunner.gunner) return;
+    const sideState = gunner.side === 'right' ? this.right : this.left;
+    const level = Math.max(0, Math.round(Number(sideState?.gunnerSkyCannonLevel) || 0));
+    const unlocked = level >= GUNNER_FOOD_THROW_UNLOCK_LEVEL;
+    gunner.gunnerFoodThrowUnlocked = unlocked;
+    if (!unlocked) {
+      gunner.gunnerFoodThrowCd = 0;
+      return;
+    }
+    if (!Number.isFinite(gunner.gunnerFoodThrowCd)) {
+      gunner.gunnerFoodThrowCd = 0.38 + Math.random() * 0.32;
+    } else {
+      gunner.gunnerFoodThrowCd = Math.max(0, gunner.gunnerFoodThrowCd - dt);
+    }
+    if (gunner.gunnerFoodThrowCd > 0) return;
+
+    const target = this.pickGunnerFoodThrowTarget(gunner, minionBuckets, bucketW);
+    if (!target) {
+      gunner.gunnerFoodThrowCd = 0.2;
+      return;
+    }
+
+    this.gunnerFoodThrowAtMinion(gunner, target);
+    gunner.gunnerFoodThrowCd = Math.max(
+      0.55,
+      GUNNER_FOOD_THROW_INTERVAL
+      - Math.min(0.22, Math.max(0, level - GUNNER_FOOD_THROW_UNLOCK_LEVEL) * 0.06)
+      + Math.random() * GUNNER_FOOD_THROW_COOLDOWN_JITTER
+    );
+  }
+
   gunnerSkyCannon(gunner, impactX, impactY) {
     if (!gunner || !gunner.gunner) return;
     const sideName = gunner.side === 'right' ? 'right' : 'left';
@@ -6298,6 +6407,8 @@ class GameRoom {
       balloonHitCircleIndex: -1,
       balloonHitCircleTtl: 0,
       gunnerSkyCannonCd: 0,
+      gunnerFoodThrowCd: 0,
+      gunnerFoodThrowUnlocked: false,
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
@@ -6364,6 +6475,10 @@ class GameRoom {
       revived.gunnerSkyCannonCd = (Number(sideState?.gunnerSkyCannonLevel) || 0) > 0
         ? (GUNNER_SKY_CANNON_INTERVAL * 0.42 + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER)
         : (GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER);
+      revived.gunnerFoodThrowUnlocked = (Number(sideState?.gunnerSkyCannonLevel) || 0) >= GUNNER_FOOD_THROW_UNLOCK_LEVEL;
+      revived.gunnerFoodThrowCd = revived.gunnerFoodThrowUnlocked
+        ? (0.45 + Math.random() * 0.32)
+        : 0;
       revived.gunnerSkyCannonSetupTtl = 0;
       revived.gunnerSkyCannonAimX = null;
       revived.gunnerSkyCannonAimY = null;
@@ -6563,6 +6678,8 @@ class GameRoom {
       gunDragonMul: 1,
       gunFlashTtl: 0,
       gunnerSkyCannonCd: 0,
+      gunnerFoodThrowCd: 0,
+      gunnerFoodThrowUnlocked: false,
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
@@ -7111,6 +7228,10 @@ class GameRoom {
       gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
       gunFlashTtl: 0,
       gunnerSkyCannonCd: isGunner ? (GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER) : 0,
+      gunnerFoodThrowCd: isGunner && (Number(side.gunnerSkyCannonLevel) || 0) >= GUNNER_FOOD_THROW_UNLOCK_LEVEL
+        ? (0.38 + Math.random() * 0.32)
+        : 0,
+      gunnerFoodThrowUnlocked: isGunner && (Number(side.gunnerSkyCannonLevel) || 0) >= GUNNER_FOOD_THROW_UNLOCK_LEVEL,
       gunnerSkyCannonSetupTtl: 0,
       gunnerSkyCannonAimX: null,
       gunnerSkyCannonAimY: null,
