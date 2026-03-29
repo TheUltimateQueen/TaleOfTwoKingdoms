@@ -8493,10 +8493,12 @@ export class GameRenderer {
     ctx.fillText('shoot to choose', card.x, card.y + 20);
   }
 
-  drawShotPowerIcon(powerType, x, y, size = 16, side = 'left') {
+  drawShotPowerIcon(powerType, x, y, size = 16, side = 'left', options = {}) {
+    if (!powerType) return;
     const { ctx } = this;
-    const radius = Math.max(10, size);
-    const iconSizeMultiplier = 1.35;
+    const drawBadge = options?.drawBadge !== false;
+    const radius = Math.max(drawBadge ? 10 : 4, size);
+    const iconSizeMultiplier = drawBadge ? 1.35 : 0.86;
     const outlineColor = side === 'right' ? '#ff6a6a' : '#4da7ff';
     const fg = powerType === 'flameShot' ? '#ffae2b'
       : powerType === 'pierceShot' ? '#80d1ff'
@@ -8507,24 +8509,26 @@ export class GameRenderer {
     ctx.save();
     ctx.translate(x, y);
 
-    // Draw smaller base circle (0.9x gold resource) with side outline
-    ctx.fillStyle = '#1a1f2a';
-    ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
-    ctx.fill();
+    if (drawBadge) {
+      // Draw smaller base circle (0.9x gold resource) with side outline.
+      ctx.fillStyle = '#1a1f2a';
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.strokeStyle = outlineColor;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
-    ctx.stroke();
+      ctx.strokeStyle = outlineColor;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     const emojiSpec = SHOT_POWER_TWEMOJI_GLYPHS[powerType] || null;
     if (emojiSpec) {
       const image = this.getUpgradeGlyphImage(emojiSpec.src);
       if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
-        const drawSize = Math.max(12, radius * emojiSpec.scale * iconSizeMultiplier);
-        const offsetY = radius * emojiSpec.yOffset;
+        const drawSize = Math.max(drawBadge ? 12 : 7, radius * emojiSpec.scale * iconSizeMultiplier);
+        const offsetY = radius * emojiSpec.yOffset * (drawBadge ? 1 : 0.62);
         ctx.drawImage(image, -drawSize / 2, offsetY - drawSize / 2, drawSize, drawSize);
         ctx.restore();
         return;
@@ -8532,7 +8536,7 @@ export class GameRenderer {
     }
 
     // Fallback custom shapes while SVG is still loading.
-    const iconScale = radius * 1.35 * iconSizeMultiplier;
+    const iconScale = radius * (drawBadge ? 1.35 : 0.95) * iconSizeMultiplier;
     ctx.fillStyle = fg;
     if (powerType === 'multiShot') {
       for (let dx = -iconScale * 0.2; dx <= iconScale * 0.2; dx += iconScale * 0.2) {
@@ -8571,8 +8575,8 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(0, 0, iconScale * 0.2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#fff9d3';
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = drawBadge ? '#fff9d3' : this.withAlpha(outlineColor, 0.85);
+      ctx.lineWidth = drawBadge ? 1.4 : 1.1;
       ctx.beginPath();
       ctx.arc(0, 0, iconScale * 0.35, 0, Math.PI * 2);
       ctx.stroke();
@@ -13352,6 +13356,11 @@ export class GameRenderer {
     ctx.lineTo(-len * 0.32, 2.8);
     ctx.closePath();
     ctx.fill();
+
+    if (isMainArrow && arrow.powerType) {
+      const iconSize = Math.max(9, arrow.r * 1.55) + 2;
+      this.drawShotPowerIcon(arrow.powerType, len * 0.02, 0, iconSize, arrow.side, { drawBadge: false });
+    }
 
     ctx.restore();
   }
