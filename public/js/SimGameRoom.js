@@ -40,6 +40,14 @@ const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
 const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
+const RESOURCE_SPAWN_INITIAL_DELAY = 7.2;
+const RESOURCE_SPAWN_MIN_INTERVAL = 5.2;
+const RESOURCE_SPAWN_BASE_INTERVAL = 9.1;
+const RESOURCE_SPAWN_DECAY_DIVISOR = 220;
+const RESOURCE_VALUE_BASE = 22;
+const RESOURCE_VALUE_GROWTH_STEP = 2;
+const RESOURCE_VALUE_GROWTH_SECONDS = 45;
+const MINION_KILL_GOLD_BASE = 10;
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -719,7 +727,7 @@ class GameRoom {
       hasDisplay: false,
     };
 
-    this.nextResourceAt = 5;
+    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY;
     this.nextShotPowerAt = 7;
     this.seq = 1;
     this.candles = {
@@ -743,7 +751,7 @@ class GameRoom {
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
-    this.nextResourceAt = this.t + 5 / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    this.nextResourceAt = this.t + RESOURCE_SPAWN_INITIAL_DELAY / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
     this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
 
     this.seedUpgradeCards();
@@ -1119,7 +1127,7 @@ class GameRoom {
 
     if (refreshExisting) {
       for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
-      this.nextResourceAt = Math.min(Number(this.nextResourceAt) || this.t + 5, this.t + 0.4);
+      this.nextResourceAt = Math.min(Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_INITIAL_DELAY, this.t + 0.4);
       this.nextShotPowerAt = Math.min(Number(this.nextShotPowerAt) || this.t + 7, this.t + 0.6);
     }
   }
@@ -1558,7 +1566,7 @@ class GameRoom {
     this.lineEvents = [];
     this.activePresidents = { left: [], right: [] };
     this.candleCarrierCounts = { left: 0, right: 0 };
-    this.nextResourceAt = 5;
+    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY;
     this.nextShotPowerAt = 7;
     this.seq = 1;
     this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
@@ -1570,7 +1578,7 @@ class GameRoom {
     this.applyDebugConfigToRoom(false);
     const resourceMul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
     const powerMul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
-    this.nextResourceAt = this.t + 5 / resourceMul;
+    this.nextResourceAt = this.t + RESOURCE_SPAWN_INITIAL_DELAY / resourceMul;
     this.nextShotPowerAt = this.t + 7 / powerMul;
     this.seedUpgradeCards();
     this.resetMatchReport();
@@ -1811,7 +1819,10 @@ class GameRoom {
     if (this.t >= this.nextResourceAt) {
       this.spawnMirroredResource();
       const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
-      this.nextResourceAt = this.t + Math.max(0.7, Math.max(3.2, 6 - this.t / 200) / mul);
+      this.nextResourceAt = this.t + Math.max(
+        0.7,
+        Math.max(RESOURCE_SPAWN_MIN_INTERVAL, RESOURCE_SPAWN_BASE_INTERVAL - this.t / RESOURCE_SPAWN_DECAY_DIVISOR) / mul
+      );
     }
 
     if (this.t >= this.nextShotPowerAt) {
@@ -7287,7 +7298,7 @@ class GameRoom {
   }
 
   goldFromMinionKill(side, scalar = 1) {
-    const base = 8 * scalar;
+    const base = MINION_KILL_GOLD_BASE * scalar;
     const bonus = 1 + (side.bountyLevel - 1) * 0.2;
     return Math.floor(base * bonus);
   }
@@ -7556,7 +7567,7 @@ class GameRoom {
   spawnMirroredResource() {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
-    const value = 26 + Math.floor(this.t / 35) * 2;
+    const value = RESOURCE_VALUE_BASE + Math.floor(this.t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
     this.resources.push({ id: this.seq++, x, y, r: 14, value });
     this.resources.push({ id: this.seq++, x: mirroredX(x), y, r: 14, value });
   }
