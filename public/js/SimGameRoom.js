@@ -39,6 +39,7 @@ const SHOT_POWER_SPAWN_MIN_INTERVAL = 1.8; // minimum spacing between spawns
 const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
 const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
+const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -86,7 +87,7 @@ const UPGRADE_PATH_BY_TYPE = {
   superMinionLevel: 'special',
 };
 const UPGRADE_LEVEL_CAPS = {
-  volleyLevel: 4,
+  volleyLevel: 2,
   balloonLevel: 4,
   dragonSuperBreathLevel: 1,
 };
@@ -4453,7 +4454,11 @@ class GameRoom {
   }
 
   statArrowCount(side) {
-    return 1 + Math.max(0, side.volleyLevel || 0);
+    const volleyCap = Number.isFinite(UPGRADE_LEVEL_CAPS.volleyLevel)
+      ? Math.max(0, Math.floor(UPGRADE_LEVEL_CAPS.volleyLevel))
+      : Number.POSITIVE_INFINITY;
+    const volley = Math.max(0, Math.round(Number(side?.volleyLevel) || 0));
+    return 1 + Math.min(volleyCap, volley);
   }
 
   comboProgress(side) {
@@ -7558,7 +7563,19 @@ class GameRoom {
 
   spawnMirroredShotPower() {
     const x = 680 + Math.random() * 110;
-    const type = randomFrom(SHOT_POWER_TYPES);
+    const hasMultiShot = SHOT_POWER_TYPES.includes('multiShot');
+    const nonMultiCount = Math.max(0, SHOT_POWER_TYPES.length - (hasMultiShot ? 1 : 0));
+    const equalChance = SHOT_POWER_TYPES.length > 0 ? (1 / SHOT_POWER_TYPES.length) : 0;
+    const targetMultiChance = Math.max(0, Math.min(0.95, equalChance * SHOT_POWER_MULTI_SHOT_CHANCE_RATIO));
+    const multiWeight = (!hasMultiShot || nonMultiCount <= 0 || targetMultiChance <= 0)
+      ? 1
+      : ((targetMultiChance * nonMultiCount) / Math.max(0.0001, 1 - targetMultiChance));
+    const weightedTypes = SHOT_POWER_TYPES.map((type) => ({
+      type,
+      weight: type === 'multiShot' ? multiWeight : 1,
+    }));
+    const picked = weightedRandomFrom(weightedTypes);
+    const type = picked?.type || randomFrom(SHOT_POWER_TYPES);
     const vy = SHOT_POWER_FALL_MIN_SPEED + Math.random() * (SHOT_POWER_FALL_MAX_SPEED - SHOT_POWER_FALL_MIN_SPEED);
 
     this.shotPowers.push({ id: this.seq++, side: 'left', x, y: 40, r: 16, type, vy });
