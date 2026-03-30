@@ -4793,12 +4793,15 @@ export class GameRenderer {
       const worldW = Number(eventWorld?.w) || Number(this.canvas?.width) || 1600;
       const centralBandMin = worldW * 0.33;
       const centralBandMax = worldW * 0.67;
-      if (Number.isFinite(px) && px >= centralBandMin && px <= centralBandMax && (pside === 'left' || pside === 'right')) {
+      const forcedKillTrail = Boolean(event?.killGoldTrail);
+      const inCentralBand = Number.isFinite(px) && px >= centralBandMin && px <= centralBandMax;
+      if ((forcedKillTrail || inCentralBand) && (pside === 'left' || pside === 'right')) {
+        const trailCount = Math.max(1, Math.min(10, Math.round(Number(event?.trailCount) || 2)));
         this.spawnGoldResourceTrail(px, py, pside, eventWorld || {
           towerLeftX: 190,
           towerRightX: 1410,
           towerY: 350,
-        }, 2);
+        }, trailCount);
       }
     }
     if (type === 'towerhit') {

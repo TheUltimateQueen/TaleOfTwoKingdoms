@@ -44,10 +44,13 @@ const RESOURCE_SPAWN_INITIAL_DELAY = 7.2;
 const RESOURCE_SPAWN_MIN_INTERVAL = 5.2;
 const RESOURCE_SPAWN_BASE_INTERVAL = 9.1;
 const RESOURCE_SPAWN_DECAY_DIVISOR = 220;
-const RESOURCE_VALUE_BASE = 22;
-const RESOURCE_VALUE_GROWTH_STEP = 2;
-const RESOURCE_VALUE_GROWTH_SECONDS = 45;
-const MINION_KILL_GOLD_BASE = 10;
+const RESOURCE_VALUE_START = 1;
+const RESOURCE_VALUE_TARGET = 26;
+const RESOURCE_VALUE_RAMP_SECONDS = 420;
+const RESOURCE_VALUE_RAMP_EXPONENT = 2.3;
+const MINION_KILL_GOLD_BASE = 12;
+const MINION_ARROW_ASSIST_WINDOW = 3.2;
+const MINION_ARROW_ASSIST_GOLD_MULT = 1.8;
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -3195,7 +3198,7 @@ class GameRoom {
             minion.heroArrowHits = (minion.heroArrowHits || 0) + 1;
             if (minion.heroArrowHits >= HERO_ARROW_FINISHER_HITS) {
               this.queueHitSfx('explosion', minion.x, minion.y - 6, a.side);
-              this.killMinionByRef(minion, a.side, { goldScalar: 1.2 });
+              this.killMinionByRef(minion, a.side, { goldScalar: 1.2, killSourceType: 'arrow' });
               continue;
             }
             if (minion.heroArrowHits === 3 || minion.heroArrowHits === 6) {
@@ -3209,7 +3212,7 @@ class GameRoom {
           }
 
           if (minion.explosive) {
-            this.killMinionByRef(minion, a.side, { triggerExplosion: true, impactDamage: a.dmg });
+            this.killMinionByRef(minion, a.side, { triggerExplosion: true, impactDamage: a.dmg, killSourceType: 'arrow' });
             continue;
           }
 
@@ -3230,7 +3233,7 @@ class GameRoom {
           this.applyFlameArrowImpact(a, minion, damage, minionBuckets);
           this.applyMaxComboSplash(a, minion, damage, minionBuckets);
           if (minion.hp <= 0) {
-            this.killMinionByRef(minion, a.side);
+            this.killMinionByRef(minion, a.side, { killSourceType: 'arrow' });
           }
         }
       }
@@ -4534,7 +4537,7 @@ class GameRoom {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
       this.dealDamageToMinion(victim, splash, arrow.side, 'arrow');
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
-      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75 });
+      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75, killSourceType: 'arrow' });
     }
   }
 
@@ -4590,7 +4593,7 @@ class GameRoom {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
       this.dealDamageToMinion(victim, splashDamage, arrow.side, 'arrow');
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
-      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8 });
+      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8, killSourceType: 'arrow' });
     }
   }
 
@@ -4598,6 +4601,11 @@ class GameRoom {
     if (!minion) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
     if (dmg <= 0) return 0;
+    const side = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
+    if (sourceType === 'arrow' && side) {
+      minion.lastArrowAssistSide = side;
+      minion.lastArrowAssistAt = this.t;
+    }
     let remaining = dmg;
     if (remaining > 0) {
       if (!Number.isFinite(minion.executiveOrderHitsLeft)) minion.executiveOrderHitsLeft = 0;
@@ -4649,7 +4657,6 @@ class GameRoom {
     if (remaining > 0) minion.hp -= remaining;
     this.queueDamageNumber(dmg, minion.x, minion.y - Math.max(8, minion.r * 0.25));
     const effective = Math.max(0, remaining);
-    const side = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
     if (side && effective > 0) this.recordDamage(side, sourceType === 'arrow' ? 'arrow' : 'unit', effective);
     return effective;
   }
@@ -6233,8 +6240,18 @@ class GameRoom {
   }
 
   awardMinionKillGold(killerSide, scalar = 1) {
-    if (killerSide === 'left') this.grantGold('left', this.goldFromMinionKill(this.left, scalar), true);
-    else if (killerSide === 'right') this.grantGold('right', this.goldFromMinionKill(this.right, scalar), true);
+    if (killerSide === 'left') return this.grantGold('left', this.goldFromMinionKill(this.left, scalar), true);
+    if (killerSide === 'right') return this.grantGold('right', this.goldFromMinionKill(this.right, scalar), true);
+    return 0;
+  }
+
+  isArrowAssistKill(minion, killerSide) {
+    if (!minion || (killerSide !== 'left' && killerSide !== 'right')) return false;
+    const assistSide = minion.lastArrowAssistSide === 'right' ? 'right' : (minion.lastArrowAssistSide === 'left' ? 'left' : null);
+    if (assistSide !== killerSide) return false;
+    const assistedAt = Number(minion.lastArrowAssistAt);
+    if (!Number.isFinite(assistedAt)) return false;
+    return (this.t - assistedAt) <= MINION_ARROW_ASSIST_WINDOW;
   }
 
   queueMinionDeathGhost(minion, killerSide = null) {
@@ -6303,6 +6320,7 @@ class GameRoom {
       goldScalar = 1,
       triggerExplosion = false,
       impactDamage = null,
+      killSourceType = null,
     } = options;
 
     if (this.tryNecroExpertRevive(minion, killerSide)) {
@@ -6320,7 +6338,15 @@ class GameRoom {
       this.resolveBalloonBombImpact(minion);
     }
 
-    this.awardMinionKillGold(killerSide, goldScalar);
+    const assistGold = killSourceType !== 'arrow' && this.isArrowAssistKill(minion, killerSide);
+    const finalGoldScalar = assistGold ? (goldScalar * MINION_ARROW_ASSIST_GOLD_MULT) : goldScalar;
+    const awardedGold = this.awardMinionKillGold(killerSide, finalGoldScalar);
+    if (assistGold && awardedGold > 0) {
+      this.queueHitSfx('resource', minion.x, minion.y, killerSide, {
+        killGoldTrail: true,
+        trailCount: Math.min(9, Math.max(3, Math.round(awardedGold / 6))),
+      });
+    }
     this.recordMinionKill(killerSide);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
     this.queueMinionDeathGhost(minion, killerSide);
@@ -7567,7 +7593,12 @@ class GameRoom {
   spawnMirroredResource() {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
-    const value = RESOURCE_VALUE_BASE + Math.floor(this.t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
+    const progress = clamp(this.t / Math.max(1, RESOURCE_VALUE_RAMP_SECONDS), 0, 1);
+    const eased = Math.pow(progress, RESOURCE_VALUE_RAMP_EXPONENT);
+    const value = Math.max(
+      1,
+      Math.round(RESOURCE_VALUE_START + (RESOURCE_VALUE_TARGET - RESOURCE_VALUE_START) * eased)
+    );
     this.resources.push({ id: this.seq++, x, y, r: 14, value });
     this.resources.push({ id: this.seq++, x: mirroredX(x), y, r: 14, value });
   }
