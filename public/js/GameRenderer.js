@@ -405,6 +405,10 @@ export class GameRenderer {
       left: { items: [], lastGold: 0 },
       right: { items: [], lastGold: 0 },
     };
+    this.treasureShotGoldState = {
+      left: { lastValue: 0, lastChangeMs: 0 },
+      right: { lastValue: 0, lastChangeMs: 0 },
+    };
     this.lastFrameAt = performance.now();
   }
 
@@ -447,6 +451,8 @@ export class GameRenderer {
       this.barracksDoorStatePrimed = false;
       this.treasurePileState.left = { items: [], lastGold: 0 };
       this.treasurePileState.right = { items: [], lastGold: 0 };
+      this.treasureShotGoldState.left = { lastValue: 0, lastChangeMs: 0 };
+      this.treasureShotGoldState.right = { lastValue: 0, lastChangeMs: 0 };
     }
   }
 
@@ -7570,7 +7576,7 @@ export class GameRenderer {
     const left = x - wallW / 2;
     const totalGold = Math.max(0, Number(sideState?.goldEarnedTotal) || 0);
 
-    this.drawTreasureChest(side, x, this.treasureChestY(y), totalGold, 10);
+    this.drawTreasureChest(side, x, this.treasureChestY(y), totalGold, 10, sideState);
 
     // Removed tower footing block for cleaner base silhouette.
 
@@ -7801,7 +7807,7 @@ export class GameRenderer {
     this.drawTowerUpgradeBadges(side, x, y, sideState);
   }
 
-  drawTreasureChest(side, x, y, totalGold, topCapY = -24) {
+  drawTreasureChest(side, x, y, totalGold, topCapY = -24, sideState = null) {
     const { ctx } = this;
     const chestW = 54;
     const chestH = 30;
@@ -7907,6 +7913,48 @@ export class GameRenderer {
     ctx.strokeText(chestLabel, chestAnchorX, chestY + chestH - 12);
     ctx.fillStyle = '#ffe08a';
     ctx.fillText(chestLabel, chestAnchorX, chestY + chestH - 12);
+
+    const arrowsFired = Math.max(0, Number(sideState?.arrowsFired) || 0);
+    if (arrowsFired > 0) {
+      const shotGold = Math.max(0, Math.round(Number(sideState?.arrowShotGoldCurrent) || 0));
+      const shotLabel = `+${shotGold.toLocaleString()}`;
+      const nowMs = performance.now();
+      const pulseState = this.treasureShotGoldState?.[side];
+      if (pulseState) {
+        if (pulseState.lastValue !== shotGold) {
+          pulseState.lastValue = shotGold;
+          pulseState.lastChangeMs = nowMs;
+        }
+      }
+      const ageSec = pulseState ? Math.max(0, (nowMs - (pulseState.lastChangeMs || nowMs)) / 1000) : 1;
+      const pulse = Math.max(0, 1 - ageSec / 0.34);
+      const baseFont = Math.max(9, Math.min(15, 9 + Math.log10(shotGold + 1) * 3.2));
+      const fontPx = Math.round(baseFont * (1 + pulse * 0.18));
+      const lineY = chestY + chestH + 15;
+
+      ctx.save();
+      ctx.font = `bold ${fontPx}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const textW = Math.max(8, ctx.measureText(shotLabel).width);
+      const padX = Math.max(5, Math.round(fontPx * 0.32));
+      const pillW = textW + padX * 2;
+      const pillH = Math.max(11, fontPx + 2);
+      const pillX = chestAnchorX - pillW / 2;
+      const pillY = lineY - pillH / 2;
+      const positive = shotGold > 0;
+      ctx.fillStyle = this.withAlpha(positive ? '#38240f' : '#202a39', 0.78);
+      ctx.fillRect(pillX, pillY, pillW, pillH);
+      ctx.strokeStyle = this.withAlpha(positive ? '#d4a85f' : '#7d8ea8', 0.72);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pillX + 0.5, pillY + 0.5, pillW - 1, pillH - 1);
+      ctx.strokeStyle = this.withAlpha(positive ? '#4a2a0f' : '#243247', 0.88);
+      ctx.lineWidth = Math.max(2, fontPx * 0.24);
+      ctx.strokeText(shotLabel, chestAnchorX, lineY);
+      ctx.fillStyle = positive ? '#ffd774' : '#c4d2e8';
+      ctx.fillText(shotLabel, chestAnchorX, lineY);
+      ctx.restore();
+    }
   }
 
   ensureTreasurePileEntries(side, totalGold, count) {
