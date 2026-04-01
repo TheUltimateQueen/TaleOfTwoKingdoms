@@ -1555,6 +1555,7 @@ export class GameClient {
           minionKills: 0,
           arrowResourceGoldCollected: Number(snapshot?.left?.arrowResourceGoldCollected) || 0,
           diggerResourceGoldCollected: Number(snapshot?.left?.diggerResourceGoldCollected) || 0,
+          minionDamageGoldCollected: Number(snapshot?.left?.minionDamageGoldCollected) || 0,
         },
         right: {
           arrowDamage: 0,
@@ -1564,6 +1565,7 @@ export class GameClient {
           minionKills: 0,
           arrowResourceGoldCollected: Number(snapshot?.right?.arrowResourceGoldCollected) || 0,
           diggerResourceGoldCollected: Number(snapshot?.right?.diggerResourceGoldCollected) || 0,
+          minionDamageGoldCollected: Number(snapshot?.right?.minionDamageGoldCollected) || 0,
         },
       },
       luck: {
@@ -1590,10 +1592,24 @@ export class GameClient {
     const luckTotal = Math.max(1e-6, leftLuckValue + rightLuckValue);
     const luckLeftFill = Math.max(0, Math.min(100, (leftLuckValue / luckTotal) * 100));
     const luckRightFill = Math.max(0, Math.min(100, (rightLuckValue / luckTotal) * 100));
-    const leftLuckOnTop = luckLeftFill >= luckRightFill;
     const leftTotalDamage = (Number(leftTotals.arrowDamage) || 0) + (Number(leftTotals.unitDamage) || 0) + (Number(leftTotals.towerDamageDealt) || 0);
     const rightTotalDamage = (Number(rightTotals.arrowDamage) || 0) + (Number(rightTotals.unitDamage) || 0) + (Number(rightTotals.towerDamageDealt) || 0);
     const winner = sideVictoryLabel(snapshot?.winner, this.state.themeMode);
+    const miniCompareBar = (leftRaw, rightRaw, ariaLabel) => {
+      const left = Math.max(0, Number(leftRaw) || 0);
+      const right = Math.max(0, Number(rightRaw) || 0);
+      const total = Math.max(1e-6, left + right);
+      const leftFill = Math.max(0, Math.min(100, (left / total) * 100));
+      const rightFill = Math.max(0, Math.min(100, (right / total) * 100));
+      const leftOnTop = leftFill >= rightFill;
+      return `
+        <div class="post-stat-mini-track" role="img" aria-label="${ariaLabel}">
+          <div class="post-stat-mini-mid"></div>
+          <span class="post-stat-mini-west" style="width:${leftFill}%; z-index:${leftOnTop ? 2 : 1}"></span>
+          <span class="post-stat-mini-east" style="width:${rightFill}%; z-index:${leftOnTop ? 1 : 2}"></span>
+        </div>
+      `;
+    };
     const cards = [
       { title: 'Duration', value: this.formatPostTime(report?.durationSec || snapshot?.t || 0) },
       { title: 'Winner', value: winner },
@@ -1601,18 +1617,25 @@ export class GameClient {
       { title: 'Tower Damage', value: `<span class="team-west">${this.numberCompact(leftTotals.towerDamageDealt, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.towerDamageDealt, 0)}</span>` },
       { title: 'Total Damage', value: `<span class="team-west">${this.numberCompact(leftTotalDamage, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotalDamage, 0)}</span>` },
       { title: 'Minion Kills', value: `<span class="team-west">${this.numberCompact(leftTotals.minionKills, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.minionKills, 0)}</span>` },
-      { title: 'Arrow Gold', value: `<span class="team-west">${this.numberCompact(leftTotals.arrowResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.arrowResourceGoldCollected, 0)}</span>` },
-      { title: 'Digger Gold', value: `<span class="team-west">${this.numberCompact(leftTotals.diggerResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.diggerResourceGoldCollected, 0)}</span>` },
+      {
+        title: 'Arrow Gold',
+        value: `<span class="team-west">${this.numberCompact(leftTotals.arrowResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.arrowResourceGoldCollected, 0)}</span>`,
+        bar: miniCompareBar(leftTotals.arrowResourceGoldCollected, rightTotals.arrowResourceGoldCollected, 'Arrow gold comparison'),
+      },
+      {
+        title: 'Digger Gold',
+        value: `<span class="team-west">${this.numberCompact(leftTotals.diggerResourceGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.diggerResourceGoldCollected, 0)}</span>`,
+        bar: miniCompareBar(leftTotals.diggerResourceGoldCollected, rightTotals.diggerResourceGoldCollected, 'Digger gold comparison'),
+      },
+      {
+        title: 'Minion Damage Gold',
+        value: `<span class="team-west">${this.numberCompact(leftTotals.minionDamageGoldCollected, 0)}</span> <span class="team-sep">vs</span> <span class="team-east">${this.numberCompact(rightTotals.minionDamageGoldCollected, 0)}</span>`,
+        bar: miniCompareBar(leftTotals.minionDamageGoldCollected, rightTotals.minionDamageGoldCollected, 'Minion damage gold comparison'),
+      },
       {
         title: 'Luck % (Higher Better)',
         value: `<span class="team-west">${leftLuckText}</span> <span class="team-sep">vs</span> <span class="team-east">${rightLuckText}</span>`,
-        bar: `
-          <div class="post-stat-mini-track" role="img" aria-label="Luck percent comparison">
-            <div class="post-stat-mini-mid"></div>
-            <span class="post-stat-mini-west" style="width:${luckLeftFill}%; z-index:${leftLuckOnTop ? 2 : 1}"></span>
-            <span class="post-stat-mini-east" style="width:${luckRightFill}%; z-index:${leftLuckOnTop ? 1 : 2}"></span>
-          </div>
-        `,
+        bar: miniCompareBar(luckLeftFill, luckRightFill, 'Luck percent comparison'),
       },
     ];
     this.postSummaryGrid.innerHTML = cards.map((card) => `
