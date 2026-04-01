@@ -1647,21 +1647,23 @@ export class GameRenderer {
         if (riderChargeReady) {
           const chargePulse = 0.5 + 0.5 * Math.sin(animNow * 12.6 + animSeed * 1.7);
           ctx.save();
-          ctx.globalAlpha = 0.24 + chargePulse * 0.22;
-          ctx.fillStyle = '#ffe0a8';
-          ctx.beginPath();
-          ctx.ellipse(dir * 1.6 * scale, 4.2 * scale, 15.8 * scale + chargePulse * 2.6 * scale, 9.6 * scale + chargePulse * 1.5 * scale, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 0.86;
+          ctx.globalAlpha = 0.7 + chargePulse * 0.24;
           ctx.strokeStyle = '#fff1cc';
-          ctx.lineWidth = 1.7 * scale;
-          ctx.setLineDash([3.6 * scale, 2.2 * scale]);
-          ctx.beginPath();
-          ctx.arc(0, 5.2 * scale, 14.6 * scale + chargePulse * 2.1 * scale, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.strokeStyle = '#fff9ea';
-          ctx.lineWidth = 1.6 * scale;
+          ctx.lineWidth = 1.5 * scale;
+          const shellCx = dir * 1.7 * scale;
+          const shellCy = 4.6 * scale;
+          const shellPhase = animNow * 11.8 + animSeed * 1.2;
+          for (let band = 0; band < 3; band += 1) {
+            const rx = (12.6 + band * 2.4 + chargePulse * 2.1) * scale;
+            const ry = (7.4 + band * 1.3 + chargePulse * 1.1) * scale;
+            for (let seg = 0; seg < 4; seg += 1) {
+              const start = shellPhase + seg * (Math.PI * 0.5) + band * 0.28;
+              const end = start + 0.56 + chargePulse * 0.14;
+              ctx.beginPath();
+              ctx.ellipse(shellCx, shellCy, rx, ry, 0, start, end);
+              ctx.stroke();
+            }
+          }
           for (let i = 0; i < 2; i += 1) {
             const markX = 15.6 * dir * scale + i * dir * 3.4 * scale;
             const markY = -8.8 * scale - i * 0.45 * scale;
@@ -1671,6 +1673,16 @@ export class GameRenderer {
             ctx.moveTo(markX - dir * markW, markY - markH);
             ctx.lineTo(markX, markY);
             ctx.lineTo(markX - dir * markW, markY + markH);
+            ctx.stroke();
+          }
+          ctx.strokeStyle = '#f7cf8f';
+          ctx.lineWidth = 1.1 * scale;
+          for (let i = 0; i < 2; i += 1) {
+            const startX = shellCx + dir * (9.8 + i * 2.3) * scale;
+            const startY = shellCy + (i === 0 ? -5.2 : 4.5) * scale;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(startX + dir * (3.8 + chargePulse * 1.8) * scale, startY + (i === 0 ? -0.4 : 0.4) * scale);
             ctx.stroke();
           }
           ctx.restore();
@@ -2296,21 +2308,23 @@ export class GameRenderer {
       if (riderChargeReady) {
         const chargePulse = 0.5 + 0.5 * Math.sin(animNow * 12.6 + animSeed * 1.7);
         ctx.save();
-        ctx.globalAlpha = 0.24 + chargePulse * 0.22;
-        ctx.fillStyle = '#ffd8e3';
-        ctx.beginPath();
-        ctx.ellipse(dir * 1.5 * scale, 4.3 * scale, 15.6 * scale + chargePulse * 2.6 * scale, 9.4 * scale + chargePulse * 1.5 * scale, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 0.86;
+        ctx.globalAlpha = 0.72 + chargePulse * 0.22;
         ctx.strokeStyle = '#ffe8ef';
-        ctx.lineWidth = 1.7 * scale;
-        ctx.setLineDash([3.6 * scale, 2.2 * scale]);
-        ctx.beginPath();
-        ctx.arc(0, 5.1 * scale, 14.4 * scale + chargePulse * 2.1 * scale, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.strokeStyle = '#fff2f7';
-        ctx.lineWidth = 1.6 * scale;
+        ctx.lineWidth = 1.5 * scale;
+        const shellCx = dir * 1.6 * scale;
+        const shellCy = 4.5 * scale;
+        const shellPhase = animNow * 11.8 + animSeed * 1.2;
+        for (let band = 0; band < 3; band += 1) {
+          const rx = (12.4 + band * 2.4 + chargePulse * 2.1) * scale;
+          const ry = (7.2 + band * 1.3 + chargePulse * 1.1) * scale;
+          for (let seg = 0; seg < 4; seg += 1) {
+            const start = shellPhase + seg * (Math.PI * 0.5) + band * 0.28;
+            const end = start + 0.56 + chargePulse * 0.14;
+            ctx.beginPath();
+            ctx.ellipse(shellCx, shellCy, rx, ry, 0, start, end);
+            ctx.stroke();
+          }
+        }
         for (let i = 0; i < 2; i += 1) {
           const markX = 15.8 * dir * scale + i * dir * 3.4 * scale;
           const markY = -8.7 * scale - i * 0.45 * scale;
@@ -2320,6 +2334,16 @@ export class GameRenderer {
           ctx.moveTo(markX - dir * markW, markY - markH);
           ctx.lineTo(markX, markY);
           ctx.lineTo(markX - dir * markW, markY + markH);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = '#f3aebe';
+        ctx.lineWidth = 1.1 * scale;
+        for (let i = 0; i < 2; i += 1) {
+          const startX = shellCx + dir * (9.9 + i * 2.2) * scale;
+          const startY = shellCy + (i === 0 ? -5.1 : 4.2) * scale;
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(startX + dir * (3.7 + chargePulse * 1.7) * scale, startY + (i === 0 ? -0.5 : 0.5) * scale);
           ctx.stroke();
         }
         ctx.restore();
@@ -12595,29 +12619,23 @@ export class GameRenderer {
       ctx.stroke();
       if (chargeGlow) {
         ctx.save();
-        ctx.globalAlpha = 0.24 + chargePulse * 0.2;
-        ctx.fillStyle = '#ffe0a0';
-        ctx.beginPath();
-        ctx.ellipse(
-          dir * bodyR * 0.25,
-          horseY - bodyR * 0.06,
-          horseBody + 4 + chargePulse * 2.2,
-          bodyR * (0.82 + chargePulse * 0.18),
-          0,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-        ctx.globalAlpha = 0.86;
+        ctx.globalAlpha = 0.78 + chargePulse * 0.18;
         ctx.strokeStyle = '#fff2c7';
-        ctx.lineWidth = 2.3;
-        ctx.setLineDash([4.5, 3.2]);
-        ctx.beginPath();
-        ctx.arc(0, horseY, horseBody + 3.8 + chargePulse * 1.8, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.lineWidth = 1.7;
+        const shellPhase = performance.now() * 0.019 + (Number(minion.id) || 0) * 0.39;
+        for (let band = 0; band < 3; band += 1) {
+          const rx = horseBody * (0.94 + band * 0.12 + chargePulse * 0.06);
+          const ry = bodyR * (0.66 + band * 0.1 + chargePulse * 0.05);
+          for (let seg = 0; seg < 4; seg += 1) {
+            const start = shellPhase + seg * (Math.PI * 0.5) + band * 0.24;
+            const end = start + 0.52 + chargePulse * 0.12;
+            ctx.beginPath();
+            ctx.ellipse(0, horseY, rx, ry, 0, start, end);
+            ctx.stroke();
+          }
+        }
         ctx.strokeStyle = '#fff8e5';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.1;
         const markerY = horseY - bodyR * 1.34;
         for (let i = 0; i < 2; i += 1) {
           const markerX = headX + dir * (bodyR * (0.46 + i * 0.45));
@@ -12626,6 +12644,16 @@ export class GameRenderer {
           ctx.moveTo(markerX - dir * markerSize, markerY - markerSize * 0.75);
           ctx.lineTo(markerX, markerY);
           ctx.lineTo(markerX - dir * markerSize, markerY + markerSize * 0.75);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = '#ffd48f';
+        ctx.lineWidth = 1.2;
+        for (let i = 0; i < 2; i += 1) {
+          const startX = headX + dir * bodyR * (0.34 + i * 0.3);
+          const startY = headY + (i === 0 ? -bodyR * 0.34 : bodyR * 0.26);
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(startX + dir * bodyR * (0.42 + chargePulse * 0.2), startY + (i === 0 ? -0.4 : 0.4));
           ctx.stroke();
         }
         ctx.restore();
