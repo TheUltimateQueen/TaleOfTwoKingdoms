@@ -1645,6 +1645,35 @@ export class GameRenderer {
         ctx.fillStyle = '#1f2a38';
         ctx.fillRect(-1.8 * scale, -13.1 * scale, 3.6 * scale, 0.9 * scale);
         if (riderChargeReady) {
+          const chargePulse = 0.5 + 0.5 * Math.sin(animNow * 12.6 + animSeed * 1.7);
+          ctx.save();
+          ctx.globalAlpha = 0.24 + chargePulse * 0.22;
+          ctx.fillStyle = '#ffe0a8';
+          ctx.beginPath();
+          ctx.ellipse(dir * 1.6 * scale, 4.2 * scale, 15.8 * scale + chargePulse * 2.6 * scale, 9.6 * scale + chargePulse * 1.5 * scale, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.86;
+          ctx.strokeStyle = '#fff1cc';
+          ctx.lineWidth = 1.7 * scale;
+          ctx.setLineDash([3.6 * scale, 2.2 * scale]);
+          ctx.beginPath();
+          ctx.arc(0, 5.2 * scale, 14.6 * scale + chargePulse * 2.1 * scale, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#fff9ea';
+          ctx.lineWidth = 1.6 * scale;
+          for (let i = 0; i < 2; i += 1) {
+            const markX = 15.6 * dir * scale + i * dir * 3.4 * scale;
+            const markY = -8.8 * scale - i * 0.45 * scale;
+            const markW = 3 * scale;
+            const markH = 2 * scale;
+            ctx.beginPath();
+            ctx.moveTo(markX - dir * markW, markY - markH);
+            ctx.lineTo(markX, markY);
+            ctx.lineTo(markX - dir * markW, markY + markH);
+            ctx.stroke();
+          }
+          ctx.restore();
           // First boosted hit: lance-forward charge profile.
           ctx.strokeStyle = '#f3e8d4';
           ctx.lineWidth = 2.5;
@@ -2265,6 +2294,35 @@ export class GameRenderer {
       ctx.closePath();
       ctx.fill();
       if (riderChargeReady) {
+        const chargePulse = 0.5 + 0.5 * Math.sin(animNow * 12.6 + animSeed * 1.7);
+        ctx.save();
+        ctx.globalAlpha = 0.24 + chargePulse * 0.22;
+        ctx.fillStyle = '#ffd8e3';
+        ctx.beginPath();
+        ctx.ellipse(dir * 1.5 * scale, 4.3 * scale, 15.6 * scale + chargePulse * 2.6 * scale, 9.4 * scale + chargePulse * 1.5 * scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.86;
+        ctx.strokeStyle = '#ffe8ef';
+        ctx.lineWidth = 1.7 * scale;
+        ctx.setLineDash([3.6 * scale, 2.2 * scale]);
+        ctx.beginPath();
+        ctx.arc(0, 5.1 * scale, 14.4 * scale + chargePulse * 2.1 * scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = '#fff2f7';
+        ctx.lineWidth = 1.6 * scale;
+        for (let i = 0; i < 2; i += 1) {
+          const markX = 15.8 * dir * scale + i * dir * 3.4 * scale;
+          const markY = -8.7 * scale - i * 0.45 * scale;
+          const markW = 3 * scale;
+          const markH = 2 * scale;
+          ctx.beginPath();
+          ctx.moveTo(markX - dir * markW, markY - markH);
+          ctx.lineTo(markX, markY);
+          ctx.lineTo(markX - dir * markW, markY + markH);
+          ctx.stroke();
+        }
+        ctx.restore();
         // First boosted hit: switch to a charge lance before the opening strike lands.
         ctx.strokeStyle = '#f2dcc3';
         ctx.lineWidth = 2.35;
@@ -11594,6 +11652,25 @@ export class GameRenderer {
       ctx.font = `bold ${minion.super ? 13 : 11}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText('RIDER', x, y - bodyR * scale - (minion.super ? 34 : 20));
+      if (minion.riderChargeReady) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.018 + (Number(minion.id) || 0) * 0.73);
+        ctx.save();
+        ctx.fillStyle = pulse > 0.5 ? '#fff5cf' : '#ffd88d';
+        ctx.font = `bold ${minion.super ? 12 : 10}px sans-serif`;
+        ctx.fillText('CHARGE READY', x, y - bodyR * scale - (minion.super ? 46 : 32));
+        ctx.strokeStyle = '#fff1c7';
+        ctx.lineWidth = 1.5;
+        const markerY = y - bodyR * scale - (minion.super ? 39 : 27);
+        ctx.beginPath();
+        ctx.moveTo(x - 9, markerY - 2);
+        ctx.lineTo(x - 3, markerY);
+        ctx.lineTo(x - 9, markerY + 2);
+        ctx.moveTo(x + 9, markerY - 2);
+        ctx.lineTo(x + 3, markerY);
+        ctx.lineTo(x + 9, markerY + 2);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     const hpPct = Math.max(0, minion.hp / minion.maxHp);
@@ -12436,6 +12513,9 @@ export class GameRenderer {
       const horseBody = bodyR * 1.28;
       const horseY = bodyR * 0.78;
       const chargeGlow = Boolean(minion.riderChargeReady);
+      const chargePulse = chargeGlow
+        ? (0.5 + 0.5 * Math.sin(performance.now() * 0.018 + (Number(minion.id) || 0) * 0.71))
+        : 0;
       const legSwing = riderSuperHorse ? Math.sin(riderGaitPhase) * (bodyR * 0.3) : 0;
       const neckX = dir * horseBody * 0.74;
       const neckY = horseY - bodyR * 0.32;
@@ -12514,11 +12594,41 @@ export class GameRenderer {
       ctx.lineTo(horseBody * 0.72 + legSwing * 0.34, horseY + bodyR * 0.92);
       ctx.stroke();
       if (chargeGlow) {
-        ctx.strokeStyle = '#ffd88d88';
-        ctx.lineWidth = 2;
+        ctx.save();
+        ctx.globalAlpha = 0.24 + chargePulse * 0.2;
+        ctx.fillStyle = '#ffe0a0';
         ctx.beginPath();
-        ctx.arc(0, horseY, horseBody + 3, 0, Math.PI * 2);
+        ctx.ellipse(
+          dir * bodyR * 0.25,
+          horseY - bodyR * 0.06,
+          horseBody + 4 + chargePulse * 2.2,
+          bodyR * (0.82 + chargePulse * 0.18),
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        ctx.globalAlpha = 0.86;
+        ctx.strokeStyle = '#fff2c7';
+        ctx.lineWidth = 2.3;
+        ctx.setLineDash([4.5, 3.2]);
+        ctx.beginPath();
+        ctx.arc(0, horseY, horseBody + 3.8 + chargePulse * 1.8, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = '#fff8e5';
+        ctx.lineWidth = 2;
+        const markerY = horseY - bodyR * 1.34;
+        for (let i = 0; i < 2; i += 1) {
+          const markerX = headX + dir * (bodyR * (0.46 + i * 0.45));
+          const markerSize = bodyR * (0.2 + i * 0.03);
+          ctx.beginPath();
+          ctx.moveTo(markerX - dir * markerSize, markerY - markerSize * 0.75);
+          ctx.lineTo(markerX, markerY);
+          ctx.lineTo(markerX - dir * markerSize, markerY + markerSize * 0.75);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
     }
 
