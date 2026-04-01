@@ -62,7 +62,7 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'spawnLevel', code: 'SP', base: 1 },
   { type: 'unitHpLevel', code: 'HP', base: 1 },
   { type: 'resourceLevel', code: 'RS', base: 1 },
-  { type: 'bountyLevel', code: 'KG', base: 1 },
+  { type: 'bountyLevel', code: 'CG', base: 1 },
   { type: 'powerLevel', code: 'PW', base: 1 },
   { type: 'specialRateLevel', code: 'SR', base: 1 },
   { type: 'balloonLevel', code: 'BA', base: 0 },
@@ -393,6 +393,7 @@ export class GameRenderer {
     this.cardTextFitCacheMaxEntries = 1024;
     this.upgradeGlyphImageCache = new Map();
     this.goldResourceTrails = [];
+    this.resourceSpawnTelegraphs = [];
     this.powerupTrails = [];
     this.barracksDoorActors = { left: null, right: null };
     this.prevBarracksRollState = {
@@ -436,6 +437,7 @@ export class GameRenderer {
       this.militiaFoodFx.clear();
       this.cardTextFitCache.clear();
       this.goldResourceTrails.length = 0;
+      this.resourceSpawnTelegraphs.length = 0;
       this.powerupTrails.length = 0;
       this.barracksDoorActors = { left: null, right: null };
       this.prevBarracksRollState = {
@@ -4464,6 +4466,62 @@ export class GameRenderer {
     return towerY + 117;
   }
 
+  spawnResourceTelegraph(x, y, side, ttl = 0.5) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.resourceSpawnTelegraphs.push({
+      x,
+      y,
+      side: side === 'right' ? 'right' : (side === 'left' ? 'left' : null),
+      age: 0,
+      ttl: Math.max(0.1, Math.min(1.5, Number(ttl) || 0.5)),
+      seed: Math.random() * Math.PI * 2,
+    });
+  }
+
+  updateResourceTelegraphs(dt) {
+    let write = 0;
+    for (let i = 0; i < this.resourceSpawnTelegraphs.length; i += 1) {
+      const telegraph = this.resourceSpawnTelegraphs[i];
+      telegraph.age += dt;
+      if (telegraph.age >= telegraph.ttl) continue;
+      this.resourceSpawnTelegraphs[write] = telegraph;
+      write += 1;
+    }
+    this.resourceSpawnTelegraphs.length = write;
+  }
+
+  drawResourceTelegraphs() {
+    const { ctx } = this;
+    for (const telegraph of this.resourceSpawnTelegraphs) {
+      const t = Math.max(0, Math.min(1, telegraph.age / Math.max(0.0001, telegraph.ttl)));
+      const ease = 1 - Math.pow(1 - t, 3);
+      const pulse = 0.8 + Math.sin((ease * Math.PI * 2) + telegraph.seed) * 0.12;
+      const radius = (4 + ease * 16) * pulse;
+      const alpha = 1 - Math.max(0, ease - 0.7) / 0.3;
+      const x = telegraph.x;
+      const y = telegraph.y;
+
+      const halo = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.4);
+      halo.addColorStop(0, this.withAlpha('#fff3b8', alpha * 0.9));
+      halo.addColorStop(0.52, this.withAlpha('#f5c357', alpha * 0.72));
+      halo.addColorStop(1, this.withAlpha('#d28c1a', 0));
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, radius * 2.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#ffd873', alpha * 0.95);
+      ctx.beginPath();
+      ctx.arc(x, y, radius * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = this.withAlpha('#fff9dd', alpha * 0.9);
+      ctx.beginPath();
+      ctx.arc(x - radius * 0.15, y - radius * 0.16, radius * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   spawnGoldResourceTrail(fromX, fromY, side, world, count = 2) {
     const towerX = side === 'right' ? Number(world?.towerRightX) || 0 : Number(world?.towerLeftX) || 0;
     const towerY = Number(world?.towerY) || 0;
@@ -4596,6 +4654,7 @@ export class GameRenderer {
     this.updateTowerShake(dt);
     this.updateGameOverCinematic(snapshot, world, now, dt);
     this.updateMilitiaFoodFx(snapshot.minions, dt);
+    this.updateResourceTelegraphs(dt);
     this.updateGoldResourceTrails(snapshot, world, dt);
     this.updatePowerupTrails(snapshot, world, dt);
 
@@ -4671,6 +4730,7 @@ export class GameRenderer {
 
     this.drawUpgradePlaceholders(snapshot);
 
+    this.drawResourceTelegraphs();
     for (const res of snapshot.resources) this.drawResourceNode(res);
     this.drawGoldResourceTrails();
     this.drawPowerupTrails();
@@ -4788,14 +4848,16 @@ export class GameRenderer {
       }
       return;
     }
+    if (type === 'resource_telegraph') {
+      this.spawnResourceTelegraph(px, py, pside, Number(event?.ttl) || 0.5);
+      return;
+    }
     const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;
     if (type === 'resource') {
       const worldW = Number(eventWorld?.w) || Number(this.canvas?.width) || 1600;
       const centralBandMin = worldW * 0.33;
       const centralBandMax = worldW * 0.67;
-      const forcedKillTrail = Boolean(event?.killGoldTrail);
-      const inCentralBand = Number.isFinite(px) && px >= centralBandMin && px <= centralBandMax;
-      if ((forcedKillTrail || inCentralBand) && (pside === 'left' || pside === 'right')) {
+      if (Number.isFinite(px) && px >= centralBandMin && px <= centralBandMax && (pside === 'left' || pside === 'right')) {
         const trailCount = Math.max(1, Math.min(10, Math.round(Number(event?.trailCount) || 2)));
         this.spawnGoldResourceTrail(px, py, pside, eventWorld || {
           towerLeftX: 190,

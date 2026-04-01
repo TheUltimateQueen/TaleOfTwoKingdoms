@@ -44,12 +44,15 @@ const RESOURCE_SPAWN_INITIAL_DELAY = 7.2;
 const RESOURCE_SPAWN_MIN_INTERVAL = 5.2;
 const RESOURCE_SPAWN_BASE_INTERVAL = 9.1;
 const RESOURCE_SPAWN_DECAY_DIVISOR = 220;
+const RESOURCE_SPAWN_INTERVAL_MULT = 2;
+const RESOURCE_SPAWN_TELEGRAPH_DURATION = 0.5;
 const RESOURCE_VALUE_BASE = 22;
 const RESOURCE_VALUE_GROWTH_STEP = 2;
 const RESOURCE_VALUE_GROWTH_SECONDS = 45;
 const MINION_KILL_GOLD_BASE = 12;
-const MINION_ARROW_ASSIST_WINDOW = 3.2;
-const MINION_ARROW_ASSIST_GOLD_MULT = 1.8;
+const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1;
+const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
+const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 6;
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -608,6 +611,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: 100,
+    arrowDamageGoldRemainder: 0,
     upgradeAutoPickAt: null,
     archerAimY: archerPulls[0].archerAimY,
     pullX: archerPulls[0].pullX,
@@ -729,7 +733,9 @@ class GameRoom {
       hasDisplay: false,
     };
 
-    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY;
+    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT;
+    this.nextResourceTelegraphAt = Math.max(0, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
     this.candles = {
@@ -753,7 +759,9 @@ class GameRoom {
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
-    this.nextResourceAt = this.t + RESOURCE_SPAWN_INITIAL_DELAY / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    this.nextResourceAt = this.t + (RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT) / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.pendingResourceSpawns = null;
     this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
 
     this.seedUpgradeCards();
@@ -1129,7 +1137,12 @@ class GameRoom {
 
     if (refreshExisting) {
       for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
-      this.nextResourceAt = Math.min(Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_INITIAL_DELAY, this.t + 0.4);
+      this.nextResourceAt = Math.min(
+        Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT,
+        this.t + 0.4
+      );
+      this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+      this.pendingResourceSpawns = null;
       this.nextShotPowerAt = Math.min(Number(this.nextShotPowerAt) || this.t + 7, this.t + 0.6);
     }
   }
@@ -1349,6 +1362,7 @@ class GameRoom {
       y: roundTo(res.y, 1),
       r: roundTo(res.r, 1),
       value: Math.max(0, Math.round(Number(res.value) || 0)),
+      side: res.side === 'right' ? 'right' : 'left',
     }));
     const shotPowers = this.shotPowers.map((power) => ({
       id: power.id,
@@ -1568,7 +1582,9 @@ class GameRoom {
     this.lineEvents = [];
     this.activePresidents = { left: [], right: [] };
     this.candleCarrierCounts = { left: 0, right: 0 };
-    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY;
+    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT;
+    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
     this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
@@ -1580,7 +1596,8 @@ class GameRoom {
     this.applyDebugConfigToRoom(false);
     const resourceMul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
     const powerMul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
-    this.nextResourceAt = this.t + RESOURCE_SPAWN_INITIAL_DELAY / resourceMul;
+    this.nextResourceAt = this.t + (RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT) / resourceMul;
+    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
     this.nextShotPowerAt = this.t + 7 / powerMul;
     this.seedUpgradeCards();
     this.resetMatchReport();
@@ -1818,13 +1835,18 @@ class GameRoom {
     this.enforceDebugFocusedMinimum('left');
     this.enforceDebugFocusedMinimum('right');
 
+    if (this.t >= this.nextResourceTelegraphAt && !this.pendingResourceSpawns) {
+      this.pendingResourceSpawns = this.makeMirroredResourceSpawn(this.nextResourceAt);
+      this.queueResourceTelegraph(this.pendingResourceSpawns);
+    }
     if (this.t >= this.nextResourceAt) {
-      this.spawnMirroredResource();
-      const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
-      this.nextResourceAt = this.t + Math.max(
-        0.7,
-        Math.max(RESOURCE_SPAWN_MIN_INTERVAL, RESOURCE_SPAWN_BASE_INTERVAL - this.t / RESOURCE_SPAWN_DECAY_DIVISOR) / mul
-      );
+      const readySpawns = Array.isArray(this.pendingResourceSpawns) && this.pendingResourceSpawns.length
+        ? this.pendingResourceSpawns
+        : this.makeMirroredResourceSpawn(this.nextResourceAt);
+      this.spawnMirroredResource(readySpawns);
+      this.pendingResourceSpawns = null;
+      this.nextResourceAt = this.t + this.resourceSpawnInterval();
+      this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
     }
 
     if (this.t >= this.nextShotPowerAt) {
@@ -3197,7 +3219,7 @@ class GameRoom {
             minion.heroArrowHits = (minion.heroArrowHits || 0) + 1;
             if (minion.heroArrowHits >= HERO_ARROW_FINISHER_HITS) {
               this.queueHitSfx('explosion', minion.x, minion.y - 6, a.side);
-              this.killMinionByRef(minion, a.side, { goldScalar: 1.2, killSourceType: 'arrow' });
+              this.killMinionByRef(minion, a.side, { goldScalar: 1.2 });
               continue;
             }
             if (minion.heroArrowHits === 3 || minion.heroArrowHits === 6) {
@@ -3211,11 +3233,11 @@ class GameRoom {
           }
 
           if (minion.explosive) {
-            this.killMinionByRef(minion, a.side, { triggerExplosion: true, impactDamage: a.dmg, killSourceType: 'arrow' });
+            this.killMinionByRef(minion, a.side, { triggerExplosion: true, impactDamage: a.dmg });
             continue;
           }
 
-          this.dealDamageToMinion(minion, damage, a.side, 'arrow');
+          this.dealDamageToMinion(minion, damage, a.side, 'arrow', a);
           if (dragonHeartshot) {
             minion.hitFlashTtl = Math.max(Number(minion.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL * 1.85);
           }
@@ -3232,7 +3254,7 @@ class GameRoom {
           this.applyFlameArrowImpact(a, minion, damage, minionBuckets);
           this.applyMaxComboSplash(a, minion, damage, minionBuckets);
           if (minion.hp <= 0) {
-            this.killMinionByRef(minion, a.side, { killSourceType: 'arrow' });
+            this.killMinionByRef(minion, a.side);
           }
         }
       }
@@ -4534,9 +4556,9 @@ class GameRoom {
 
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
-      this.dealDamageToMinion(victim, splash, arrow.side, 'arrow');
+      this.dealDamageToMinion(victim, splash, arrow.side, 'arrow', arrow);
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
-      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75, killSourceType: 'arrow' });
+      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.75 });
     }
   }
 
@@ -4544,7 +4566,7 @@ class GameRoom {
     if (!arrow || arrow.powerType !== 'flameShot' || !target) return;
 
     const burnDamage = Math.max(1, baseDamage * (Number(arrow.flameBurn) || 0.18));
-    this.dealDamageToMinion(target, burnDamage, arrow.side, 'arrow');
+    this.dealDamageToMinion(target, burnDamage, arrow.side, 'arrow', arrow);
     target.hitFlashTtl = Math.max(Number(target.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
 
     if (!arrow.flameScorchPlaced) {
@@ -4590,21 +4612,17 @@ class GameRoom {
 
     for (const victim of victims) {
       if (!victim || victim.removed || victim.side === arrow.side || victim.id === target.id) continue;
-      this.dealDamageToMinion(victim, splashDamage, arrow.side, 'arrow');
+      this.dealDamageToMinion(victim, splashDamage, arrow.side, 'arrow', arrow);
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
-      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8, killSourceType: 'arrow' });
+      if (victim.hp <= 0) this.killMinionByRef(victim, arrow.side, { goldScalar: 0.8 });
     }
   }
 
-  dealDamageToMinion(minion, amount, sourceSide = null, sourceType = null) {
+  dealDamageToMinion(minion, amount, sourceSide = null, sourceType = null, sourceRef = null) {
     if (!minion) return 0;
     const dmg = Math.max(0, Number(amount) || 0);
     if (dmg <= 0) return 0;
     const side = sourceSide === 'right' ? 'right' : (sourceSide === 'left' ? 'left' : null);
-    if (sourceType === 'arrow' && side) {
-      minion.lastArrowAssistSide = side;
-      minion.lastArrowAssistAt = this.t;
-    }
     let remaining = dmg;
     if (remaining > 0) {
       if (!Number.isFinite(minion.executiveOrderHitsLeft)) minion.executiveOrderHitsLeft = 0;
@@ -4653,10 +4671,18 @@ class GameRoom {
     if (remaining > 0 && minion.shieldBearer && (Number(minion.shieldDarkMetalTtl) || 0) > 0) {
       remaining *= SHIELD_DARK_METAL_DAMAGE_TAKEN_MULT;
     }
-    if (remaining > 0) minion.hp -= remaining;
+    const hpBefore = Math.max(0, Number(minion.hp) || 0);
+    let hpDamage = 0;
+    if (remaining > 0 && hpBefore > 0) {
+      hpDamage = Math.min(remaining, hpBefore);
+      minion.hp = hpBefore - hpDamage;
+    }
     this.queueDamageNumber(dmg, minion.x, minion.y - Math.max(8, minion.r * 0.25));
-    const effective = Math.max(0, remaining);
+    const effective = Math.max(0, hpDamage);
     if (side && effective > 0) this.recordDamage(side, sourceType === 'arrow' ? 'arrow' : 'unit', effective);
+    if (side && sourceType === 'arrow' && effective > 0) {
+      this.awardArrowDamageGold(side, effective, minion, sourceRef);
+    }
     return effective;
   }
 
@@ -6244,13 +6270,52 @@ class GameRoom {
     return 0;
   }
 
-  isArrowAssistKill(minion, killerSide) {
-    if (!minion || (killerSide !== 'left' && killerSide !== 'right')) return false;
-    const assistSide = minion.lastArrowAssistSide === 'right' ? 'right' : (minion.lastArrowAssistSide === 'left' ? 'left' : null);
-    if (assistSide !== killerSide) return false;
-    const assistedAt = Number(minion.lastArrowAssistAt);
-    if (!Number.isFinite(assistedAt)) return false;
-    return (this.t - assistedAt) <= MINION_ARROW_ASSIST_WINDOW;
+  arrowDamageGoldFromDamage(side, damage, target = null) {
+    const dmg = Math.max(0, Number(damage) || 0);
+    if (dmg <= 0 || !side) return 0;
+    const maxHp = Math.max(1, Number(target?.maxHp) || 1);
+    const hpRatio = clamp(dmg / maxHp, 0, 1);
+    const bountyLevel = Math.max(1, Number(side.bountyLevel) || 1);
+    const bountyBonus = 1 + (bountyLevel - 1) * 0.2;
+    const fullUnitGold = MINION_KILL_GOLD_BASE * ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV * bountyBonus;
+    return hpRatio * fullUnitGold;
+  }
+
+  maxCurrentResourceCoinValue() {
+    const leftValue = this.resourceValueForSide('left', this.t);
+    const rightValue = this.resourceValueForSide('right', this.t);
+    return Math.max(1, leftValue, rightValue);
+  }
+
+  arrowDamageGoldShotCap() {
+    return Math.max(1, Math.floor(this.maxCurrentResourceCoinValue() * ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO));
+  }
+
+  awardArrowDamageGold(sideName, damage, target = null, arrow = null) {
+    const side = sideName === 'right' ? this.right : (sideName === 'left' ? this.left : null);
+    if (!side) return 0;
+    const raw = this.arrowDamageGoldFromDamage(side, damage, target);
+    if (!(raw > 0)) return 0;
+    const cap = this.arrowDamageGoldShotCap();
+    let capRemaining = cap;
+    if (arrow && typeof arrow === 'object') {
+      if (!Number.isFinite(arrow.arrowDamageGoldAwarded)) arrow.arrowDamageGoldAwarded = 0;
+      capRemaining = Math.max(0, cap - (Number(arrow.arrowDamageGoldAwarded) || 0));
+    }
+    const maxWhole = Math.floor(capRemaining);
+    if (maxWhole <= 0) return 0;
+    const carry = Math.max(0, Number(side.arrowDamageGoldRemainder) || 0);
+    const total = raw + carry;
+    let gain = Math.floor(total);
+    const capped = gain > maxWhole;
+    if (capped) gain = maxWhole;
+    side.arrowDamageGoldRemainder = capped ? 0 : (total - gain);
+    if (gain <= 0) return 0;
+    this.grantGold(sideName, gain, true);
+    if (arrow && typeof arrow === 'object') arrow.arrowDamageGoldAwarded += gain;
+    const chargeGain = Math.max(1, Math.round(gain * ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT));
+    this.addUpgradeCharge(side, chargeGain);
+    return gain;
   }
 
   queueMinionDeathGhost(minion, killerSide = null) {
@@ -6319,7 +6384,6 @@ class GameRoom {
       goldScalar = 1,
       triggerExplosion = false,
       impactDamage = null,
-      killSourceType = null,
     } = options;
 
     if (this.tryNecroExpertRevive(minion, killerSide)) {
@@ -6337,15 +6401,7 @@ class GameRoom {
       this.resolveBalloonBombImpact(minion);
     }
 
-    const assistGold = killSourceType !== 'arrow' && this.isArrowAssistKill(minion, killerSide);
-    const finalGoldScalar = assistGold ? (goldScalar * MINION_ARROW_ASSIST_GOLD_MULT) : goldScalar;
-    const awardedGold = this.awardMinionKillGold(killerSide, finalGoldScalar);
-    if (assistGold && awardedGold > 0) {
-      this.queueHitSfx('resource', minion.x, minion.y, killerSide, {
-        killGoldTrail: true,
-        trailCount: Math.min(9, Math.max(3, Math.round(awardedGold / 6))),
-      });
-    }
+    this.awardMinionKillGold(killerSide, goldScalar);
     this.recordMinionKill(killerSide);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
     this.queueMinionDeathGhost(minion, killerSide);
@@ -6886,6 +6942,7 @@ class GameRoom {
         gravity,
         launchDelay,
         mainArrow: isMainArrow,
+        arrowDamageGoldAwarded: 0,
         comboTier: comboMul,
         stuck: false,
         stuckAngle: null,
@@ -7328,9 +7385,8 @@ class GameRoom {
     return Math.floor(base * bonus);
   }
 
-  goldFromResource(side, value) {
-    const bonus = 1 + (side.resourceLevel - 1) * 0.22;
-    return Math.floor(value * bonus);
+  goldFromResource(_side, value) {
+    return Math.max(0, Math.floor(Number(value) || 0));
   }
 
   grantGold(sideName, amount, countAsEarned = true) {
@@ -7589,12 +7645,61 @@ class GameRoom {
     return candidates;
   }
 
-  spawnMirroredResource() {
+  resourceValueAtTime(time = this.t) {
+    const t = Math.max(0, Number(time) || 0);
+    return RESOURCE_VALUE_BASE + Math.floor(t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
+  }
+
+  resourceValueForSide(sideName, time = this.t) {
+    const side = sideName === 'right' ? this.right : this.left;
+    const baseValue = this.resourceValueAtTime(time);
+    const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * 0.22;
+    return Math.max(1, Math.floor(baseValue * bonus));
+  }
+
+  makeMirroredResourceSpawn(time = this.t) {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
-    const value = RESOURCE_VALUE_BASE + Math.floor(this.t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
-    this.resources.push({ id: this.seq++, x, y, r: 14, value });
-    this.resources.push({ id: this.seq++, x: mirroredX(x), y, r: 14, value });
+    const leftValue = this.resourceValueForSide('left', time);
+    const rightValue = this.resourceValueForSide('right', time);
+    return [
+      { x, y, r: 14, value: leftValue, side: 'left' },
+      { x: mirroredX(x), y, r: 14, value: rightValue, side: 'right' },
+    ];
+  }
+
+  queueResourceTelegraph(spawns = []) {
+    if (!Array.isArray(spawns)) return;
+    for (const entry of spawns) {
+      if (!entry) continue;
+      this.queueHitSfx('resource_telegraph', Number(entry.x) || 0, Number(entry.y) || 0, null, {
+        ttl: RESOURCE_SPAWN_TELEGRAPH_DURATION,
+      });
+    }
+  }
+
+  resourceSpawnInterval() {
+    const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
+    const baseInterval = Math.max(
+      RESOURCE_SPAWN_MIN_INTERVAL,
+      RESOURCE_SPAWN_BASE_INTERVAL - this.t / RESOURCE_SPAWN_DECAY_DIVISOR
+    );
+    return Math.max(0.7, (baseInterval * RESOURCE_SPAWN_INTERVAL_MULT) / mul);
+  }
+
+  spawnMirroredResource(spawns = null) {
+    const chosen = Array.isArray(spawns) && spawns.length ? spawns : this.makeMirroredResourceSpawn(this.t);
+    for (const entry of chosen) {
+      if (!entry) continue;
+      this.resources.push({
+        id: this.seq++,
+        x: Number(entry.x) || 0,
+        y: Number(entry.y) || 0,
+        r: Math.max(6, Number(entry.r) || 14),
+        value: Math.max(1, Number(entry.value) || 1),
+        side: entry.side === 'right' ? 'right' : 'left',
+      });
+    }
   }
 
   spawnMirroredShotPower() {
