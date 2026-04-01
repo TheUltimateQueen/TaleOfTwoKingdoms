@@ -6885,11 +6885,22 @@ export class GameRenderer {
     return chips;
   }
 
-  drawBarracksMetaChips(x, y, maxWidth, chips = []) {
+  drawBarracksMetaChips(x, y, maxWidth, chips = [], options = null) {
     const { ctx } = this;
     if (!Array.isArray(chips) || !chips.length || maxWidth <= 8) return;
+    const compact = Boolean(options && options.compact);
+    const chipH = compact ? 8 : 10;
+    const chipHalfH = chipH * 0.5;
+    const chipGap = compact ? 3 : 4;
+    const glyphOnlyW = compact ? 10 : 14;
+    const chipInsetX = compact ? 3 : 4;
+    const glyphPadW = compact ? 12 : 20;
+    const statsLeadLabel = compact ? 'B' : 'Base';
+    const statsLeadPad = compact ? 4 : 6;
+    const statsPartPad = compact ? 6 : 9;
+    const textYOffset = compact ? -0.1 : 0;
     ctx.save();
-    ctx.font = '8px sans-serif';
+    ctx.font = compact ? '7px sans-serif' : '8px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     let cx = x;
@@ -6900,16 +6911,16 @@ export class GameRenderer {
       const text = typeof chip?.text === 'string' ? chip.text : '';
       const glyphOnly = chip?.kind === 'glyph' && !text;
       let chipW = glyphOnly
-        ? 14
-        : Math.ceil(ctx.measureText(text).width) + (chip?.kind === 'glyph' ? 20 : 8);
+        ? glyphOnlyW
+        : Math.ceil(ctx.measureText(text).width) + (chip?.kind === 'glyph' ? glyphPadW : (compact ? 6 : 8));
       if (chip?.kind === 'stats') {
-        chipW = 10 + Math.ceil(ctx.measureText('Base').width);
+        chipW = (compact ? 8 : 10) + Math.ceil(ctx.measureText(statsLeadLabel).width);
         const parts = Array.isArray(chip.parts) ? chip.parts : [];
         for (const part of parts) {
           const partLabel = `${part?.label ?? ''}`;
           const partValue = `${part?.value ?? ''}`;
           chipW += Math.ceil(ctx.measureText(partLabel).width);
-          chipW += Math.ceil(ctx.measureText(partValue).width) + 9;
+          chipW += Math.ceil(ctx.measureText(partValue).width) + statsPartPad;
         }
       }
       if (cx + chipW > right) break;
@@ -6919,46 +6930,46 @@ export class GameRenderer {
       const panelColor = chip?.kind === 'stats' ? '#141b27' : style.panel;
       const borderColor = chip?.kind === 'stats' ? '#4d5d78' : style.border;
       ctx.fillStyle = this.withAlpha(panelColor, fillAlpha);
-      ctx.fillRect(cx, y - 5, chipW, 10);
+      ctx.fillRect(cx, y - chipHalfH, chipW, chipH);
       ctx.strokeStyle = this.withAlpha(borderColor, borderAlpha);
-      ctx.lineWidth = 0.8;
-      ctx.strokeRect(cx + 0.5, y - 4.5, chipW - 1, 9);
+      ctx.lineWidth = compact ? 0.7 : 0.8;
+      ctx.strokeRect(cx + 0.5, y - chipHalfH + 0.5, chipW - 1, chipH - 1);
       if (chip?.kind === 'glyph' && chip?.glyphType) {
         ctx.save();
         ctx.globalAlpha = chip?.dim ? 0.58 : 1;
-        this.drawUpgradeGlyph(chip.glyphType, cx + 7, y, 4.2, chip?.dim ? '#cbb8a8' : style.title);
+        this.drawUpgradeGlyph(chip.glyphType, cx + (compact ? 5 : 7), y + textYOffset, compact ? 3.4 : 4.2, chip?.dim ? '#cbb8a8' : style.title);
         ctx.restore();
         if (!chip?.active) {
           ctx.strokeStyle = this.withAlpha('#f2b0a4', 0.8);
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(cx + 3.5, y + 3.5);
-          ctx.lineTo(cx + 10.5, y - 3.5);
+          ctx.moveTo(cx + (compact ? 2.6 : 3.5), y + (compact ? 2.8 : 3.5));
+          ctx.lineTo(cx + (compact ? 7.4 : 10.5), y - (compact ? 2.8 : 3.5));
           ctx.stroke();
         }
       }
       if (chip?.kind === 'stats') {
-        let tx = cx + 4;
+        let tx = cx + chipInsetX;
         ctx.fillStyle = chip?.dim ? '#aeb7c6' : '#d9e1ee';
-        ctx.fillText('Base', tx, y);
-        tx += Math.ceil(ctx.measureText('Base').width) + 6;
+        ctx.fillText(statsLeadLabel, tx, y + textYOffset);
+        tx += Math.ceil(ctx.measureText(statsLeadLabel).width) + statsLeadPad;
         const parts = Array.isArray(chip.parts) ? chip.parts : [];
         for (const part of parts) {
           const partStyle = UPGRADE_CATEGORY_STYLE[upgradeCategory(part?.type)] || UPGRADE_CATEGORY_STYLE.misc;
           const label = `${part?.label ?? ''}`;
           const value = `${part?.value ?? ''}`;
           ctx.fillStyle = chip?.dim ? '#aeb7c6' : (partStyle.badge || partStyle.title);
-          ctx.fillText(label, tx, y);
+          ctx.fillText(label, tx, y + textYOffset);
           tx += Math.ceil(ctx.measureText(label).width);
           ctx.fillStyle = chip?.dim ? '#d8dee9' : '#f4f7ff';
-          ctx.fillText(value, tx, y);
-          tx += Math.ceil(ctx.measureText(value).width) + 6;
+          ctx.fillText(value, tx, y + textYOffset);
+          tx += Math.ceil(ctx.measureText(value).width) + (compact ? 4 : 6);
         }
       } else if (text) {
         ctx.fillStyle = textColor;
-        ctx.fillText(text, cx + (chip?.kind === 'glyph' ? 16 : 4), y);
+        ctx.fillText(text, cx + (chip?.kind === 'glyph' ? (compact ? 10 : 16) : chipInsetX), y + textYOffset);
       }
-      cx += chipW + 4;
+      cx += chipW + chipGap;
     }
     ctx.restore();
   }
@@ -7251,10 +7262,10 @@ export class GameRenderer {
       Math.max(0, Number(snapshot?.t) || 0)
     );
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
-    const panelW = 346;
-    const rowH = 22;
-    const rowStartY = 76;
-    const panelH = rowStartY + rows.length * rowH + 12;
+    const panelW = 390;
+    const rowH = 16;
+    const rowStartY = 72;
+    const panelH = rowStartY + rows.length * rowH + 10;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelBottomPad = 10;
     const viewportBottom = Number(world?.h) || Number(world?.groundY) || 0;
@@ -7272,8 +7283,9 @@ export class GameRenderer {
 
     ctx.fillStyle = '#f1e3b4';
     ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(sideBarracksLabel(side, this.themeMode), px + panelW / 2, py + 15);
     ctx.textAlign = 'left';
-    ctx.fillText(sideBarracksLabel(side, this.themeMode), px + 10, py + 15);
     ctx.fillStyle = '#bac7da';
     ctx.font = '9px sans-serif';
     ctx.fillText(
@@ -7313,32 +7325,31 @@ export class GameRenderer {
     }
 
     const colLabelX = px + 28;
-    const colStatusX = px + 112;
-    const colChanceX = px + 138;
-    const detailX = px + 28;
-    const detailW = 170;
-    const barX = px + 202;
-    const barW = 56;
-    const barH = 7;
+    const colStatusX = px + 108;
+    const colChanceX = px + 132;
+    const barX = px + 152;
+    const barW = 54;
+    const barH = 6;
+    const chipX = px + 214;
+    const chipW = 86;
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
       const ry = py + rowStartY + i * rowH;
-      const line1Y = ry - 4;
-      const line2Y = ry + 6;
-      const barY = ry + 2;
+      const lineY = ry + rowH * 0.62;
+      const barY = ry + rowH - 5;
       const isLockedRow = !row.unlocked && row.type !== 'militia' && row.type !== 'candle';
       const rowBg = isLockedRow
-        ? (i % 2 === 0 ? '#111723d8' : '#0e1520d8')
-        : (i % 2 === 0 ? '#162033a8' : '#121a2ba8');
+        ? (i % 2 === 0 ? '#161c29e2' : '#0f1826e2')
+        : (i % 2 === 0 ? '#1a2943cf' : '#13213acf');
       const labelColor = isLockedRow ? '#b8b0a8' : '#eaf0fc';
 
       ctx.fillStyle = rowBg;
-      ctx.fillRect(px + 6, ry - 12, panelW - 12, rowH - 1);
+      ctx.fillRect(px + 6, ry, panelW - 12, rowH - 1);
 
       const rowGlyph = BARRACKS_ROW_GLYPH_BY_TYPE[row.type] || 'unitLevel';
       const iconX = px + 16;
-      const iconY = ry - 2;
+      const iconY = ry + rowH * 0.52;
       this.drawBarracksRowGlyph(row.type, rowGlyph, iconX, iconY, 5.8, '#1f2230');
 
       ctx.fillStyle = labelColor;
@@ -7346,10 +7357,10 @@ export class GameRenderer {
       ctx.textAlign = 'left';
       const fittedRowLabel = this.fitUpgradeCardText(
         row.label,
-        Math.max(18, colStatusX - colLabelX - 6),
+        Math.max(18, colStatusX - colLabelX - 7),
         '9px sans-serif'
       );
-      ctx.fillText(fittedRowLabel, colLabelX, line1Y);
+      ctx.fillText(fittedRowLabel, colLabelX, lineY);
       let rowStatusTag = '...';
       let rowStatusColor = '#9da8ba';
       if (isLockedRow) {
@@ -7363,19 +7374,19 @@ export class GameRenderer {
         rowStatusColor = '#ffb9a9';
       }
       ctx.fillStyle = rowStatusColor;
-      ctx.fillText(rowStatusTag, colStatusX, line1Y);
+      ctx.fillText(rowStatusTag, colStatusX, lineY);
       const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
       if (rowChancePct != null && row.unlocked && row.type !== 'militia') {
         ctx.fillStyle = '#9fc8ef';
-        ctx.fillText(`${rowChancePct}%`, colChanceX, line1Y);
+        ctx.fillText(`${rowChancePct}%`, colChanceX, lineY);
       } else if (!row.unlocked && row.type !== 'militia') {
         const lockImage = this.getUpgradeGlyphImage(BARRACKS_LOCK_TWEMOJI);
         if (lockImage?.complete && lockImage.naturalWidth > 0 && lockImage.naturalHeight > 0) {
           const lockSize = 9;
-          ctx.drawImage(lockImage, colChanceX, ry - 11, lockSize, lockSize);
+          ctx.drawImage(lockImage, colChanceX, lineY - 7, lockSize, lockSize);
         } else {
           ctx.fillStyle = '#7f8aa0';
-          ctx.fillText('LOCK', colChanceX, line1Y);
+          ctx.fillText('LOCK', colChanceX, lineY);
         }
       }
       const active = Math.max(0, Number(row.activeCount) || 0);
@@ -7384,10 +7395,16 @@ export class GameRenderer {
       ctx.fillRect(barX, barY, barW, barH);
       ctx.fillStyle = row.unlocked ? this.withAlpha(sidePalette.primary, 0.95) : '#6f7688';
       ctx.fillRect(barX, barY, barW * row.progress, barH);
-      this.drawBarracksMetaChips(detailX, line2Y - 1, detailW, this.barracksMetaChipsForRow(sideState, row));
+      this.drawBarracksMetaChips(
+        chipX,
+        lineY,
+        chipW,
+        this.barracksMetaChipsForRow(sideState, row),
+        { compact: true }
+      );
 
-      const statusX = px + panelW - 10;
-      const statusLeftX = barX + barW + 12;
+      const statusX = px + panelW - 36;
+      const statusLeftX = chipX + chipW + 8;
       let statusText = '';
       let statusColor = '#b8c8e2';
       if (row.type === 'candle') {
@@ -7411,11 +7428,12 @@ export class GameRenderer {
       const fittedStatusText = this.fitUpgradeCardText(
         statusText,
         Math.max(24, statusX - statusLeftX),
-        '9px sans-serif'
+        '8px sans-serif'
       );
       ctx.textAlign = 'right';
       ctx.fillStyle = statusColor;
-      ctx.fillText(fittedStatusText, statusX, line1Y);
+      ctx.font = '8px sans-serif';
+      ctx.fillText(fittedStatusText, statusX, lineY);
 
       // Icon + count badge so the number clearly maps to this row's unit type.
       const activeBadgeText = `${active}`;
@@ -7428,7 +7446,7 @@ export class GameRenderer {
       const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2 + activeBadgeIconSlotW;
       const activeBadgeH = 10;
       const activeBadgeX = px + panelW - activeBadgeW - 10;
-      const activeBadgeY = line2Y - activeBadgeH + 3;
+      const activeBadgeY = ry + (rowH - activeBadgeH) * 0.5;
       ctx.fillStyle = active > 0 ? '#153526' : '#1a2334';
       ctx.fillRect(activeBadgeX, activeBadgeY, activeBadgeW, activeBadgeH);
       ctx.strokeStyle = active > 0 ? '#5fd78c' : '#5f7393';
