@@ -4466,14 +4466,14 @@ export class GameRenderer {
     return towerY + 117;
   }
 
-  spawnResourceTelegraph(x, y, side, ttl = 0.5) {
+  spawnResourceTelegraph(x, y, side, ttl = 1) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.resourceSpawnTelegraphs.push({
       x,
       y,
       side: side === 'right' ? 'right' : (side === 'left' ? 'left' : null),
       age: 0,
-      ttl: Math.max(0.1, Math.min(1.5, Number(ttl) || 0.5)),
+      ttl: Math.max(0.1, Math.min(1.5, Number(ttl) || 1)),
       seed: Math.random() * Math.PI * 2,
     });
   }
@@ -4849,7 +4849,7 @@ export class GameRenderer {
       return;
     }
     if (type === 'resource_telegraph') {
-      this.spawnResourceTelegraph(px, py, pside, Number(event?.ttl) || 0.5);
+      this.spawnResourceTelegraph(px, py, pside, Number(event?.ttl) || 1);
       return;
     }
     const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;

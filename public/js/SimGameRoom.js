@@ -40,15 +40,12 @@ const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
 const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
-const RESOURCE_SPAWN_INITIAL_DELAY = 7.2;
-const RESOURCE_SPAWN_MIN_INTERVAL = 5.2;
-const RESOURCE_SPAWN_BASE_INTERVAL = 9.1;
-const RESOURCE_SPAWN_DECAY_DIVISOR = 220;
-const RESOURCE_SPAWN_INTERVAL_MULT = 2;
-const RESOURCE_SPAWN_TELEGRAPH_DURATION = 0.5;
+const RESOURCE_SPAWN_RANDOM_MIN_SECONDS = 2;
+const RESOURCE_SPAWN_RANDOM_MAX_SECONDS = 10;
+const RESOURCE_SPAWN_TELEGRAPH_DURATION = 1;
 const RESOURCE_VALUE_BASE = 22;
-const RESOURCE_VALUE_GROWTH_STEP = 2;
-const RESOURCE_VALUE_GROWTH_SECONDS = 45;
+const RESOURCE_VALUE_WAIT_MIN_MULT = 0.7;
+const RESOURCE_VALUE_WAIT_MAX_MULT = 1.3;
 const MINION_KILL_GOLD_BASE = 12;
 const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
@@ -733,8 +730,9 @@ class GameRoom {
       hasDisplay: false,
     };
 
-    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT;
-    this.nextResourceTelegraphAt = Math.max(0, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.nextResourceAt = 0;
+    this.nextResourceTelegraphAt = 0;
+    this.pendingResourceInterval = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
     this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
@@ -759,9 +757,7 @@ class GameRoom {
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
-    this.nextResourceAt = this.t + (RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT) / Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
-    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
-    this.pendingResourceSpawns = null;
+    this.scheduleNextResourceSpawn(this.t);
     this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
 
     this.seedUpgradeCards();
@@ -1138,10 +1134,11 @@ class GameRoom {
     if (refreshExisting) {
       for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
       this.nextResourceAt = Math.min(
-        Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT,
+        Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_RANDOM_MAX_SECONDS,
         this.t + 0.4
       );
       this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+      this.pendingResourceInterval = Math.max(0.05, this.nextResourceAt - this.t);
       this.pendingResourceSpawns = null;
       this.nextShotPowerAt = Math.min(Number(this.nextShotPowerAt) || this.t + 7, this.t + 0.6);
     }
@@ -1582,8 +1579,9 @@ class GameRoom {
     this.lineEvents = [];
     this.activePresidents = { left: [], right: [] };
     this.candleCarrierCounts = { left: 0, right: 0 };
-    this.nextResourceAt = RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT;
-    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.nextResourceAt = 0;
+    this.nextResourceTelegraphAt = 0;
+    this.pendingResourceInterval = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
     this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
@@ -1594,10 +1592,8 @@ class GameRoom {
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
-    const resourceMul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
     const powerMul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
-    this.nextResourceAt = this.t + (RESOURCE_SPAWN_INITIAL_DELAY * RESOURCE_SPAWN_INTERVAL_MULT) / resourceMul;
-    this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.scheduleNextResourceSpawn(this.t);
     this.nextShotPowerAt = this.t + 7 / powerMul;
     this.seedUpgradeCards();
     this.resetMatchReport();
@@ -1836,17 +1832,15 @@ class GameRoom {
     this.enforceDebugFocusedMinimum('right');
 
     if (this.t >= this.nextResourceTelegraphAt && !this.pendingResourceSpawns) {
-      this.pendingResourceSpawns = this.makeMirroredResourceSpawn(this.nextResourceAt);
+      this.pendingResourceSpawns = this.makeMirroredResourceSpawn(this.pendingResourceInterval);
       this.queueResourceTelegraph(this.pendingResourceSpawns);
     }
     if (this.t >= this.nextResourceAt) {
       const readySpawns = Array.isArray(this.pendingResourceSpawns) && this.pendingResourceSpawns.length
         ? this.pendingResourceSpawns
-        : this.makeMirroredResourceSpawn(this.nextResourceAt);
+        : this.makeMirroredResourceSpawn(this.pendingResourceInterval);
       this.spawnMirroredResource(readySpawns);
-      this.pendingResourceSpawns = null;
-      this.nextResourceAt = this.t + this.resourceSpawnInterval();
-      this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+      this.scheduleNextResourceSpawn(this.t);
     }
 
     if (this.t >= this.nextShotPowerAt) {
@@ -6282,9 +6276,17 @@ class GameRoom {
   }
 
   maxCurrentResourceCoinValue() {
-    const leftValue = this.resourceValueForSide('left', this.t);
-    const rightValue = this.resourceValueForSide('right', this.t);
-    return Math.max(1, leftValue, rightValue);
+    let maxValue = 1;
+    if (Array.isArray(this.resources)) {
+      for (const res of this.resources) {
+        const value = Math.max(0, Math.floor(Number(res?.value) || 0));
+        if (value > maxValue) maxValue = value;
+      }
+    }
+    const pendingWait = Math.max(0.05, Number(this.pendingResourceInterval) || RESOURCE_SPAWN_RANDOM_MIN_SECONDS);
+    const leftValue = this.resourceValueForSide('left', pendingWait);
+    const rightValue = this.resourceValueForSide('right', pendingWait);
+    return Math.max(1, maxValue, leftValue, rightValue);
   }
 
   arrowDamageGoldShotCap() {
@@ -7645,23 +7647,30 @@ class GameRoom {
     return candidates;
   }
 
-  resourceValueAtTime(time = this.t) {
-    const t = Math.max(0, Number(time) || 0);
-    return RESOURCE_VALUE_BASE + Math.floor(t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
+  resourceBaseValueForInterval(waitSeconds = RESOURCE_SPAWN_RANDOM_MIN_SECONDS) {
+    const minWait = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
+    const maxWait = RESOURCE_SPAWN_RANDOM_MAX_SECONDS;
+    const wait = clamp(Number(waitSeconds) || minWait, minWait, maxWait);
+    const span = Math.max(0.0001, maxWait - minWait);
+    const waitRatio = (wait - minWait) / span;
+    const waitMult = RESOURCE_VALUE_WAIT_MIN_MULT
+      + (RESOURCE_VALUE_WAIT_MAX_MULT - RESOURCE_VALUE_WAIT_MIN_MULT) * waitRatio;
+    return Math.max(1, Math.round(RESOURCE_VALUE_BASE * waitMult));
   }
 
-  resourceValueForSide(sideName, time = this.t) {
+  resourceValueForSide(sideName, waitSeconds = RESOURCE_SPAWN_RANDOM_MIN_SECONDS) {
     const side = sideName === 'right' ? this.right : this.left;
-    const baseValue = this.resourceValueAtTime(time);
+    const baseValue = this.resourceBaseValueForInterval(waitSeconds);
     const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * 0.22;
     return Math.max(1, Math.floor(baseValue * bonus));
   }
 
-  makeMirroredResourceSpawn(time = this.t) {
+  makeMirroredResourceSpawn(waitSeconds = this.pendingResourceInterval) {
+    const wait = Math.max(0.05, Number(waitSeconds) || RESOURCE_SPAWN_RANDOM_MIN_SECONDS);
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
-    const leftValue = this.resourceValueForSide('left', time);
-    const rightValue = this.resourceValueForSide('right', time);
+    const leftValue = this.resourceValueForSide('left', wait);
+    const rightValue = this.resourceValueForSide('right', wait);
     return [
       { x, y, r: 14, value: leftValue, side: 'left' },
       { x: mirroredX(x), y, r: 14, value: rightValue, side: 'right' },
@@ -7679,16 +7688,24 @@ class GameRoom {
   }
 
   resourceSpawnInterval() {
+    const minBase = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
+    const maxBase = RESOURCE_SPAWN_RANDOM_MAX_SECONDS;
+    const roll = minBase + Math.random() * Math.max(0, maxBase - minBase);
     const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
-    const baseInterval = Math.max(
-      RESOURCE_SPAWN_MIN_INTERVAL,
-      RESOURCE_SPAWN_BASE_INTERVAL - this.t / RESOURCE_SPAWN_DECAY_DIVISOR
-    );
-    return Math.max(0.7, (baseInterval * RESOURCE_SPAWN_INTERVAL_MULT) / mul);
+    return Math.max(0.2, roll / mul);
+  }
+
+  scheduleNextResourceSpawn(fromTime = this.t) {
+    const now = Math.max(0, Number(fromTime) || 0);
+    const delay = this.resourceSpawnInterval();
+    this.pendingResourceInterval = delay;
+    this.nextResourceAt = now + delay;
+    this.nextResourceTelegraphAt = Math.max(now, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
+    this.pendingResourceSpawns = null;
   }
 
   spawnMirroredResource(spawns = null) {
-    const chosen = Array.isArray(spawns) && spawns.length ? spawns : this.makeMirroredResourceSpawn(this.t);
+    const chosen = Array.isArray(spawns) && spawns.length ? spawns : this.makeMirroredResourceSpawn(this.pendingResourceInterval);
     for (const entry of chosen) {
       if (!entry) continue;
       this.resources.push({
