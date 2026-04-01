@@ -44,10 +44,9 @@ const RESOURCE_SPAWN_INITIAL_DELAY = 7.2;
 const RESOURCE_SPAWN_MIN_INTERVAL = 5.2;
 const RESOURCE_SPAWN_BASE_INTERVAL = 9.1;
 const RESOURCE_SPAWN_DECAY_DIVISOR = 220;
-const RESOURCE_VALUE_START = 1;
-const RESOURCE_VALUE_TARGET = 26;
-const RESOURCE_VALUE_RAMP_SECONDS = 420;
-const RESOURCE_VALUE_RAMP_EXPONENT = 2.3;
+const RESOURCE_VALUE_BASE = 22;
+const RESOURCE_VALUE_GROWTH_STEP = 2;
+const RESOURCE_VALUE_GROWTH_SECONDS = 45;
 const MINION_KILL_GOLD_BASE = 12;
 const MINION_ARROW_ASSIST_WINDOW = 3.2;
 const MINION_ARROW_ASSIST_GOLD_MULT = 1.8;
@@ -7593,12 +7592,7 @@ class GameRoom {
   spawnMirroredResource() {
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
-    const progress = clamp(this.t / Math.max(1, RESOURCE_VALUE_RAMP_SECONDS), 0, 1);
-    const eased = Math.pow(progress, RESOURCE_VALUE_RAMP_EXPONENT);
-    const value = Math.max(
-      1,
-      Math.round(RESOURCE_VALUE_START + (RESOURCE_VALUE_TARGET - RESOURCE_VALUE_START) * eased)
-    );
+    const value = RESOURCE_VALUE_BASE + Math.floor(this.t / RESOURCE_VALUE_GROWTH_SECONDS) * RESOURCE_VALUE_GROWTH_STEP;
     this.resources.push({ id: this.seq++, x, y, r: 14, value });
     this.resources.push({ id: this.seq++, x: mirroredX(x), y, r: 14, value });
   }
