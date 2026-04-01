@@ -40,16 +40,20 @@ const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
 const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
-const RESOURCE_SPAWN_RANDOM_MIN_SECONDS = 2;
-const RESOURCE_SPAWN_RANDOM_MAX_SECONDS = 10;
+const RESOURCE_SPAWN_START_MIN_SECONDS = 2;
+const RESOURCE_SPAWN_START_MAX_SECONDS = 10;
+const RESOURCE_SPAWN_END_MIN_SECONDS = 8;
+const RESOURCE_SPAWN_END_MAX_SECONDS = 25;
+const RESOURCE_SPAWN_RANGE_RAMP_SECONDS = 120;
 const RESOURCE_SPAWN_TELEGRAPH_DURATION = 1;
 const RESOURCE_VALUE_BASE = 22;
-const RESOURCE_VALUE_WAIT_MIN_MULT = 0.7;
-const RESOURCE_VALUE_WAIT_MAX_MULT = 1.3;
+const RESOURCE_VALUE_REFERENCE_WAIT_SECONDS = (RESOURCE_SPAWN_START_MIN_SECONDS + RESOURCE_SPAWN_START_MAX_SECONDS) * 0.5;
 const MINION_KILL_GOLD_BASE = 12;
 const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1;
+const ARROW_DAMAGE_GOLD_MAX_COMBO_MULT = 1.2;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
 const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 6;
+const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
@@ -467,6 +471,7 @@ function serializeSideState(side) {
     arrowResourceGoldCollected: roundTo(state.arrowResourceGoldCollected, 1),
     diggerResourceGoldCollected: roundTo(state.diggerResourceGoldCollected, 1),
     minionDamageGoldCollected: roundTo(state.minionDamageGoldCollected, 1),
+    arrowShotGoldCurrent: roundTo(state.arrowShotGoldCurrent, 1),
     economyLevel: Math.max(0, Math.round(Number(state.economyLevel) || 0)),
     nextEcoCost: Math.max(0, Math.round(Number(state.nextEcoCost) || 0)),
     unitLevel: Math.max(0, Math.round(Number(state.unitLevel) || 0)),
@@ -586,6 +591,10 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     arrowResourceGoldCollected: 0,
     diggerResourceGoldCollected: 0,
     minionDamageGoldCollected: 0,
+    arrowShotGoldCurrent: 0,
+    arrowShotVolleySeq: 0,
+    pendingArrowVolleyId: 0,
+    arrowShotGoldActiveVolleyId: 0,
     economyLevel: 0,
     nextEcoCost: 120,
     unitLevel: 1,
@@ -734,7 +743,7 @@ class GameRoom {
 
     this.nextResourceAt = 0;
     this.nextResourceTelegraphAt = 0;
-    this.pendingResourceInterval = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
+    this.pendingResourceInterval = RESOURCE_SPAWN_START_MIN_SECONDS;
     this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
@@ -1140,7 +1149,7 @@ class GameRoom {
     if (refreshExisting) {
       for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
       this.nextResourceAt = Math.min(
-        Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_RANDOM_MAX_SECONDS,
+        Number(this.nextResourceAt) || this.t + RESOURCE_SPAWN_END_MAX_SECONDS,
         this.t + 0.4
       );
       this.nextResourceTelegraphAt = Math.max(this.t, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
@@ -1587,7 +1596,7 @@ class GameRoom {
     this.candleCarrierCounts = { left: 0, right: 0 };
     this.nextResourceAt = 0;
     this.nextResourceTelegraphAt = 0;
-    this.pendingResourceInterval = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
+    this.pendingResourceInterval = RESOURCE_SPAWN_START_MIN_SECONDS;
     this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 7;
     this.seq = 1;
@@ -1805,6 +1814,8 @@ class GameRoom {
     // Keep last special roll result visible for UI history; TTL controls recency only.
 
     if (this.sharedShotCd === 0) {
+      this.beginArrowVolley('left');
+      this.beginArrowVolley('right');
       // Alternate arrow resolution priority each volley to reduce deterministic side bias.
       // Arrows are processed in reverse array order, so we enqueue the priority side last.
       const prioritySide = this.nextArrowPrioritySide === 'right' ? 'right' : 'left';
@@ -3267,12 +3278,12 @@ class GameRoom {
           if (a.side === 'left') {
             const gain = this.goldFromResource(this.left, res.value);
             this.grantGold('left', gain, true);
-            this.recordResourceGoldCollected('left', gain, 'arrow');
+            this.recordResourceGoldCollected('left', gain, 'arrow', a);
             this.addUpgradeCharge(this.left, gain);
           } else {
             const gain = this.goldFromResource(this.right, res.value);
             this.grantGold('right', gain, true);
-            this.recordResourceGoldCollected('right', gain, 'arrow');
+            this.recordResourceGoldCollected('right', gain, 'arrow', a);
             this.addUpgradeCharge(this.right, gain);
           }
           this.queueHitSfx('resource', res.x, res.y, a.side);
@@ -3995,6 +4006,8 @@ class GameRoom {
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
+      if (m.rider) this.refreshRiderChargeState(m);
+      const advanceSpeed = this.minionAdvanceSpeed(m);
       const mySideState = m.side === 'right' ? this.right : this.left;
       if (m.gunner) this.tickGunnerFoodThrow(m, dt, targetBuckets, MINION_TARGET_BUCKET_W);
       if (m.stoneGolem && this.tickStoneGolemBite(m, dt, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W)) {
@@ -4318,7 +4331,9 @@ class GameRoom {
             m.atkCd = 0.92;
           }
         } else if (!closestGroundTarget) {
-          m.x += dir * m.speed * dt;
+          const moveDx = dir * advanceSpeed * dt;
+          m.x += moveDx;
+          if (m.rider) this.refreshRiderChargeState(m, Math.abs(moveDx) > 0.001);
         }
 
         if (m.flying) {
@@ -4372,7 +4387,9 @@ class GameRoom {
         if (m.stoneGolem) {
           const holdDist = Math.max(74, m.r + target.r + 18);
           if (Math.abs(target.x - m.x) > holdDist) {
-            m.x += dir * m.speed * dt;
+            const moveDx = dir * advanceSpeed * dt;
+            m.x += moveDx;
+            if (m.rider) this.refreshRiderChargeState(m, Math.abs(moveDx) > 0.001);
           } else if (m.atkCd === 0) {
             this.stoneGolemSmash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
             m.atkCd = STONE_GOLEM_SMASH_INTERVAL;
@@ -4381,7 +4398,9 @@ class GameRoom {
           if (m.shieldPushCd === 0) this.triggerShieldPush(m, targetBuckets, MINION_TARGET_BUCKET_W);
           const holdDist = Math.max(58, m.r + target.r + 18);
           if (Math.abs(target.x - m.x) > holdDist) {
-            m.x += dir * m.speed * dt;
+            const moveDx = dir * advanceSpeed * dt;
+            m.x += moveDx;
+            if (m.rider) this.refreshRiderChargeState(m, Math.abs(moveDx) > 0.001);
           } else {
             m.atkCd = Math.max(m.atkCd, 0.22);
           }
@@ -4461,7 +4480,9 @@ class GameRoom {
           }
         }
       } else {
-        m.x += dir * m.speed * dt;
+        const moveDx = dir * advanceSpeed * dt;
+        m.x += moveDx;
+        if (m.rider) this.refreshRiderChargeState(m, Math.abs(moveDx) > 0.001);
         if (m.flying) {
           let desiredY = TOWER_Y - 120;
           if (m.balloon) {
@@ -4517,6 +4538,7 @@ class GameRoom {
   }
 
   markArrowHit(arrow) {
+    this.activateArrowShotGoldTracker(arrow);
     if (!arrow || !arrow.mainArrow || arrow.comboCounted) return;
     arrow.comboCounted = true;
     const side = arrow.side === 'left' ? this.left : this.right;
@@ -5506,12 +5528,9 @@ class GameRoom {
     const base = Math.max(0, Number(rider?.dmg) || 0);
     if (!rider || !rider.rider || !rider.riderChargeReady) return base;
 
-    const originX = Number.isFinite(rider.riderChargeStartX) ? rider.riderChargeStartX : rider.x;
-    const distance = Math.abs(rider.x - originX);
-    const threshold = Math.max(90, Number(rider.riderChargeDistance) || 170);
     rider.riderChargeReady = false;
-    if (distance < threshold) return base;
-
+    rider.riderChargeMoveTicks = 0;
+    rider.riderChargeStartX = Number.isFinite(rider.x) ? rider.x : (Number(rider.riderChargeStartX) || 0);
     const baseMul = Math.max(1.4, Number(rider.riderChargeMul) || 2.2);
     const mul = rider.riderSuperHorse ? Math.max(baseMul, baseMul * 1.28) : baseMul;
     if (Number.isFinite(hitX) && Number.isFinite(hitY)) this.queueHitSfx('powerup', hitX, hitY, rider.side);
@@ -5519,15 +5538,117 @@ class GameRoom {
   }
 
   riderChargeImpactReady(rider) {
-    if (!rider || !rider.rider || !rider.riderChargeReady) return false;
-    const originX = Number.isFinite(rider.riderChargeStartX) ? rider.riderChargeStartX : rider.x;
-    const distance = Math.abs((Number(rider.x) || 0) - (Number(originX) || 0));
-    const threshold = Math.max(90, Number(rider.riderChargeDistance) || 170);
-    return distance >= threshold;
+    return Boolean(rider && rider.rider && rider.riderChargeReady);
+  }
+
+  refreshRiderChargeState(rider, moved = false) {
+    if (!rider || !rider.rider) return;
+    if (!Number.isFinite(rider.riderChargeStartX)) rider.riderChargeStartX = Number(rider.x) || 0;
+    if (!Number.isFinite(rider.riderChargeMoveTicks)) {
+      rider.riderChargeMoveTicks = rider.riderChargeReady ? RIDER_CHARGE_REARM_MOVE_TICKS : 0;
+    }
+    if (rider.riderChargeReady) return;
+    if (moved) rider.riderChargeMoveTicks += 1;
+    if (rider.riderChargeMoveTicks >= RIDER_CHARGE_REARM_MOVE_TICKS) {
+      rider.riderChargeReady = true;
+      rider.riderChargeMoveTicks = RIDER_CHARGE_REARM_MOVE_TICKS;
+    }
+  }
+
+  minionAdvanceSpeed(minion) {
+    const baseSpeed = Math.max(0, Number(minion?.speed) || 0);
+    if (!minion || !minion.rider || !minion.riderSuperHorse) return baseSpeed;
+    if (!this.riderChargeImpactReady(minion)) return baseSpeed;
+    return baseSpeed * 1.5;
+  }
+
+  riderChargeClashOutcome(riderA, riderB) {
+    if (!riderA || !riderB) {
+      return {
+        winner: riderA || riderB || null,
+        both: false,
+      };
+    }
+    const midpoint = WORLD_W * 0.5;
+    const aSide = riderA.side === 'right' ? 'right' : 'left';
+    const bSide = riderB.side === 'right' ? 'right' : 'left';
+    const aX = Number(riderA.x) || 0;
+    const bX = Number(riderB.x) || 0;
+    const aOnOwnSide = aSide === 'left' ? aX <= midpoint : aX >= midpoint;
+    const bOnOwnSide = bSide === 'left' ? bX <= midpoint : bX >= midpoint;
+    if (aOnOwnSide !== bOnOwnSide) {
+      return {
+        winner: aOnOwnSide ? riderA : riderB,
+        both: false,
+      };
+    }
+
+    const aTowerX = aSide === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT;
+    const bTowerX = bSide === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT;
+    const aTowerDist = Math.abs(aX - aTowerX);
+    const bTowerDist = Math.abs(bX - bTowerX);
+    if (Math.abs(aTowerDist - bTowerDist) <= 0.01) {
+      return {
+        winner: null,
+        both: true,
+      };
+    }
+    return {
+      winner: aTowerDist < bTowerDist ? riderA : riderB,
+      both: false,
+    };
+  }
+
+  resolveRiderChargeClash(riderA, riderB) {
+    if (!riderA || !riderB || riderA.removed || riderB.removed) return;
+    if (!riderA.rider || !riderB.rider) return;
+    if (riderA.side === riderB.side) return;
+
+    const clash = this.riderChargeClashOutcome(riderA, riderB);
+    const winner = clash.winner;
+    const loser = winner === riderA ? riderB : riderA;
+    const damageToB = this.riderHitDamage(riderA, riderB.x, riderB.y);
+    const damageToA = this.riderHitDamage(riderB, riderA.x, riderA.y);
+    this.dealMinionDamage(riderA, riderB, damageToB, 'melee');
+    this.dealMinionDamage(riderB, riderA, damageToA, 'melee');
+    riderA.atkCd = Math.max(Number(riderA.atkCd) || 0, 0.72);
+    riderB.atkCd = Math.max(Number(riderB.atkCd) || 0, 0.72);
+
+    if (clash.both) {
+      if (!riderA.removed && (Number(riderA.hp) || 0) > 0 && !riderB.removed && (Number(riderB.hp) || 0) > 0) {
+        const aKnockDir = riderB.side === 'left' ? 1 : -1;
+        const bKnockDir = riderA.side === 'left' ? 1 : -1;
+        const aLandingDamage = 1 + Math.floor(Math.random() * Math.max(1, Math.floor(Number(riderB.level) || 1)));
+        const bLandingDamage = 1 + Math.floor(Math.random() * Math.max(1, Math.floor(Number(riderA.level) || 1)));
+        this.startStoneGolemFling(riderA, aKnockDir, aLandingDamage, riderB.side, 0);
+        this.startStoneGolemFling(riderB, bKnockDir, bLandingDamage, riderA.side, 0);
+      }
+      return;
+    }
+
+    if (!winner || !loser || winner.removed || loser.removed) return;
+    if ((Number(winner.hp) || 0) <= 0) return;
+    if ((Number(loser.hp) || 0) <= 0) return;
+    const awayFromWinnerTowerDir = winner.side === 'left' ? 1 : -1;
+    const winnerLevel = Math.max(1, Math.floor(Number(winner.level) || 1));
+    const landingDamage = 1 + Math.floor(Math.random() * winnerLevel);
+    this.startStoneGolemFling(loser, awayFromWinnerTowerDir, landingDamage, winner.side, 0);
   }
 
   riderStrikeMinion(rider, target) {
     const chargeImpact = this.riderChargeImpactReady(rider);
+    const riderChargeClash = Boolean(
+      chargeImpact
+      && rider?.rider
+      && target?.rider
+      && target?.side !== rider?.side
+      && this.riderChargeImpactReady(target)
+    );
+    if (riderChargeClash) {
+      this.resolveRiderChargeClash(rider, target);
+      return;
+    }
+
     const damage = this.riderHitDamage(rider, target?.x, target?.y);
     this.dealMinionDamage(rider, target, damage, 'melee');
     if (!chargeImpact || !target || target.removed || target.side === rider?.side) return;
@@ -6277,7 +6398,8 @@ class GameRoom {
     const hpRatio = clamp(dmg / maxHp, 0, 1);
     const bountyLevel = Math.max(1, Number(side.bountyLevel) || 1);
     const bountyBonus = 1 + (bountyLevel - 1) * 0.2;
-    const fullUnitGold = MINION_KILL_GOLD_BASE * ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV * bountyBonus;
+    const comboBonus = this.hasMaxCombo(side) ? ARROW_DAMAGE_GOLD_MAX_COMBO_MULT : 1;
+    const fullUnitGold = MINION_KILL_GOLD_BASE * ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV * bountyBonus * comboBonus;
     return hpRatio * fullUnitGold;
   }
 
@@ -6289,7 +6411,7 @@ class GameRoom {
         if (value > maxValue) maxValue = value;
       }
     }
-    const pendingWait = Math.max(0.05, Number(this.pendingResourceInterval) || RESOURCE_SPAWN_RANDOM_MIN_SECONDS);
+    const pendingWait = Math.max(0.05, Number(this.pendingResourceInterval) || RESOURCE_SPAWN_START_MIN_SECONDS);
     const leftValue = this.resourceValueForSide('left', pendingWait);
     const rightValue = this.resourceValueForSide('right', pendingWait);
     return Math.max(1, maxValue, leftValue, rightValue);
@@ -6302,7 +6424,8 @@ class GameRoom {
   awardArrowDamageGold(sideName, damage, target = null, arrow = null) {
     const side = sideName === 'right' ? this.right : (sideName === 'left' ? this.left : null);
     if (!side) return 0;
-    const raw = this.arrowDamageGoldFromDamage(side, damage, target);
+    let raw = this.arrowDamageGoldFromDamage(side, damage, target);
+    if (this.hasMaxCombo(side)) raw = Math.ceil(raw);
     if (!(raw > 0)) return 0;
     const cap = this.arrowDamageGoldShotCap();
     let capRemaining = cap;
@@ -6321,6 +6444,7 @@ class GameRoom {
     if (gain <= 0) return 0;
     this.grantGold(sideName, gain, true);
     this.recordMinionDamageGoldCollected(sideName, gain);
+    this.recordArrowShotGold(sideName, gain, arrow);
     if (arrow && typeof arrow === 'object') arrow.arrowDamageGoldAwarded += gain;
     const chargeGain = Math.max(1, Math.round(gain * ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT));
     this.addUpgradeCharge(side, chargeGain);
@@ -6607,6 +6731,7 @@ class GameRoom {
     }
     if (revived.rider) {
       revived.riderChargeReady = true;
+      revived.riderChargeMoveTicks = RIDER_CHARGE_REARM_MOVE_TICKS;
       revived.riderChargeStartX = x;
     }
     if (revived.hero) {
@@ -6696,6 +6821,7 @@ class GameRoom {
       gunner: false,
       rider: false,
       riderChargeReady: false,
+      riderChargeMoveTicks: 0,
       riderSuperHorse: false,
       dragonSuperBreathUpgraded: false,
       shieldDarkMetalUpgraded: false,
@@ -6859,6 +6985,7 @@ class GameRoom {
     const launch = launchFromPull(sideName, pull.x, pull.y);
     const forwardSign = sideName === 'left' ? 1 : -1;
     const comboMul = this.comboMultiplier(side);
+    const volleyId = Math.max(1, Math.round(Number(side.pendingArrowVolleyId) || 0));
 
     let count = this.statArrowCount(side);
     let spread = 0.032 + Math.min(0.02, Math.max(0, count - 1) * 0.0025);
@@ -6952,6 +7079,7 @@ class GameRoom {
         launchDelay,
         mainArrow: isMainArrow,
         arrowDamageGoldAwarded: 0,
+        shotVolleyId: volleyId,
         comboTier: comboMul,
         stuck: false,
         stuckAngle: null,
@@ -7240,6 +7368,7 @@ class GameRoom {
       gunner: isGunner,
       rider: isRider,
       riderChargeReady: isRider,
+      riderChargeMoveTicks: isRider ? RIDER_CHARGE_REARM_MOVE_TICKS : 0,
       riderSuperHorse: isRider && (Number(side.riderSuperHorseLevel) || 0) > 0,
       dragonSuperBreathUpgraded: isDragon && (Number(side.dragonSuperBreathLevel) || 0) > 0,
       shieldDarkMetalUpgraded: isShieldBearer && (Number(side.shieldDarkMetalLevel) || 0) > 0,
@@ -7408,7 +7537,7 @@ class GameRoom {
     return gain;
   }
 
-  recordResourceGoldCollected(sideName, amount, source = 'arrow') {
+  recordResourceGoldCollected(sideName, amount, source = 'arrow', sourceRef = null) {
     const side = sideName === 'right' ? this.right : this.left;
     const totals = this.matchReport?.totals?.[sideName === 'right' ? 'right' : 'left'];
     const gain = Math.max(0, Number(amount) || 0);
@@ -7419,6 +7548,7 @@ class GameRoom {
     } else {
       side.arrowResourceGoldCollected = Math.max(0, (Number(side.arrowResourceGoldCollected) || 0) + gain);
       if (totals) totals.arrowResourceGoldCollected = Math.max(0, (Number(totals.arrowResourceGoldCollected) || 0) + gain);
+      this.recordArrowShotGold(sideName, gain, sourceRef);
     }
     this.postGameReportCache = null;
   }
@@ -7435,6 +7565,49 @@ class GameRoom {
       totals.minionDamageGoldCollected = Math.max(0, (Number(totals.minionDamageGoldCollected) || 0) + gain);
     }
     this.postGameReportCache = null;
+  }
+
+  beginArrowVolley(sideName) {
+    const normalized = sideName === 'right' ? 'right' : (sideName === 'left' ? 'left' : null);
+    if (!normalized) return 0;
+    const side = normalized === 'right' ? this.right : this.left;
+    if (!side) return 0;
+    const seq = Math.max(0, Math.round(Number(side.arrowShotVolleySeq) || 0)) + 1;
+    side.arrowShotVolleySeq = seq;
+    side.pendingArrowVolleyId = seq;
+    return seq;
+  }
+
+  activateArrowShotGoldTracker(arrow = null) {
+    if (!arrow || typeof arrow !== 'object') return 0;
+    const sideName = arrow.side === 'right' ? 'right' : (arrow.side === 'left' ? 'left' : null);
+    if (!sideName) return 0;
+    const side = sideName === 'right' ? this.right : this.left;
+    if (!side) return 0;
+    const volleyId = Math.max(
+      1,
+      Math.round(
+        Number.isFinite(arrow.shotVolleyId)
+          ? Number(arrow.shotVolleyId)
+          : (Number(side.pendingArrowVolleyId) || 0)
+      )
+    );
+    const activeId = Math.max(0, Math.round(Number(side.arrowShotGoldActiveVolleyId) || 0));
+    if (activeId !== volleyId) {
+      side.arrowShotGoldActiveVolleyId = volleyId;
+      side.arrowShotGoldCurrent = 0;
+    }
+    return volleyId;
+  }
+
+  recordArrowShotGold(sideName, amount, sourceRef = null) {
+    const normalized = sideName === 'right' ? 'right' : (sideName === 'left' ? 'left' : null);
+    if (!normalized) return;
+    const side = normalized === 'right' ? this.right : this.left;
+    const gain = Math.max(0, Number(amount) || 0);
+    if (!side || gain <= 0) return;
+    if (sourceRef && typeof sourceRef === 'object') this.activateArrowShotGoldTracker(sourceRef);
+    side.arrowShotGoldCurrent = Math.max(0, (Number(side.arrowShotGoldCurrent) || 0) + gain);
   }
 
   addUpgradeCharge(side, amount) {
@@ -7668,26 +7841,36 @@ class GameRoom {
     return candidates;
   }
 
-  resourceBaseValueForInterval(waitSeconds = RESOURCE_SPAWN_RANDOM_MIN_SECONDS) {
-    const minWait = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
-    const maxWait = RESOURCE_SPAWN_RANDOM_MAX_SECONDS;
-    const wait = clamp(Number(waitSeconds) || minWait, minWait, maxWait);
-    const span = Math.max(0.0001, maxWait - minWait);
-    const waitRatio = (wait - minWait) / span;
-    const waitMult = RESOURCE_VALUE_WAIT_MIN_MULT
-      + (RESOURCE_VALUE_WAIT_MAX_MULT - RESOURCE_VALUE_WAIT_MIN_MULT) * waitRatio;
-    return Math.max(1, Math.round(RESOURCE_VALUE_BASE * waitMult));
+  resourceSpawnIntervalRangeAtTime(time = this.t) {
+    const t = Math.max(0, Number(time) || 0);
+    const rampT = clamp(t / Math.max(0.0001, RESOURCE_SPAWN_RANGE_RAMP_SECONDS), 0, 1);
+    const minWait = RESOURCE_SPAWN_START_MIN_SECONDS
+      + (RESOURCE_SPAWN_END_MIN_SECONDS - RESOURCE_SPAWN_START_MIN_SECONDS) * rampT;
+    const maxWait = RESOURCE_SPAWN_START_MAX_SECONDS
+      + (RESOURCE_SPAWN_END_MAX_SECONDS - RESOURCE_SPAWN_START_MAX_SECONDS) * rampT;
+    return {
+      minWait: Math.max(0.2, minWait),
+      maxWait: Math.max(minWait, maxWait),
+      rampT,
+    };
   }
 
-  resourceValueForSide(sideName, waitSeconds = RESOURCE_SPAWN_RANDOM_MIN_SECONDS) {
+  resourceBaseValueForInterval(waitSeconds = RESOURCE_SPAWN_START_MIN_SECONDS) {
+    const wait = Math.max(0.05, Number(waitSeconds) || RESOURCE_SPAWN_START_MIN_SECONDS);
+    const ref = Math.max(0.05, RESOURCE_VALUE_REFERENCE_WAIT_SECONDS);
+    return Math.max(1, Math.round(RESOURCE_VALUE_BASE * (wait / ref)));
+  }
+
+  resourceValueForSide(sideName, waitSeconds = RESOURCE_SPAWN_START_MIN_SECONDS) {
     const side = sideName === 'right' ? this.right : this.left;
     const baseValue = this.resourceBaseValueForInterval(waitSeconds);
     const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * 0.22;
     return Math.max(1, Math.floor(baseValue * bonus));
   }
 
-  makeMirroredResourceSpawn(waitSeconds = this.pendingResourceInterval) {
-    const wait = Math.max(0.05, Number(waitSeconds) || RESOURCE_SPAWN_RANDOM_MIN_SECONDS);
+  makeMirroredResourceSpawn(waitSeconds = this.pendingResourceInterval, time = this.nextResourceAt) {
+    const { minWait } = this.resourceSpawnIntervalRangeAtTime(time);
+    const wait = Math.max(0.05, Number(waitSeconds) || minWait);
     const x = 680 + Math.random() * 110;
     const y = 270 + Math.random() * 340;
     const leftValue = this.resourceValueForSide('left', wait);
@@ -7708,9 +7891,8 @@ class GameRoom {
     }
   }
 
-  resourceSpawnInterval() {
-    const minBase = RESOURCE_SPAWN_RANDOM_MIN_SECONDS;
-    const maxBase = RESOURCE_SPAWN_RANDOM_MAX_SECONDS;
+  resourceSpawnInterval(time = this.t) {
+    const { minWait: minBase, maxWait: maxBase } = this.resourceSpawnIntervalRangeAtTime(time);
     const roll = minBase + Math.random() * Math.max(0, maxBase - minBase);
     const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugResourceRateMultiplier) || 1);
     return Math.max(0.2, roll / mul);
@@ -7718,7 +7900,7 @@ class GameRoom {
 
   scheduleNextResourceSpawn(fromTime = this.t) {
     const now = Math.max(0, Number(fromTime) || 0);
-    const delay = this.resourceSpawnInterval();
+    const delay = this.resourceSpawnInterval(now);
     this.pendingResourceInterval = delay;
     this.nextResourceAt = now + delay;
     this.nextResourceTelegraphAt = Math.max(now, this.nextResourceAt - RESOURCE_SPAWN_TELEGRAPH_DURATION);
