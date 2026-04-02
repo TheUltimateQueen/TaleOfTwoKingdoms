@@ -4692,24 +4692,24 @@ export class GameRenderer {
     const { ctx } = this;
     const dir = sideKey === 'left' ? 1 : -1;
     const now = performance.now();
-    const beat = now * 0.008 + (Number(slot) || 0) * 0.85 + (sideKey === 'right' ? 0.35 : 0);
-    const sway = Math.sin(beat) * 1.9;
-    const bob = Math.cos(beat * 1.12) * 0.8;
+    const beat = now * 0.004 + (Number(slot) || 0) * 0.85 + (sideKey === 'right' ? 0.35 : 0);
+    const sway = Math.sin(beat) * 0.45;
+    const bob = Math.cos(beat * 1.05) * 0.2;
     const handDist = 12;
     const holdX = archerX + Math.cos(aim) * handDist + dir * 2 + sway;
     const holdY = archerY - 4 + Math.sin(aim) * handDist - 1 + bob;
-    const iconSize = 13.6 + Math.max(0, Math.sin(beat * 1.38)) * 1.2;
+    const iconSize = 13.4 + Math.max(0, Math.sin(beat * 1.22)) * 0.3;
 
     ctx.save();
     ctx.drawImage(image, holdX - iconSize / 2, holdY - iconSize / 2, iconSize, iconSize);
 
     // Subtle "playing" motion arcs by the held instrument.
     const waveX = holdX + dir * (iconSize * 0.72 + 2);
-    const waveA = 0.58 + Math.sin(beat * 1.8) * 0.18;
+    const waveA = 0.42 + Math.sin(beat * 1.5) * 0.06;
     ctx.strokeStyle = this.withAlpha('#ffe9b8', Math.max(0.2, waveA));
     ctx.lineWidth = 1;
     for (let i = 0; i < 2; i += 1) {
-      const r = iconSize * (0.26 + i * 0.2);
+      const r = iconSize * (0.22 + i * 0.17);
       ctx.beginPath();
       if (dir > 0) ctx.arc(waveX, holdY - 0.6, r, -0.56, 0.56);
       else ctx.arc(waveX, holdY - 0.6, r, Math.PI - 0.56, Math.PI + 0.56);

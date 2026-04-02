@@ -624,10 +624,12 @@ export class SoundEngine {
     const comboGain = 1 + combo * 0.56;
     const comboPitchCents = combo * 104;
     const totalGainMul = fx.gainMul * comboGain * Math.max(0.2, Number(mix) || 1);
-    const sub = this.envGain(t, 0.235, 0.142, fx.output, totalGainMul);
-    const punch = this.envGain(t + 0.0015, 0.152, 0.102, fx.output, totalGainMul);
-    const attack = this.envGain(t, 0.074, 0.046, fx.output, totalGainMul);
-    const sparkle = this.envGain(t + 0.014, 0.049 + combo * 0.012, 0.078, fx.output, totalGainMul);
+    // Keep instrument layer clear by dialing back the thud body.
+    const impactGainMul = totalGainMul * 0.4;
+    const sub = this.envGain(t, 0.235, 0.142, fx.output, impactGainMul);
+    const punch = this.envGain(t + 0.0015, 0.152, 0.102, fx.output, impactGainMul);
+    const attack = this.envGain(t, 0.074, 0.046, fx.output, impactGainMul);
+    const sparkle = this.envGain(t + 0.014, 0.049 + combo * 0.012, 0.078, fx.output, impactGainMul);
     const pianoProfile = this.archerPianoProfile(spatial);
     const pianoScale = Array.isArray(pianoProfile.scale) && pianoProfile.scale.length
       ? pianoProfile.scale
@@ -703,7 +705,7 @@ export class SoundEngine {
       390 + combo * 92,
       0.95,
       fx.output,
-      totalGainMul,
+      impactGainMul,
       fx.detuneCents + comboPitchCents * 0.28
     );
     this.noiseBurst(
@@ -713,7 +715,7 @@ export class SoundEngine {
       1060 + combo * 130,
       1.1,
       fx.output,
-      totalGainMul,
+      impactGainMul,
       fx.detuneCents + comboPitchCents * 0.34
     );
     // A short high "air" layer after the thud for a satisfying follow-through.
@@ -724,7 +726,7 @@ export class SoundEngine {
       1980 + combo * 200,
       1.24,
       fx.output,
-      totalGainMul,
+      impactGainMul,
       fx.detuneCents + comboPitchCents * 0.58
     );
     this.noiseBurst(
