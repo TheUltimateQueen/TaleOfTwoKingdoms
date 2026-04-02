@@ -305,6 +305,7 @@ const NECRO_BASE_EVERY = 12;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
+const MAX_UNIT_HIT_IMPACTS = 120;
 const HERO_LINE_TIME_SCALE = 0.5;
 const HERO_LINE_MOTION_SCALE = 0.5;
 const MILITIA_FOOD_GAG_TTL = 0.62;
@@ -395,6 +396,7 @@ export class GameRenderer {
     this.goldResourceTrails = [];
     this.resourceSpawnTelegraphs = [];
     this.powerupTrails = [];
+    this.unitHitImpacts = [];
     this.barracksDoorActors = { left: null, right: null };
     this.prevBarracksRollState = {
       left: { ttl: 0, key: '' },
@@ -443,6 +445,7 @@ export class GameRenderer {
       this.goldResourceTrails.length = 0;
       this.resourceSpawnTelegraphs.length = 0;
       this.powerupTrails.length = 0;
+      this.unitHitImpacts.length = 0;
       this.barracksDoorActors = { left: null, right: null };
       this.prevBarracksRollState = {
         left: { ttl: 0, key: '' },
@@ -4554,6 +4557,106 @@ export class GameRenderer {
     return towerY + 117;
   }
 
+  spawnUnitHitImpact(x, y, side) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const direction = side === 'right' ? -1 : 1;
+    const qualityCap = this.fxQuality === 'low'
+      ? 34
+      : (this.fxQuality === 'medium' ? 76 : MAX_UNIT_HIT_IMPACTS);
+    this.unitHitImpacts.push({
+      x,
+      y,
+      side: side === 'right' ? 'right' : 'left',
+      age: 0,
+      duration: 0.22 + Math.random() * 0.09,
+      size: 8.5 + Math.random() * 4.2,
+      angle: (direction > 0 ? 0 : Math.PI) + (Math.random() * 0.34 - 0.17),
+      seed: Math.random() * Math.PI * 2,
+    });
+    if (this.unitHitImpacts.length > qualityCap) {
+      this.unitHitImpacts.splice(0, this.unitHitImpacts.length - qualityCap);
+    }
+  }
+
+  updateUnitHitImpacts(dt) {
+    let write = 0;
+    for (let i = 0; i < this.unitHitImpacts.length; i += 1) {
+      const impact = this.unitHitImpacts[i];
+      impact.age += dt;
+      if (impact.age >= impact.duration) continue;
+      this.unitHitImpacts[write] = impact;
+      write += 1;
+    }
+    this.unitHitImpacts.length = write;
+  }
+
+  drawUnitHitImpacts() {
+    const { ctx } = this;
+    for (const impact of this.unitHitImpacts) {
+      const t = Math.max(0, Math.min(1, impact.age / Math.max(0.0001, impact.duration)));
+      const ease = easeOutCubic(t);
+      const fade = 1 - Math.pow(t, 1.28);
+      if (fade <= 0) continue;
+
+      const pulse = 0.92 + Math.sin((t * Math.PI * 2.2) + impact.seed) * 0.1;
+      const outerR = impact.size * (0.9 + ease * 1.7) * pulse;
+      const coreR = impact.size * (0.28 + ease * 0.75);
+      const ringR = impact.size * (0.72 + ease * 1.08);
+      const x = impact.x;
+      const y = impact.y;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const halo = ctx.createRadialGradient(x, y, 0, x, y, outerR);
+      halo.addColorStop(0, this.withAlpha('#ffd5cf', fade * 0.92));
+      halo.addColorStop(0.42, this.withAlpha('#ff6f5f', fade * 0.86));
+      halo.addColorStop(1, this.withAlpha('#c52e2e', 0));
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, outerR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = fade * 0.78;
+      ctx.strokeStyle = '#ff5a4f';
+      ctx.lineWidth = 1.4 + ease * 1.6;
+      ctx.beginPath();
+      ctx.arc(x, y, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.globalAlpha = fade * 0.9;
+      ctx.fillStyle = '#ffb7aa';
+      ctx.beginPath();
+      ctx.arc(x, y, coreR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(impact.angle);
+      const arrowScale = 0.76 + ease * 0.54;
+      ctx.scale(arrowScale, arrowScale);
+      ctx.globalAlpha = fade * 0.94;
+      ctx.fillStyle = '#ff5346';
+      ctx.beginPath();
+      ctx.moveTo(-impact.size * 0.66, -impact.size * 0.18);
+      ctx.lineTo(impact.size * 0.6, 0);
+      ctx.lineTo(-impact.size * 0.66, impact.size * 0.18);
+      ctx.lineTo(-impact.size * 0.24, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = fade * 0.82;
+      ctx.fillStyle = '#ffdcd2';
+      ctx.beginPath();
+      ctx.moveTo(-impact.size * 0.22, -impact.size * 0.09);
+      ctx.lineTo(impact.size * 0.34, 0);
+      ctx.lineTo(-impact.size * 0.22, impact.size * 0.09);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   spawnResourceTelegraph(x, y, side, ttl = 1) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.resourceSpawnTelegraphs.push({
@@ -4745,6 +4848,7 @@ export class GameRenderer {
     this.updateResourceTelegraphs(dt);
     this.updateGoldResourceTrails(snapshot, world, dt);
     this.updatePowerupTrails(snapshot, world, dt);
+    this.updateUnitHitImpacts(dt);
 
     const w = canvas.width;
     const h = canvas.height;
@@ -4857,6 +4961,7 @@ export class GameRenderer {
     this.drawParticles();
     this.frameArrowCount = Array.isArray(snapshot.arrows) ? snapshot.arrows.length : 0;
     for (const arrow of snapshot.arrows) this.drawArrow(arrow);
+    this.drawUnitHitImpacts();
     this.updateDamageTexts(dt);
     this.drawDamageTexts();
     this.updateHeroLines(dt);
@@ -4940,6 +5045,7 @@ export class GameRenderer {
       this.spawnResourceTelegraph(px, py, pside, Number(event?.ttl) || 1);
       return;
     }
+    if (type === 'minion') this.spawnUnitHitImpact(px, py, pside);
     const palette = TEAM_COLORS[pside] || TEAM_COLORS.left;
     if (type === 'resource') {
       const worldW = Number(eventWorld?.w) || Number(this.canvas?.width) || 1600;
@@ -5159,6 +5265,14 @@ export class GameRenderer {
       speed = 220;
       life = 0.42;
       gravity = 480;
+    } else if (type === 'minion') {
+      count = 16;
+      colors = ['#ffd0cb', '#ff8a7e', '#ff6055', '#ffc7b6'];
+      speed = 245;
+      life = 0.36;
+      gravity = 430;
+      sizeBase = 2.1;
+      sizeRand = 2.8;
     } else if (type === 'powerup') {
       count = 14;
       colors = ['#b88dff', '#79f3ff', '#fff3a3'];
