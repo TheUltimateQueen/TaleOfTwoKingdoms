@@ -397,6 +397,7 @@ export class GameRenderer {
     this.resourceSpawnTelegraphs = [];
     this.powerupTrails = [];
     this.unitHitImpacts = [];
+    this.archerInstruments = { left: [], right: [] };
     this.barracksDoorActors = { left: null, right: null };
     this.prevBarracksRollState = {
       left: { ttl: 0, key: '' },
@@ -457,6 +458,27 @@ export class GameRenderer {
       this.treasureShotGoldState.left = { lastValue: 0, lastChangeMs: 0 };
       this.treasureShotGoldState.right = { lastValue: 0, lastChangeMs: 0 };
     }
+  }
+
+  setArcherInstruments(loadout = null) {
+    const normalizeSide = (sideName) => {
+      const entries = Array.isArray(loadout?.[sideName]) ? loadout[sideName] : [];
+      const out = [];
+      for (let i = 0; i < entries.length; i += 1) {
+        const entry = entries[i];
+        if (!entry || typeof entry !== 'object') {
+          out.push(null);
+          continue;
+        }
+        const iconSrc = typeof entry.iconSrc === 'string' ? entry.iconSrc : '';
+        out.push(iconSrc ? { iconSrc } : null);
+      }
+      return out;
+    };
+    this.archerInstruments = {
+      left: normalizeSide('left'),
+      right: normalizeSide('right'),
+    };
   }
 
   fitUpgradeCardText(text, maxWidth, font = '10px sans-serif') {
@@ -4657,6 +4679,65 @@ export class GameRenderer {
     }
   }
 
+  drawArcherHeldInstrument(side, slot, archerX, archerY, aim) {
+    const sideKey = side === 'right' ? 'right' : 'left';
+    const entries = Array.isArray(this.archerInstruments?.[sideKey]) ? this.archerInstruments[sideKey] : [];
+    const info = entries[Math.max(0, Number(slot) || 0)];
+    const iconSrc = typeof info?.iconSrc === 'string' ? info.iconSrc : '';
+    if (!iconSrc) return;
+
+    const image = this.getUpgradeGlyphImage(iconSrc);
+    if (!(image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0)) return;
+
+    const { ctx } = this;
+    const dir = sideKey === 'left' ? 1 : -1;
+    const now = performance.now();
+    const beat = now * 0.008 + (Number(slot) || 0) * 0.85 + (sideKey === 'right' ? 0.35 : 0);
+    const sway = Math.sin(beat) * 1.9;
+    const bob = Math.cos(beat * 1.12) * 0.8;
+    const handDist = 12;
+    const holdX = archerX + Math.cos(aim) * handDist + dir * 2 + sway;
+    const holdY = archerY - 4 + Math.sin(aim) * handDist - 1 + bob;
+    const iconSize = 13.6 + Math.max(0, Math.sin(beat * 1.38)) * 1.2;
+
+    ctx.save();
+    ctx.drawImage(image, holdX - iconSize / 2, holdY - iconSize / 2, iconSize, iconSize);
+
+    // Subtle "playing" motion arcs by the held instrument.
+    const waveX = holdX + dir * (iconSize * 0.72 + 2);
+    const waveA = 0.58 + Math.sin(beat * 1.8) * 0.18;
+    ctx.strokeStyle = this.withAlpha('#ffe9b8', Math.max(0.2, waveA));
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 2; i += 1) {
+      const r = iconSize * (0.26 + i * 0.2);
+      ctx.beginPath();
+      if (dir > 0) ctx.arc(waveX, holdY - 0.6, r, -0.56, 0.56);
+      else ctx.arc(waveX, holdY - 0.6, r, Math.PI - 0.56, Math.PI + 0.56);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  drawArcherInstrumentOverlay(world, leftPulls = [], rightPulls = []) {
+    if (!world) return;
+    const leftX = Number(world.towerLeftX) + 35;
+    const rightX = Number(world.towerRightX) - 35;
+    if (!Number.isFinite(leftX) || !Number.isFinite(rightX)) return;
+
+    for (let i = 0; i < leftPulls.length; i += 1) {
+      const pull = leftPulls[i] || {};
+      const aim = worldAimAngle('left', pull.pullX, pull.pullY);
+      const y = Number.isFinite(pull.archerAimY) ? Number(pull.archerAimY) : (Number(world.towerY) - 56 - i * 78);
+      this.drawArcherHeldInstrument('left', i, leftX, y, aim);
+    }
+    for (let i = 0; i < rightPulls.length; i += 1) {
+      const pull = rightPulls[i] || {};
+      const aim = worldAimAngle('right', pull.pullX, pull.pullY);
+      const y = Number.isFinite(pull.archerAimY) ? Number(pull.archerAimY) : (Number(world.towerY) - 56 - i * 78);
+      this.drawArcherHeldInstrument('right', i, rightX, y, aim);
+    }
+  }
+
   spawnResourceTelegraph(x, y, side, ttl = 1) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.resourceSpawnTelegraphs.push({
@@ -5003,6 +5084,7 @@ export class GameRenderer {
         shotPowerShots: activeShots,
       });
     }
+    this.drawArcherInstrumentOverlay(world, leftPulls, rightPulls);
     this.drawColliderDebugOverlay(snapshot, world);
 
     const gameOverCinematicActive = this.isGameOverCinematicActive(now);

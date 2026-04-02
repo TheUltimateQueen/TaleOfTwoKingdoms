@@ -352,6 +352,7 @@ export class GameClient {
       missingPlayers: 0,
       immediateRematchReady: false,
     };
+    this.audioRoundStarted = false;
 
     this.bindDom();
     this.applyThemeMode(this.state.themeMode, { persist: false, requestServer: false, updateRoom: false });
@@ -741,9 +742,27 @@ export class GameClient {
 
     this.socket.on('hit_sfx', (events) => {
       if (this.isController || !Array.isArray(events)) return;
+      const archersTotal = this.state.mode === '2v2' ? 4 : 2;
       for (const e of events) {
-        this.sound.play(e.type, { ...e, world: this.state.world });
-        this.renderer.emitHitParticles({ ...e, world: this.state.world });
+        const payload = {
+          ...e,
+          world: this.state.world,
+          mode: this.state.mode,
+          archersTotal,
+        };
+        if (
+          e?.type === 'minion'
+          && this.sound
+          && typeof this.sound.archerInstrumentUi === 'function'
+        ) {
+          const marker = this.sound.archerInstrumentUi(payload);
+          if (marker?.iconSrc) {
+            payload.instrumentIconSrc = marker.iconSrc;
+            payload.instrumentKey = marker.instrument || null;
+          }
+        }
+        this.sound.play(e.type, payload);
+        this.renderer.emitHitParticles(payload);
       }
     });
 
@@ -930,9 +949,27 @@ export class GameClient {
     const damageEvents = this.localRoom.consumeDamageEvents();
     const lineEvents = this.localRoom.consumeLineEvents();
 
+    const archersTotal = snapshot.mode === '2v2' ? 4 : 2;
     for (const e of sfxEvents) {
-      this.sound.play(e.type, { ...e, world: snapshot.world });
-      this.renderer.emitHitParticles({ ...e, world: snapshot.world });
+      const payload = {
+        ...e,
+        world: snapshot.world,
+        mode: snapshot.mode,
+        archersTotal,
+      };
+      if (
+        e?.type === 'minion'
+        && this.sound
+        && typeof this.sound.archerInstrumentUi === 'function'
+      ) {
+        const marker = this.sound.archerInstrumentUi(payload);
+        if (marker?.iconSrc) {
+          payload.instrumentIconSrc = marker.iconSrc;
+          payload.instrumentKey = marker.instrument || null;
+        }
+      }
+      this.sound.play(e.type, payload);
+      this.renderer.emitHitParticles(payload);
     }
     for (const e of damageEvents) this.renderer.emitDamageNumber(e.amount, e.x, e.y);
     for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
@@ -2407,6 +2444,32 @@ export class GameClient {
     }
   }
 
+  syncArcherInstrumentVisuals(mode = this.state.mode) {
+    if (!this.renderer || typeof this.renderer.setArcherInstruments !== 'function') return;
+    if (!this.sound || typeof this.sound.archerInstrumentUi !== 'function') {
+      this.renderer.setArcherInstruments(null);
+      return;
+    }
+    const normalizedMode = mode === '2v2' ? '2v2' : '1v1';
+    const archersPerSide = normalizedMode === '2v2' ? 2 : 1;
+    const archersTotal = archersPerSide * 2;
+    const loadout = { left: [], right: [] };
+    for (const side of ['left', 'right']) {
+      for (let slot = 0; slot < archersPerSide; slot += 1) {
+        const marker = this.sound.archerInstrumentUi({
+          side,
+          archerSlot: slot,
+          mode: normalizedMode,
+          archersTotal,
+        });
+        loadout[side][slot] = marker?.iconSrc
+          ? { iconSrc: marker.iconSrc, instrument: marker.instrument || null }
+          : null;
+      }
+    }
+    this.renderer.setArcherInstruments(loadout);
+  }
+
   normalizeVoiceSide(side) {
     return side === 'right' ? 'right' : 'left';
   }
@@ -2920,6 +2983,17 @@ export class GameClient {
     const mode = snapshot.mode === '2v2' ? '2v2' : '1v1';
     this.state.mode = mode;
     const postGameActive = Boolean(snapshot.gameOver && (snapshot.started || this.gameOverLatched));
+    const inPlayableRound = Boolean(snapshot.started && !snapshot.gameOver);
+    if (!this.isController && this.sound) {
+      if (inPlayableRound && !this.audioRoundStarted) {
+        this.audioRoundStarted = true;
+        if (typeof this.sound.randomizeArcherPianoSlots === 'function') this.sound.randomizeArcherPianoSlots();
+        this.syncArcherInstrumentVisuals(mode);
+      } else if (!inPlayableRound) {
+        this.audioRoundStarted = false;
+      }
+      this.syncArcherInstrumentVisuals(mode);
+    }
     if (this.state.createMode !== mode) this.setCreateMode(mode);
     this.updateHud(snapshot);
     if (snapshot.started || postGameActive) this.setDisplayMode('game');

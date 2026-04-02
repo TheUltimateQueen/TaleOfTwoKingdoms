@@ -2760,7 +2760,11 @@ class GameRoom {
       const waxLoss = enemyHit ? (0.45 + flameShotBonus * 0.2) : 0.02;
       candle.wax = Math.max(0, candle.wax - waxLoss);
       const attackerSide = hitSide === 'right' ? this.right : this.left;
+      const archerSlot = Number.isFinite(arrow?.archerSlot)
+        ? Math.max(0, Math.floor(Number(arrow.archerSlot) || 0))
+        : 0;
       this.queueHitSfx('minion', candle.x, candle.y + 3, hitSide, {
+        archerSlot,
         comboHitStreak: Math.max(0, Number(attackerSide?.comboHitStreak) || 0),
         comboTier: Math.max(1, Number(this.comboTier(attackerSide)) || 1),
       });
@@ -3230,7 +3234,11 @@ class GameRoom {
             this.queueHitSfx('dragon', core?.x ?? minion.x, core?.y ?? minion.y, a.side);
           } else if (!minion.balloon) {
             const attackerSide = a.side === 'right' ? this.right : this.left;
+            const archerSlot = Number.isFinite(a?.archerSlot)
+              ? Math.max(0, Math.floor(Number(a.archerSlot) || 0))
+              : 0;
             this.queueHitSfx('minion', minion.x, minion.y, a.side, {
+              archerSlot,
               comboHitStreak: Math.max(0, Number(attackerSide?.comboHitStreak) || 0),
               comboTier: Math.max(1, Number(this.comboTier(attackerSide)) || 1),
             });

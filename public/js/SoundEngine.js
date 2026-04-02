@@ -8,6 +8,9 @@ export class SoundEngine {
       left: { streak: 0, at: 0, shepardStep: 0 },
       right: { streak: 0, at: 0, shepardStep: 12 },
     };
+    this.archerPianoSlotMap = [0, 1, 2, 3];
+    this.archerDuoInstrumentSet = [6, 0];
+    this.archerQuadInstrumentSet = [0, 4, 5, 6];
     this.lastAt = {
       minion: 0,
       resource: 0,
@@ -47,7 +50,7 @@ export class SoundEngine {
     const mix = this.effectMix(type);
 
     if (type === 'minion') this.playMinionHit(spatial, mix);
-    else if (type === 'resource') this.playResourceHit(mix);
+    else if (type === 'resource') this.playResourceHit(spatial, mix);
     else if (type === 'powerup') this.playPowerupHit(mix);
     else if (type === 'upgrade') this.playUpgradeHit(mix);
     else if (type === 'explosion') this.playExplosionHit(mix);
@@ -62,6 +65,50 @@ export class SoundEngine {
   effectMix(type) {
     if (type === 'minion') return 1.32;
     return 0.855;
+  }
+
+  randomizeArcherPianoSlots() {
+    const profiles = this.getArcherInstrumentProfiles();
+    const order = [0, 1, 2, 3];
+    for (let i = order.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = order[i];
+      order[i] = order[j];
+      order[j] = temp;
+    }
+    this.archerPianoSlotMap = order;
+
+    const byName = new Map(profiles.map((p, idx) => [p.instrument, idx]));
+    const pickOne = (names) => {
+      const available = names
+        .map((name) => byName.get(name))
+        .filter((idx) => Number.isFinite(idx));
+      if (!available.length) return 0;
+      return available[Math.floor(Math.random() * available.length)];
+    };
+    const keyboard = pickOne(['felt_piano', 'upright_piano', 'rhodes_ep']);
+    const brightKeys = pickOne(['harpsichord', 'celesta_bell']);
+    const woodwind = pickOne(['clarinet_reed', 'flute_breath']);
+    const brass = pickOne(['brass_stab']);
+
+    const duoPairs = [
+      [brass, keyboard],
+      [woodwind, brightKeys],
+      [brass, brightKeys],
+      [woodwind, keyboard],
+    ];
+    const duo = duoPairs[Math.floor(Math.random() * duoPairs.length)].slice();
+    if (Math.random() < 0.5) duo.reverse();
+    this.archerDuoInstrumentSet = duo;
+
+    const quad = [keyboard, brightKeys, woodwind, brass];
+    for (let i = quad.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = quad[i];
+      quad[i] = quad[j];
+      quad[j] = temp;
+    }
+    this.archerQuadInstrumentSet = quad;
   }
 
   envGain(start, peak, decay, output = null, gainMul = 1) {
@@ -190,6 +237,324 @@ export class SoundEngine {
     return 'left';
   }
 
+  archerSlotIndex(spatial = null) {
+    if (!spatial || typeof spatial !== 'object') return 0;
+    const raw = Number(spatial.archerSlot ?? spatial.slot ?? spatial.lane);
+    if (!Number.isFinite(raw)) return 0;
+    return Math.max(0, Math.min(3, Math.floor(raw)));
+  }
+
+  activeArcherCount(spatial = null) {
+    if (spatial && typeof spatial === 'object') {
+      const rawCount = Number(spatial.archersTotal ?? spatial.totalArchers);
+      if (Number.isFinite(rawCount) && rawCount >= 4) return 4;
+      if (Number.isFinite(rawCount) && rawCount >= 2) return 2;
+      if (spatial.mode === '2v2') return 4;
+      if (spatial.mode === '1v1') return 2;
+    }
+    return 2;
+  }
+
+  archerVoiceIndex(spatial = null) {
+    const total = this.activeArcherCount(spatial);
+    const sideIndex = spatial?.side === 'right' ? 1 : 0;
+    if (total <= 2) return sideIndex;
+    const slot = this.archerSlotIndex(spatial);
+    const lane = Math.max(0, Math.min(1, slot));
+    return sideIndex * 2 + lane;
+  }
+
+  archerHarmonySemitone(spatial = null) {
+    const total = this.activeArcherCount(spatial);
+    const voice = Math.max(0, this.archerVoiceIndex(spatial));
+    const mappedVoice = this.archerPianoSlotMap[voice] ?? voice;
+    if (total <= 2) {
+      const twoVoice = [0, 7];
+      return twoVoice[mappedVoice % twoVoice.length];
+    }
+    const fourVoice = [0, 4, 7, 11];
+    return fourVoice[mappedVoice % fourVoice.length];
+  }
+
+  getArcherInstrumentProfiles() {
+    return [
+      {
+        instrument: 'felt_piano',
+        rootHz: 311.127,
+        scale: [0, 2, 4, 7, 9],
+        stepOffset: 0,
+        gainMul: 0.72,
+        bodyWave: 'triangle',
+        harmWave: 'sine',
+        fifthWave: 'sine',
+        airWave: 'sine',
+        bodyDecay: 0.2,
+        harmDecay: 0.16,
+        airDecay: 0.056,
+        clickFreq: 2360,
+        clickQ: 1.7,
+        tailFreq: 1320,
+      },
+      {
+        instrument: 'upright_piano',
+        rootHz: 349.228,
+        scale: [0, 2, 5, 7, 11],
+        stepOffset: 1,
+        gainMul: 0.78,
+        bodyWave: 'triangle',
+        harmWave: 'triangle',
+        fifthWave: 'sine',
+        airWave: 'sine',
+        bodyDecay: 0.18,
+        harmDecay: 0.146,
+        airDecay: 0.05,
+        clickFreq: 2750,
+        clickQ: 2.12,
+        tailFreq: 1510,
+      },
+      {
+        instrument: 'rhodes_ep',
+        rootHz: 293.665,
+        scale: [0, 3, 5, 7, 10],
+        stepOffset: 2,
+        gainMul: 0.74,
+        bodyWave: 'sine',
+        harmWave: 'triangle',
+        fifthWave: 'triangle',
+        airWave: 'sine',
+        bodyDecay: 0.214,
+        harmDecay: 0.172,
+        airDecay: 0.062,
+        clickFreq: 2230,
+        clickQ: 1.46,
+        tailFreq: 1250,
+      },
+      {
+        instrument: 'harpsichord',
+        rootHz: 329.628,
+        scale: [0, 2, 4, 6, 9],
+        stepOffset: 3,
+        gainMul: 0.77,
+        bodyWave: 'triangle',
+        harmWave: 'sine',
+        fifthWave: 'sine',
+        airWave: 'triangle',
+        bodyDecay: 0.19,
+        harmDecay: 0.154,
+        airDecay: 0.058,
+        clickFreq: 2920,
+        clickQ: 2.35,
+        tailFreq: 1630,
+      },
+      {
+        instrument: 'celesta_bell',
+        rootHz: 392.0,
+        scale: [0, 2, 4, 7, 11],
+        stepOffset: 1,
+        gainMul: 0.7,
+        bodyWave: 'sine',
+        harmWave: 'sine',
+        fifthWave: 'sine',
+        airWave: 'sine',
+        bodyDecay: 0.22,
+        harmDecay: 0.2,
+        airDecay: 0.08,
+        clickFreq: 3180,
+        clickQ: 2.8,
+        tailFreq: 2140,
+      },
+      {
+        instrument: 'clarinet_reed',
+        rootHz: 246.942,
+        scale: [0, 2, 3, 7, 10],
+        stepOffset: 0,
+        gainMul: 0.73,
+        bodyWave: 'square',
+        harmWave: 'triangle',
+        fifthWave: 'square',
+        airWave: 'sine',
+        bodyDecay: 0.2,
+        harmDecay: 0.17,
+        airDecay: 0.065,
+        clickFreq: 1140,
+        clickQ: 1.15,
+        tailFreq: 980,
+      },
+      {
+        instrument: 'brass_stab',
+        rootHz: 220.0,
+        scale: [0, 2, 5, 7, 9],
+        stepOffset: 2,
+        gainMul: 0.75,
+        bodyWave: 'sawtooth',
+        harmWave: 'square',
+        fifthWave: 'triangle',
+        airWave: 'sawtooth',
+        bodyDecay: 0.16,
+        harmDecay: 0.13,
+        airDecay: 0.05,
+        clickFreq: 1760,
+        clickQ: 1.5,
+        tailFreq: 1360,
+      },
+      {
+        instrument: 'flute_breath',
+        rootHz: 523.251,
+        scale: [0, 2, 4, 7, 9],
+        stepOffset: 0,
+        gainMul: 0.68,
+        bodyWave: 'sine',
+        harmWave: 'sine',
+        fifthWave: 'triangle',
+        airWave: 'sine',
+        bodyDecay: 0.23,
+        harmDecay: 0.18,
+        airDecay: 0.075,
+        clickFreq: 1420,
+        clickQ: 0.9,
+        tailFreq: 1220,
+      },
+    ];
+  }
+
+  archerPianoProfile(spatial = null) {
+    const voice = Math.max(0, this.archerVoiceIndex(spatial));
+    const mappedSlot = this.archerPianoSlotMap[voice] ?? voice;
+    const total = this.activeArcherCount(spatial);
+    const profiles = this.getArcherInstrumentProfiles();
+    let instrumentIndex = mappedSlot;
+    if (total <= 2) {
+      const duo = Array.isArray(this.archerDuoInstrumentSet) && this.archerDuoInstrumentSet.length >= 2
+        ? this.archerDuoInstrumentSet
+        : [6, 0];
+      instrumentIndex = duo[Math.max(0, Math.min(1, voice))];
+    } else {
+      const quad = Array.isArray(this.archerQuadInstrumentSet) && this.archerQuadInstrumentSet.length >= 4
+        ? this.archerQuadInstrumentSet
+        : [0, 4, 5, 6];
+      instrumentIndex = quad[Math.max(0, Math.min(3, voice))];
+    }
+    const idx = Number.isFinite(instrumentIndex) ? Math.max(0, Math.floor(instrumentIndex)) : mappedSlot;
+    return profiles[idx] || profiles[mappedSlot] || profiles[0];
+  }
+
+  instrumentIconSrc(instrument = 'felt_piano') {
+    const iconByInstrument = {
+      felt_piano: '/icons/twemoji/1f3b9.svg', // musical keyboard
+      upright_piano: '/icons/twemoji/1f3b9.svg',
+      rhodes_ep: '/icons/twemoji/1f3b9.svg',
+      harpsichord: '/icons/twemoji/1fa97.svg', // banjo (plucked timbre proxy)
+      celesta_bell: '/icons/twemoji/1f514.svg', // bell
+      clarinet_reed: '/icons/twemoji/1f3b7.svg', // saxophone (reed proxy)
+      brass_stab: '/icons/twemoji/1f3ba.svg', // trumpet
+      flute_breath: '/icons/twemoji/1fa88.svg', // flute
+    };
+    return iconByInstrument[instrument] || '/icons/twemoji/1f3bc.svg';
+  }
+
+  archerInstrumentUi(spatial = null) {
+    const profile = this.archerPianoProfile(spatial);
+    const instrument = profile?.instrument || 'felt_piano';
+    return {
+      instrument,
+      iconSrc: this.instrumentIconSrc(instrument),
+    };
+  }
+
+  playArcherInstrumentAccent(profile, rootHz, t, output, detuneCents, comboPitchCents, combo, totalGainMul) {
+    if (!this.ctx || !profile) return;
+    const kind = profile.instrument || 'felt_piano';
+    const level = Math.max(0, Math.min(1, Number(combo) || 0));
+    const nonPiano = kind === 'celesta_bell' || kind === 'clarinet_reed' || kind === 'brass_stab' || kind === 'flute_breath';
+    const accentMul = totalGainMul * (nonPiano ? (1.02 + level * 0.42) : (0.82 + level * 0.36));
+
+    if (kind === 'upright_piano') {
+      const body = this.envGain(t + 0.0015, 0.032 + level * 0.01, 0.13, output, accentMul);
+      const bark = this.envGain(t + 0.002, 0.018 + level * 0.008, 0.09, output, accentMul);
+      const b1 = this.osc('triangle', rootHz * 1.01, t + 0.0015, 0.14, body, detuneCents * 0.7 + comboPitchCents * 0.18);
+      const b2 = this.osc('square', rootHz * 2.48, t + 0.002, 0.1, bark, detuneCents * 0.95 + comboPitchCents * 0.34);
+      b1.frequency.exponentialRampToValueAtTime(rootHz * 0.98, t + 0.13);
+      b2.frequency.exponentialRampToValueAtTime(rootHz * 2.18, t + 0.09);
+      this.noiseBurst(t + 0.0014, 0.013 + level * 0.005, 0.042, 3250, 2.4, output, accentMul, detuneCents);
+      return;
+    }
+
+    if (kind === 'rhodes_ep') {
+      const tone = this.envGain(t + 0.003, 0.028 + level * 0.012, 0.22, output, accentMul);
+      const bell = this.envGain(t + 0.005, 0.013 + level * 0.007, 0.18, output, accentMul);
+      const r1 = this.osc('sine', rootHz, t + 0.003, 0.24, tone, detuneCents * 0.5 + comboPitchCents * 0.16);
+      const r2 = this.osc('sine', rootHz * 1.006, t + 0.003, 0.24, tone, detuneCents * 0.62 + comboPitchCents * 0.22);
+      const r3 = this.osc('triangle', rootHz * 2.01, t + 0.005, 0.2, bell, detuneCents * 0.82 + comboPitchCents * 0.3);
+      r1.frequency.exponentialRampToValueAtTime(rootHz * 0.992, t + 0.22);
+      r2.frequency.exponentialRampToValueAtTime(rootHz * 1.0, t + 0.22);
+      r3.frequency.exponentialRampToValueAtTime(rootHz * 1.88, t + 0.17);
+      return;
+    }
+
+    if (kind === 'harpsichord') {
+      const pluck = this.envGain(t + 0.0012, 0.029 + level * 0.012, 0.095, output, accentMul);
+      const upper = this.envGain(t + 0.0018, 0.019 + level * 0.007, 0.08, output, accentMul);
+      const h1 = this.osc('square', rootHz, t + 0.0012, 0.1, pluck, detuneCents * 0.72 + comboPitchCents * 0.2);
+      const h2 = this.osc('square', rootHz * 2.0, t + 0.0018, 0.085, upper, detuneCents * 0.9 + comboPitchCents * 0.35);
+      h1.frequency.exponentialRampToValueAtTime(rootHz * 0.965, t + 0.09);
+      h2.frequency.exponentialRampToValueAtTime(rootHz * 1.84, t + 0.08);
+      this.noiseBurst(t + 0.001, 0.011 + level * 0.004, 0.036, 2920, 2.7, output, accentMul, detuneCents);
+      return;
+    }
+
+    if (kind === 'celesta_bell') {
+      const bell = this.envGain(t + 0.0018, 0.046 + level * 0.018, 0.28, output, accentMul);
+      const overtone = this.envGain(t + 0.0034, 0.03 + level * 0.012, 0.25, output, accentMul);
+      const c1 = this.osc('sine', rootHz * 1.995, t + 0.002, 0.26, bell, detuneCents * 0.84 + comboPitchCents * 0.26);
+      const c2 = this.osc('sine', rootHz * 3.0, t + 0.004, 0.24, overtone, detuneCents * 0.92 + comboPitchCents * 0.34);
+      c1.frequency.exponentialRampToValueAtTime(rootHz * 1.9, t + 0.24);
+      c2.frequency.exponentialRampToValueAtTime(rootHz * 2.82, t + 0.22);
+      this.noiseBurst(t + 0.002, 0.009 + level * 0.004, 0.052, 3540, 2.6, output, accentMul, detuneCents);
+      return;
+    }
+
+    if (kind === 'clarinet_reed') {
+      const reed = this.envGain(t + 0.0022, 0.045 + level * 0.018, 0.22, output, accentMul);
+      const body = this.envGain(t + 0.0034, 0.03 + level * 0.012, 0.19, output, accentMul);
+      const cl1 = this.osc('square', rootHz, t + 0.003, 0.21, reed, detuneCents * 0.6 + comboPitchCents * 0.16);
+      const cl2 = this.osc('triangle', rootHz * 1.5, t + 0.004, 0.18, body, detuneCents * 0.72 + comboPitchCents * 0.22);
+      cl1.frequency.exponentialRampToValueAtTime(rootHz * 0.98, t + 0.2);
+      cl2.frequency.exponentialRampToValueAtTime(rootHz * 1.44, t + 0.17);
+      this.noiseBurst(t + 0.002, 0.012 + level * 0.005, 0.054, 940, 0.82, output, accentMul, detuneCents);
+      return;
+    }
+
+    if (kind === 'brass_stab') {
+      const stab = this.envGain(t + 0.0016, 0.052 + level * 0.02, 0.14, output, accentMul);
+      const edge = this.envGain(t + 0.002, 0.03 + level * 0.011, 0.11, output, accentMul);
+      const br1 = this.osc('sawtooth', rootHz * 0.99, t + 0.0018, 0.14, stab, detuneCents * 0.76 + comboPitchCents * 0.26);
+      const br2 = this.osc('square', rootHz * 1.99, t + 0.0024, 0.11, edge, detuneCents * 0.92 + comboPitchCents * 0.34);
+      br1.frequency.exponentialRampToValueAtTime(rootHz * 0.93, t + 0.13);
+      br2.frequency.exponentialRampToValueAtTime(rootHz * 1.86, t + 0.1);
+      this.noiseBurst(t + 0.0018, 0.016 + level * 0.006, 0.044, 1720, 1.42, output, accentMul, detuneCents);
+      return;
+    }
+
+    if (kind === 'flute_breath') {
+      const tone = this.envGain(t + 0.0038, 0.038 + level * 0.014, 0.24, output, accentMul);
+      const air = this.envGain(t + 0.0028, 0.019 + level * 0.008, 0.15, output, accentMul);
+      const fl1 = this.osc('sine', rootHz, t + 0.004, 0.24, tone, detuneCents * 0.44 + comboPitchCents * 0.16);
+      const fl2 = this.osc('triangle', rootHz * 2.0, t + 0.006, 0.2, tone, detuneCents * 0.58 + comboPitchCents * 0.22);
+      fl1.frequency.exponentialRampToValueAtTime(rootHz * 1.008, t + 0.22);
+      fl2.frequency.exponentialRampToValueAtTime(rootHz * 1.93, t + 0.19);
+      this.noiseBurst(t + 0.0032, 0.013 + level * 0.005, 0.062, 1280, 0.72, output, accentMul, detuneCents);
+      return;
+    }
+
+    const felt = this.envGain(t + 0.0022, 0.024 + level * 0.009, 0.2, output, accentMul);
+    const feltAir = this.envGain(t + 0.0038, 0.01 + level * 0.005, 0.13, output, accentMul);
+    const f1 = this.osc('triangle', rootHz * 0.99, t + 0.0022, 0.22, felt, detuneCents * 0.54 + comboPitchCents * 0.16);
+    const f2 = this.osc('sine', rootHz * 1.98, t + 0.0038, 0.14, feltAir, detuneCents * 0.68 + comboPitchCents * 0.24);
+    f1.frequency.exponentialRampToValueAtTime(rootHz * 0.972, t + 0.2);
+    f2.frequency.exponentialRampToValueAtTime(rootHz * 1.9, t + 0.13);
+    this.noiseBurst(t + 0.0022, 0.006 + level * 0.003, 0.05, 2100, 1.35, output, accentMul, detuneCents);
+  }
+
   nextComboShepardStep(spatial = null, streak = 0) {
     const sideName = this.comboSide(spatial);
     const state = this.comboNoteState[sideName] || {
@@ -263,16 +628,72 @@ export class SoundEngine {
     const punch = this.envGain(t + 0.0015, 0.152, 0.102, fx.output, totalGainMul);
     const attack = this.envGain(t, 0.074, 0.046, fx.output, totalGainMul);
     const sparkle = this.envGain(t + 0.014, 0.049 + combo * 0.012, 0.078, fx.output, totalGainMul);
+    const pianoProfile = this.archerPianoProfile(spatial);
+    const pianoScale = Array.isArray(pianoProfile.scale) && pianoProfile.scale.length
+      ? pianoProfile.scale
+      : [0, 2, 4, 7, 9];
+    const pianoStep = pianoScale[
+      (Math.max(0, streak - 1) + Math.max(0, Number(pianoProfile.stepOffset) || 0)) % pianoScale.length
+    ];
+    const pianoRootBase = Math.max(120, Number(pianoProfile.rootHz) || 329.628);
+    const harmonySemitone = this.archerHarmonySemitone(spatial);
+    const pianoRoot = pianoRootBase * Math.pow(2, (pianoStep + harmonySemitone) / 12);
+    const kind = pianoProfile.instrument || 'felt_piano';
+    const isNonPianoFamily = kind === 'celesta_bell' || kind === 'clarinet_reed' || kind === 'brass_stab' || kind === 'flute_breath';
+    const baseLayerScale = isNonPianoFamily ? 0.24 : 0.44;
+    const pianoGainMul = totalGainMul * Math.max(0.2, Number(pianoProfile.gainMul) || 0.62) * baseLayerScale;
+    const bodyDecay = Math.max(0.09, Number(pianoProfile.bodyDecay) || 0.19);
+    const harmDecay = Math.max(0.08, Number(pianoProfile.harmDecay) || 0.15);
+    const airDecay = Math.max(0.04, Number(pianoProfile.airDecay) || 0.052);
+    const pianoBody = this.envGain(t + 0.0028, 0.023 + combo * 0.006, bodyDecay, fx.output, pianoGainMul);
+    const pianoHarm = this.envGain(t + 0.006, 0.013 + combo * 0.004, harmDecay, fx.output, pianoGainMul);
+    const pianoAir = this.envGain(t + 0.001, 0.0065, airDecay, fx.output, pianoGainMul);
 
     const subOsc = this.osc('sine', 162, t, 0.145, sub, fx.detuneCents * 0.45 + comboPitchCents * 0.24);
     const punchOsc = this.osc('triangle', 306, t + 0.0015, 0.104, punch, fx.detuneCents * 0.7 + comboPitchCents * 0.36);
     const attackOsc = this.osc('square', 430, t, 0.052, attack, fx.detuneCents * 0.92 + comboPitchCents * 0.48);
     const sparkleOsc = this.osc('sine', 1540, t + 0.014, 0.078, sparkle, fx.detuneCents * 0.82 + comboPitchCents * 0.72);
+    const pianoBodyOsc = this.osc(
+      pianoProfile.bodyWave || 'triangle',
+      pianoRoot,
+      t + 0.0028,
+      0.2,
+      pianoBody,
+      fx.detuneCents * 0.58 + comboPitchCents * 0.2
+    );
+    const pianoHarmOsc = this.osc(
+      pianoProfile.harmWave || 'sine',
+      pianoRoot * 2.01,
+      t + 0.006,
+      0.16,
+      pianoHarm,
+      fx.detuneCents * 0.6 + comboPitchCents * 0.3
+    );
+    const pianoFifthOsc = this.osc(
+      pianoProfile.fifthWave || 'sine',
+      pianoRoot * 1.5,
+      t + 0.004,
+      0.13,
+      pianoHarm,
+      fx.detuneCents * 0.45 + comboPitchCents * 0.16
+    );
+    const pianoAirOsc = this.osc(
+      pianoProfile.airWave || 'sine',
+      pianoRoot * 3.02,
+      t + 0.001,
+      0.07,
+      pianoAir,
+      fx.detuneCents * 0.72 + comboPitchCents * 0.34
+    );
 
     subOsc.frequency.exponentialRampToValueAtTime(58, t + 0.128);
     punchOsc.frequency.exponentialRampToValueAtTime(116, t + 0.096);
     attackOsc.frequency.exponentialRampToValueAtTime(188, t + 0.05);
     sparkleOsc.frequency.exponentialRampToValueAtTime(760 + combo * 140, t + 0.086);
+    pianoBodyOsc.frequency.exponentialRampToValueAtTime(pianoRoot * 0.985, t + 0.185);
+    pianoHarmOsc.frequency.exponentialRampToValueAtTime(pianoRoot * 1.95, t + 0.145);
+    pianoFifthOsc.frequency.exponentialRampToValueAtTime(pianoRoot * 1.45, t + 0.12);
+    pianoAirOsc.frequency.exponentialRampToValueAtTime(pianoRoot * 2.86, t + 0.066);
 
     // Low-mid noise bursts add a tactile "impact" instead of a sharp sparkle.
     this.noiseBurst(
@@ -306,6 +727,36 @@ export class SoundEngine {
       totalGainMul,
       fx.detuneCents + comboPitchCents * 0.58
     );
+    this.noiseBurst(
+      t + 0.002,
+      0.008 + combo * 0.002,
+      0.044,
+      (Number(pianoProfile.clickFreq) || 2550) + combo * 160,
+      Math.max(0.4, Number(pianoProfile.clickQ) || 1.9),
+      fx.output,
+      pianoGainMul,
+      fx.detuneCents + comboPitchCents * 0.2
+    );
+    this.noiseBurst(
+      t + 0.01,
+      0.0048,
+      0.065,
+      (Number(pianoProfile.tailFreq) || 1380) + combo * 90,
+      0.85,
+      fx.output,
+      pianoGainMul,
+      fx.detuneCents + comboPitchCents * 0.14
+    );
+    this.playArcherInstrumentAccent(
+      pianoProfile,
+      pianoRoot,
+      t,
+      fx.output,
+      fx.detuneCents + comboPitchCents * 0.08,
+      comboPitchCents,
+      combo,
+      totalGainMul
+    );
     const shepardStep = this.nextComboShepardStep(spatial, streak);
     if (Number.isFinite(shepardStep)) {
       this.playComboNote(
@@ -320,13 +771,15 @@ export class SoundEngine {
     this.cleanupNodeLater(fx.cleanup, 0.28);
   }
 
-  playResourceHit(mix = 1) {
+  playResourceHit(spatial = null, mix = 1) {
     const t = this.ctx.currentTime;
-    const gainMul = Math.max(0.2, Number(mix) || 1);
-    const g1 = this.envGain(t, 0.16, 0.11, null, gainMul);
-    const g2 = this.envGain(t + 0.03, 0.12, 0.1, null, gainMul);
-    this.osc('sine', 980, t, 0.12, g1);
-    this.osc('sine', 1320, t + 0.03, 0.11, g2);
+    const fx = this.buildSpatialFx(spatial);
+    const gainMul = fx.gainMul * Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.16, 0.11, fx.output, gainMul);
+    const g2 = this.envGain(t + 0.03, 0.12, 0.1, fx.output, gainMul);
+    this.osc('sine', 980, t, 0.12, g1, fx.detuneCents * 0.42);
+    this.osc('sine', 1320, t + 0.03, 0.11, g2, fx.detuneCents * 0.65);
+    this.cleanupNodeLater(fx.cleanup, 0.2);
   }
 
   playPowerupHit(mix = 1) {
