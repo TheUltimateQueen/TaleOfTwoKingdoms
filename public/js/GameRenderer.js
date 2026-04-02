@@ -11493,13 +11493,11 @@ export class GameRenderer {
   militiaUpgradeVisualTier(minion, stage = 0, tier = 0) {
     const forced = Number(minion?.upgradeVisualTier);
     if (Number.isFinite(forced)) return Math.max(0, Math.min(3, Math.round(forced)));
-    const damage = Number(minion?.dmg);
-    if (!Number.isFinite(damage) || damage <= 0) return minion?.super ? 2 : 0;
-
+    const level = Math.max(0, Number(minion?.level) || 0);
     let visualTier = 0;
-    if (damage >= 24) visualTier = 1;
-    if (damage >= 38) visualTier = 2;
-    if (damage >= 54) visualTier = 3;
+    if (level >= 3 || stage >= 1) visualTier = 1;
+    if (level >= 7 || stage >= 2) visualTier = 2;
+    if (level >= 11 || stage >= 3) visualTier = 3;
     if (minion?.super) visualTier = Math.max(2, visualTier);
     return visualTier;
   }
@@ -12675,7 +12673,7 @@ export class GameRenderer {
     ctx.strokeStyle = palette.dark;
     ctx.lineWidth = 2;
     ctx.stroke();
-    if (themedEmpires) {
+    if (themedEmpires && visualDamageTier > 0) {
       // Face + robe details to make basic troops less plain.
       const skin = minion.side === 'left' ? '#e8c9a1' : '#efd8b1';
       ctx.fillStyle = skin;
