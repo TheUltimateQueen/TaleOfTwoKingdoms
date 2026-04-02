@@ -742,7 +742,7 @@ export class GameClient {
     this.socket.on('hit_sfx', (events) => {
       if (this.isController || !Array.isArray(events)) return;
       for (const e of events) {
-        this.sound.play(e.type, { x: e.x, y: e.y, side: e.side, world: this.state.world });
+        this.sound.play(e.type, { ...e, world: this.state.world });
         this.renderer.emitHitParticles({ ...e, world: this.state.world });
       }
     });
@@ -931,7 +931,7 @@ export class GameClient {
     const lineEvents = this.localRoom.consumeLineEvents();
 
     for (const e of sfxEvents) {
-      this.sound.play(e.type, { x: e.x, y: e.y, side: e.side, world: snapshot.world });
+      this.sound.play(e.type, { ...e, world: snapshot.world });
       this.renderer.emitHitParticles({ ...e, world: snapshot.world });
     }
     for (const e of damageEvents) this.renderer.emitDamageNumber(e.amount, e.x, e.y);

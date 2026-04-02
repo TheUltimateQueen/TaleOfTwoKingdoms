@@ -296,6 +296,7 @@ const ARROW_SKY_TTL_PAUSE_Y = -60;
 const DIGGER_SPAWN_BASE_Y = TOWER_Y + 102;
 const ARROW_STICK_GROUND_Y = DIGGER_SPAWN_BASE_Y + 56;
 const ARROW_STUCK_DURATION = 4;
+const ARROW_STUCK_IMPACT_DURATION = 1.35;
 const SHOT_POWER_FALL_MIN_SPEED = 78;
 const SHOT_POWER_FALL_MAX_SPEED = 112;
 const ARROW_TARGET_BUCKET_W = 120;
@@ -1238,6 +1239,7 @@ class GameRoom {
       comboTier: Math.max(1, Math.round(Number(a.comboTier) || 1)),
       launchDelay: roundTo(a.launchDelay, 3),
       stuck: Boolean(a.stuck),
+      stuckHitUnit: Boolean(a.stuckHitUnit),
       stuckAngle: finiteOrNull(a.stuckAngle, 3),
       stuckTtl: roundTo(a.stuckTtl, 3),
       stuckTtlMax: roundTo(a.stuckTtlMax, 3),
@@ -2757,7 +2759,11 @@ class GameRoom {
     if (part === 'stem') {
       const waxLoss = enemyHit ? (0.45 + flameShotBonus * 0.2) : 0.02;
       candle.wax = Math.max(0, candle.wax - waxLoss);
-      this.queueHitSfx('minion', candle.x, candle.y + 3, hitSide);
+      const attackerSide = hitSide === 'right' ? this.right : this.left;
+      this.queueHitSfx('minion', candle.x, candle.y + 3, hitSide, {
+        comboHitStreak: Math.max(0, Number(attackerSide?.comboHitStreak) || 0),
+        comboTier: Math.max(1, Number(this.comboTier(attackerSide)) || 1),
+      });
       return;
     }
 
@@ -3084,6 +3090,7 @@ class GameRoom {
       }
 
       let consumed = false;
+      let stickImpact = null;
 
       for (let p = this.shotPowers.length - 1; p >= 0; p -= 1) {
         const power = this.shotPowers[p];
@@ -3206,6 +3213,7 @@ class GameRoom {
           }
 
           this.markArrowHit(a);
+          a.hitAnyUnit = true;
           if (a.powerType === 'flareShot' && a.mainArrow && !a.flareShotTriggered) {
             a.flareShotTriggered = true;
             this.spawnFlareShotCannonBall(a.side, minion.x, minion.y);
@@ -3221,9 +3229,19 @@ class GameRoom {
             damage *= 2.2;
             this.queueHitSfx('dragon', core?.x ?? minion.x, core?.y ?? minion.y, a.side);
           } else if (!minion.balloon) {
-            this.queueHitSfx('minion', minion.x, minion.y, a.side);
+            const attackerSide = a.side === 'right' ? this.right : this.left;
+            this.queueHitSfx('minion', minion.x, minion.y, a.side, {
+              comboHitStreak: Math.max(0, Number(attackerSide?.comboHitStreak) || 0),
+              comboTier: Math.max(1, Number(this.comboTier(attackerSide)) || 1),
+            });
           }
           consumed = a.pierce <= 0;
+          if (consumed) {
+            stickImpact = {
+              x: Number.isFinite(a.x) ? a.x : minion.x,
+              y: Number.isFinite(a.y) ? a.y : minion.y,
+            };
+          }
           if (a.pierce > 0) a.pierce -= 1;
 
           if (minion.hero) {
@@ -3309,7 +3327,13 @@ class GameRoom {
         }
       }
 
-      if (consumed) this.arrows.splice(i, 1);
+      if (consumed) {
+        if (stickImpact) {
+          this.stickArrowAtImpact(a, stickImpact.x, stickImpact.y);
+          continue;
+        }
+        this.arrows.splice(i, 1);
+      }
     }
   }
 
@@ -3325,6 +3349,7 @@ class GameRoom {
     const minAngle = sideName === 'left' ? 0.48 : Math.PI - 1.28;
     const maxAngle = sideName === 'left' ? 1.28 : Math.PI - 0.48;
     arrow.stuck = true;
+    arrow.stuckHitUnit = Boolean(arrow.hitAnyUnit);
     arrow.stuckTtl = ARROW_STUCK_DURATION;
     arrow.stuckTtlMax = ARROW_STUCK_DURATION;
     arrow.ttl = ARROW_STUCK_DURATION;
@@ -3335,6 +3360,33 @@ class GameRoom {
     arrow.x = clamp(Number(arrow.x) || 0, TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
     arrow.y = ARROW_STICK_GROUND_Y;
     arrow.stuckAngle = clamp(baseAngle * 0.6 + incoming * 0.4, minAngle, maxAngle);
+  }
+
+  stickArrowAtImpact(arrow, hitX, hitY) {
+    if (!arrow || arrow.stuck) return;
+    const sideName = arrow.side === 'right' ? 'right' : 'left';
+    const sideDir = sideName === 'left' ? 1 : -1;
+    const incoming = Math.atan2(
+      Number(arrow.vy) || 0,
+      Number(arrow.vx) || sideDir * 120
+    );
+    const baseAngle = sideName === 'left' ? 0.26 : Math.PI - 0.26;
+    const minAngle = sideName === 'left' ? -0.72 : Math.PI - 2.42;
+    const maxAngle = sideName === 'left' ? 1.2 : Math.PI - (-0.72);
+    const duration = ARROW_STUCK_IMPACT_DURATION;
+    arrow.stuck = true;
+    arrow.hitAnyUnit = true;
+    arrow.stuckHitUnit = true;
+    arrow.stuckTtl = duration;
+    arrow.stuckTtlMax = duration;
+    arrow.ttl = duration;
+    arrow.launchDelay = 0;
+    arrow.gravity = 0;
+    arrow.vx = 0;
+    arrow.vy = 0;
+    arrow.x = clamp(Number(hitX) || 0, TOWER_X_LEFT + 24, TOWER_X_RIGHT - 24);
+    arrow.y = clamp(Number(hitY) || 0, 24, WORLD_H - 24);
+    arrow.stuckAngle = clamp(baseAngle * 0.5 + incoming * 0.5, minAngle, maxAngle);
   }
 
   buildMinionBuckets(bucketW = ARROW_TARGET_BUCKET_W) {
@@ -7081,7 +7133,9 @@ class GameRoom {
         arrowDamageGoldAwarded: 0,
         shotVolleyId: volleyId,
         comboTier: comboMul,
+        hitAnyUnit: false,
         stuck: false,
+        stuckHitUnit: false,
         stuckAngle: null,
         stuckTtl: 0,
         stuckTtlMax: 0,

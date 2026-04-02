@@ -13739,6 +13739,7 @@ export class GameRenderer {
       : Math.atan2(arrow.vy, arrow.vx);
     const len = 14 + arrow.r * 1.6;
     const isMainArrow = Boolean(arrow.mainArrow);
+    const isImpactStuck = isStuck && Boolean(arrow.stuckHitUnit);
     const comboTier = Math.max(1, Math.min(4, Number(arrow.comboTier) || 1));
     const comboBoost = isMainArrow ? Math.max(0, (comboTier - 1) / 3) : 0;
     const arrowCount = Math.max(0, Number(this.frameArrowCount) || 0);
@@ -13759,6 +13760,10 @@ export class GameRenderer {
     } else if (arrow.powerType === 'multiShot') {
       body = '#d2a4ff';
       glow = '#e6ccff';
+    }
+    if (isImpactStuck) {
+      body = '#ff5a5a';
+      glow = '#ffb3a9';
     }
     if (isMainArrow && !glow) {
       glow = arrow.side === 'left' ? '#bfe8ff' : '#ffd2c7';
@@ -13844,7 +13849,7 @@ export class GameRenderer {
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = arrow.side === 'left' ? '#9ccfff' : '#ffb1b1';
+    ctx.fillStyle = isImpactStuck ? '#ff8d8d' : (arrow.side === 'left' ? '#9ccfff' : '#ffb1b1');
     ctx.beginPath();
     ctx.moveTo(-len * 0.58, 0);
     ctx.lineTo(-len * 0.32, -2.8);

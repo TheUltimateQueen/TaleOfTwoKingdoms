@@ -147,25 +147,74 @@ export class SoundEngine {
     }, ms);
   }
 
+  comboStrength(spatial = null) {
+    if (!spatial || typeof spatial !== 'object') return 0;
+    const rawStreak = Number(spatial.comboHitStreak ?? spatial.comboStreak ?? spatial.combo);
+    if (Number.isFinite(rawStreak) && rawStreak > 0) {
+      return Math.max(0, Math.min(1, rawStreak / 10));
+    }
+    const rawTier = Number(spatial.comboTier);
+    if (Number.isFinite(rawTier) && rawTier > 1) {
+      return Math.max(0, Math.min(1, (rawTier - 1) / 3));
+    }
+    return 0;
+  }
+
   playMinionHit(spatial = null) {
     const t = this.ctx.currentTime;
     const fx = this.buildSpatialFx(spatial);
-    const body = this.envGain(t, 0.16, 0.11, fx.output, fx.gainMul);
-    const crack = this.envGain(t, 0.09, 0.05, fx.output, fx.gainMul);
-    const pop = this.envGain(t + 0.004, 0.11, 0.07, fx.output, fx.gainMul);
+    const combo = this.comboStrength(spatial);
+    const comboGain = 1 + combo * 0.56;
+    const comboPitchCents = combo * 104;
+    const totalGainMul = fx.gainMul * comboGain;
+    const sub = this.envGain(t, 0.235, 0.142, fx.output, totalGainMul);
+    const punch = this.envGain(t + 0.0015, 0.152, 0.102, fx.output, totalGainMul);
+    const attack = this.envGain(t, 0.074, 0.046, fx.output, totalGainMul);
+    const sparkle = this.envGain(t + 0.014, 0.049 + combo * 0.012, 0.078, fx.output, totalGainMul);
 
-    const bodyOsc = this.osc('triangle', 235, t, 0.12, body, fx.detuneCents * 0.55);
-    const crackOsc = this.osc('square', 980, t, 0.055, crack, fx.detuneCents * 0.95);
-    const popOsc = this.osc('sine', 420, t + 0.004, 0.075, pop, fx.detuneCents * 0.72);
+    const subOsc = this.osc('sine', 162, t, 0.145, sub, fx.detuneCents * 0.45 + comboPitchCents * 0.24);
+    const punchOsc = this.osc('triangle', 306, t + 0.0015, 0.104, punch, fx.detuneCents * 0.7 + comboPitchCents * 0.36);
+    const attackOsc = this.osc('square', 430, t, 0.052, attack, fx.detuneCents * 0.92 + comboPitchCents * 0.48);
+    const sparkleOsc = this.osc('sine', 1540, t + 0.014, 0.078, sparkle, fx.detuneCents * 0.82 + comboPitchCents * 0.72);
 
-    bodyOsc.frequency.exponentialRampToValueAtTime(130, t + 0.1);
-    crackOsc.frequency.exponentialRampToValueAtTime(530, t + 0.05);
-    popOsc.frequency.exponentialRampToValueAtTime(170, t + 0.07);
+    subOsc.frequency.exponentialRampToValueAtTime(58, t + 0.128);
+    punchOsc.frequency.exponentialRampToValueAtTime(116, t + 0.096);
+    attackOsc.frequency.exponentialRampToValueAtTime(188, t + 0.05);
+    sparkleOsc.frequency.exponentialRampToValueAtTime(760 + combo * 140, t + 0.086);
 
-    // Short filtered hiss gives a bottle-open "psh" edge before the impact body.
-    this.noiseBurst(t + 0.001, 0.07, 0.06, 2050, 1.35, fx.output, fx.gainMul, fx.detuneCents);
-    this.noiseBurst(t + 0.008, 0.045, 0.08, 1250, 1.0, fx.output, fx.gainMul, fx.detuneCents);
-    this.cleanupNodeLater(fx.cleanup, 0.24);
+    // Low-mid noise bursts add a tactile "impact" instead of a sharp sparkle.
+    this.noiseBurst(
+      t + 0.0008,
+      0.052 + combo * 0.019,
+      0.068,
+      390 + combo * 92,
+      0.95,
+      fx.output,
+      totalGainMul,
+      fx.detuneCents + comboPitchCents * 0.28
+    );
+    this.noiseBurst(
+      t + 0.006,
+      0.038 + combo * 0.013,
+      0.072,
+      1060 + combo * 130,
+      1.1,
+      fx.output,
+      totalGainMul,
+      fx.detuneCents + comboPitchCents * 0.34
+    );
+    // A short high "air" layer after the thud for a satisfying follow-through.
+    this.noiseBurst(
+      t + 0.018,
+      0.018 + combo * 0.007,
+      0.054,
+      1980 + combo * 200,
+      1.24,
+      fx.output,
+      totalGainMul,
+      fx.detuneCents + comboPitchCents * 0.58
+    );
+    this.cleanupNodeLater(fx.cleanup, 0.28);
   }
 
   playResourceHit() {
