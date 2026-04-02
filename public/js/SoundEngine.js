@@ -4,6 +4,10 @@ export class SoundEngine {
     this.master = null;
     this.noiseBuffer = null;
     this.unlocked = false;
+    this.comboNoteState = {
+      left: { streak: 0, at: 0, shepardStep: 0 },
+      right: { streak: 0, at: 0, shepardStep: 12 },
+    };
     this.lastAt = {
       minion: 0,
       resource: 0,
@@ -56,8 +60,8 @@ export class SoundEngine {
   }
 
   effectMix(type) {
-    if (type === 'minion') return 1.2;
-    return 0.9;
+    if (type === 'minion') return 1.32;
+    return 0.855;
   }
 
   envGain(start, peak, decay, output = null, gainMul = 1) {
@@ -166,10 +170,92 @@ export class SoundEngine {
     return 0;
   }
 
+  comboStreak(spatial = null) {
+    if (!spatial || typeof spatial !== 'object') return 0;
+    const rawStreak = Number(spatial.comboHitStreak ?? spatial.comboStreak ?? spatial.combo);
+    if (Number.isFinite(rawStreak)) return Math.max(0, Math.min(10, Math.round(rawStreak)));
+    const rawTier = Number(spatial.comboTier);
+    if (Number.isFinite(rawTier) && rawTier > 0) return Math.max(0, Math.min(10, Math.round((rawTier - 1) * 3 + 1)));
+    return 0;
+  }
+
+  comboSide(spatial = null) {
+    if (!spatial || typeof spatial !== 'object') return 'left';
+    if (spatial.side === 'right') return 'right';
+    if (spatial.side === 'left') return 'left';
+    if (Number.isFinite(spatial.x)) {
+      const worldW = Math.max(320, Number(spatial?.world?.w) || Number(spatial.worldWidth) || 1600);
+      return (Number(spatial.x) || 0) > worldW * 0.5 ? 'right' : 'left';
+    }
+    return 'left';
+  }
+
+  nextComboShepardStep(spatial = null, streak = 0) {
+    const sideName = this.comboSide(spatial);
+    const state = this.comboNoteState[sideName] || {
+      streak: 0,
+      at: 0,
+      shepardStep: sideName === 'right' ? 12 : 0,
+    };
+    const nowMs = performance.now();
+    const nextStreak = Math.max(0, Math.min(10, Math.round(Number(streak) || 0)));
+    if (nextStreak <= 1) {
+      state.streak = nextStreak;
+      state.at = nowMs;
+      this.comboNoteState[sideName] = state;
+      return null;
+    }
+    // If combo dropped (miss happened), re-arm so the next build-up can sing again.
+    if (nextStreak < state.streak) state.streak = nextStreak - 1;
+    const atCapLoop = nextStreak >= 10 && state.streak >= 10;
+    if (!atCapLoop && nextStreak <= state.streak) return null;
+    const minGap = atCapLoop ? 120 : 45;
+    if (nowMs - (Number(state.at) || 0) < minGap) return null;
+    state.streak = nextStreak;
+    state.at = nowMs;
+    const stepToPlay = Math.max(0, Math.round(Number(state.shepardStep) || 0));
+    state.shepardStep = (stepToPlay + 1) % 24;
+    this.comboNoteState[sideName] = state;
+    return stepToPlay;
+  }
+
+  playComboNote(output, detuneCents, combo, streak, shepardStep, gainMul = 1) {
+    if (!this.ctx) return;
+    const level = Math.max(0, Math.min(1, Number(combo) || 0));
+    const step = Math.max(0, Number(shepardStep) || 0);
+    const chroma = (step * 0.5) % 12;
+    const root = 261.626; // C4
+    const pitchClassFreq = root * Math.pow(2, chroma / 12);
+    const noteGainMul = Math.max(0.2, Number(gainMul) || 1) * (0.46 + level * 0.08);
+    const t = this.ctx.currentTime + 0.004;
+    const centerHz = 880;
+    const spread = 1.04;
+    const layers = [0.5, 1, 2, 4];
+
+    for (let i = 0; i < layers.length; i += 1) {
+      const freq = pitchClassFreq * layers[i];
+      if (!Number.isFinite(freq) || freq < 70 || freq > 4200) continue;
+      const distance = Math.log2(freq / centerHz);
+      const weight = Math.exp(-0.5 * Math.pow(distance / spread, 2));
+      const peak = (0.017 + level * 0.01) * (0.18 + weight * 0.98);
+      if (peak <= 0.001) continue;
+
+      const start = t + i * 0.0018;
+      const body = this.envGain(start, peak, 0.15 + weight * 0.04, output, noteGainMul);
+      const over = this.envGain(start + 0.007, peak * 0.62, 0.14, output, noteGainMul);
+
+      const n1 = this.osc('sine', freq, start, 0.16, body, detuneCents + level * 14 + i * 3);
+      const n2 = this.osc('triangle', freq * 1.995, start + 0.007, 0.15, over, detuneCents * 0.8 + level * 20 + i * 2);
+      n1.frequency.exponentialRampToValueAtTime(freq * 1.028, start + 0.15);
+      n2.frequency.exponentialRampToValueAtTime(freq * 2.06, start + 0.147);
+    }
+  }
+
   playMinionHit(spatial = null, mix = 1) {
     const t = this.ctx.currentTime;
     const fx = this.buildSpatialFx(spatial);
     const combo = this.comboStrength(spatial);
+    const streak = this.comboStreak(spatial);
     const comboGain = 1 + combo * 0.56;
     const comboPitchCents = combo * 104;
     const totalGainMul = fx.gainMul * comboGain * Math.max(0.2, Number(mix) || 1);
@@ -220,6 +306,17 @@ export class SoundEngine {
       totalGainMul,
       fx.detuneCents + comboPitchCents * 0.58
     );
+    const shepardStep = this.nextComboShepardStep(spatial, streak);
+    if (Number.isFinite(shepardStep)) {
+      this.playComboNote(
+        fx.output,
+        fx.detuneCents + comboPitchCents * 0.35,
+        combo,
+        streak,
+        shepardStep,
+        totalGainMul
+      );
+    }
     this.cleanupNodeLater(fx.cleanup, 0.28);
   }
 
