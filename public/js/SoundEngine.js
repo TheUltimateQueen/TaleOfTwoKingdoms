@@ -40,18 +40,24 @@ export class SoundEngine {
     const minGap = type === 'minion' || type === 'gunhit' ? 45 : 80;
     if (nowMs - this.lastAt[type] < minGap) return;
     this.lastAt[type] = nowMs;
+    const mix = this.effectMix(type);
 
-    if (type === 'minion') this.playMinionHit(spatial);
-    else if (type === 'resource') this.playResourceHit();
-    else if (type === 'powerup') this.playPowerupHit();
-    else if (type === 'upgrade') this.playUpgradeHit();
-    else if (type === 'explosion') this.playExplosionHit();
-    else if (type === 'candlehit') this.playCandleHit();
-    else if (type === 'dragon') this.playDragonHurt();
-    else if (type === 'dragonfire') this.playDragonFire();
-    else if (type === 'gunhit') this.playGunHit();
-    else if (type === 'blocked') this.playBlocked();
-    else if (type === 'golemsmash') this.playGolemSmash();
+    if (type === 'minion') this.playMinionHit(spatial, mix);
+    else if (type === 'resource') this.playResourceHit(mix);
+    else if (type === 'powerup') this.playPowerupHit(mix);
+    else if (type === 'upgrade') this.playUpgradeHit(mix);
+    else if (type === 'explosion') this.playExplosionHit(mix);
+    else if (type === 'candlehit') this.playCandleHit(mix);
+    else if (type === 'dragon') this.playDragonHurt(mix);
+    else if (type === 'dragonfire') this.playDragonFire(mix);
+    else if (type === 'gunhit') this.playGunHit(mix);
+    else if (type === 'blocked') this.playBlocked(mix);
+    else if (type === 'golemsmash') this.playGolemSmash(mix);
+  }
+
+  effectMix(type) {
+    if (type === 'minion') return 1.2;
+    return 0.9;
   }
 
   envGain(start, peak, decay, output = null, gainMul = 1) {
@@ -160,13 +166,13 @@ export class SoundEngine {
     return 0;
   }
 
-  playMinionHit(spatial = null) {
+  playMinionHit(spatial = null, mix = 1) {
     const t = this.ctx.currentTime;
     const fx = this.buildSpatialFx(spatial);
     const combo = this.comboStrength(spatial);
     const comboGain = 1 + combo * 0.56;
     const comboPitchCents = combo * 104;
-    const totalGainMul = fx.gainMul * comboGain;
+    const totalGainMul = fx.gainMul * comboGain * Math.max(0.2, Number(mix) || 1);
     const sub = this.envGain(t, 0.235, 0.142, fx.output, totalGainMul);
     const punch = this.envGain(t + 0.0015, 0.152, 0.102, fx.output, totalGainMul);
     const attack = this.envGain(t, 0.074, 0.046, fx.output, totalGainMul);
@@ -217,93 +223,101 @@ export class SoundEngine {
     this.cleanupNodeLater(fx.cleanup, 0.28);
   }
 
-  playResourceHit() {
+  playResourceHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.16, 0.11);
-    const g2 = this.envGain(t + 0.03, 0.12, 0.1);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.16, 0.11, null, gainMul);
+    const g2 = this.envGain(t + 0.03, 0.12, 0.1, null, gainMul);
     this.osc('sine', 980, t, 0.12, g1);
     this.osc('sine', 1320, t + 0.03, 0.11, g2);
   }
 
-  playPowerupHit() {
+  playPowerupHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g = this.envGain(t, 0.18, 0.22);
+    const g = this.envGain(t, 0.18, 0.22, null, Math.max(0.2, Number(mix) || 1));
     const o = this.osc('sawtooth', 440, t, 0.24, g);
     o.frequency.exponentialRampToValueAtTime(940, t + 0.2);
   }
 
-  playUpgradeHit() {
+  playUpgradeHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.16, 0.18);
-    const g2 = this.envGain(t + 0.04, 0.14, 0.15);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.16, 0.18, null, gainMul);
+    const g2 = this.envGain(t + 0.04, 0.14, 0.15, null, gainMul);
     this.osc('triangle', 520, t, 0.2, g1);
     this.osc('triangle', 780, t + 0.04, 0.16, g2);
   }
 
-  playExplosionHit() {
+  playExplosionHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g = this.envGain(t, 0.24, 0.26);
+    const g = this.envGain(t, 0.24, 0.26, null, Math.max(0.2, Number(mix) || 1));
     const o = this.osc('sawtooth', 180, t, 0.28, g);
     o.frequency.exponentialRampToValueAtTime(90, t + 0.22);
   }
 
-  playCandleHit() {
+  playCandleHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.22, 0.2);
-    const g2 = this.envGain(t + 0.02, 0.14, 0.16);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.22, 0.2, null, gainMul);
+    const g2 = this.envGain(t + 0.02, 0.14, 0.16, null, gainMul);
     const o1 = this.osc('sawtooth', 240, t, 0.22, g1);
     const o2 = this.osc('triangle', 460, t + 0.02, 0.17, g2);
     o1.frequency.exponentialRampToValueAtTime(130, t + 0.18);
     o2.frequency.exponentialRampToValueAtTime(220, t + 0.16);
   }
 
-  playDragonHurt() {
+  playDragonHurt(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.21, 0.3);
-    const g2 = this.envGain(t + 0.03, 0.12, 0.22);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.21, 0.3, null, gainMul);
+    const g2 = this.envGain(t + 0.03, 0.12, 0.22, null, gainMul);
     const o1 = this.osc('sawtooth', 260, t, 0.32, g1);
     const o2 = this.osc('triangle', 520, t + 0.03, 0.24, g2);
     o1.frequency.exponentialRampToValueAtTime(132, t + 0.26);
     o2.frequency.exponentialRampToValueAtTime(240, t + 0.21);
   }
 
-  playDragonFire() {
+  playDragonFire(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.2, 0.2);
-    const g2 = this.envGain(t + 0.02, 0.11, 0.17);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.2, 0.2, null, gainMul);
+    const g2 = this.envGain(t + 0.02, 0.11, 0.17, null, gainMul);
     const o1 = this.osc('sawtooth', 150, t, 0.22, g1);
     const o2 = this.osc('square', 310, t + 0.02, 0.18, g2);
     o1.frequency.exponentialRampToValueAtTime(88, t + 0.18);
     o2.frequency.exponentialRampToValueAtTime(170, t + 0.16);
   }
 
-  playGunHit() {
+  playGunHit(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.2, 0.09);
-    const g2 = this.envGain(t + 0.01, 0.1, 0.12);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.2, 0.09, null, gainMul);
+    const g2 = this.envGain(t + 0.01, 0.1, 0.12, null, gainMul);
     const o1 = this.osc('square', 220, t, 0.1, g1);
     const o2 = this.osc('triangle', 480, t + 0.01, 0.11, g2);
     o1.frequency.exponentialRampToValueAtTime(110, t + 0.08);
     o2.frequency.exponentialRampToValueAtTime(260, t + 0.1);
   }
 
-  playBlocked() {
+  playBlocked(mix = 1) {
     const t = this.ctx.currentTime;
-    const g1 = this.envGain(t, 0.16, 0.16);
-    const g2 = this.envGain(t + 0.015, 0.12, 0.14);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const g1 = this.envGain(t, 0.16, 0.16, null, gainMul);
+    const g2 = this.envGain(t + 0.015, 0.12, 0.14, null, gainMul);
     const o1 = this.osc('square', 190, t, 0.18, g1);
     const o2 = this.osc('triangle', 420, t + 0.015, 0.14, g2);
     o1.frequency.exponentialRampToValueAtTime(96, t + 0.15);
     o2.frequency.exponentialRampToValueAtTime(210, t + 0.12);
   }
 
-  playGolemSmash() {
+  playGolemSmash(mix = 1) {
     const t = this.ctx.currentTime;
-    const rumble = this.envGain(t, 0.28, 0.42);
-    const growlA = this.envGain(t + 0.01, 0.2, 0.22);
-    const growlB = this.envGain(t + 0.055, 0.18, 0.2);
-    const growlC = this.envGain(t + 0.1, 0.16, 0.19);
-    const impact = this.envGain(t + 0.12, 0.17, 0.13);
+    const gainMul = Math.max(0.2, Number(mix) || 1);
+    const rumble = this.envGain(t, 0.28, 0.42, null, gainMul);
+    const growlA = this.envGain(t + 0.01, 0.2, 0.22, null, gainMul);
+    const growlB = this.envGain(t + 0.055, 0.18, 0.2, null, gainMul);
+    const growlC = this.envGain(t + 0.1, 0.16, 0.19, null, gainMul);
+    const impact = this.envGain(t + 0.12, 0.17, 0.13, null, gainMul);
 
     const low = this.osc('sawtooth', 118, t, 0.44, rumble);
     low.frequency.exponentialRampToValueAtTime(56, t + 0.36);
