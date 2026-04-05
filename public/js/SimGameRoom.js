@@ -55,10 +55,10 @@ const RESOURCE_SPAWN_TELEGRAPH_DURATION = 1;
 const RESOURCE_VALUE_BASE = 22;
 const RESOURCE_VALUE_REFERENCE_WAIT_SECONDS = (RESOURCE_SPAWN_START_MIN_SECONDS + RESOURCE_SPAWN_START_MAX_SECONDS) * 0.5;
 const MINION_KILL_GOLD_BASE = 12;
-const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1;
+const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1.35;
 const ARROW_DAMAGE_GOLD_MAX_COMBO_MULT = 1.2;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
-const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 6;
+const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 5;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 
 const TOWER_MAX_HP = 6000;
@@ -222,6 +222,36 @@ const HERO_ARROW_FINISHER_HITS = 9;
 const HERO_SWING_ATTACK_WINDOW = 0.34;
 const HERO_SWING_ATTACK_SPEED = 20;
 const HERO_SWING_IDLE_RETURN_SPEED = 9;
+const HERO_FOOD_RAIN_MIN_CD = 20;
+const HERO_FOOD_RAIN_MAX_CD = 120;
+const HERO_FOOD_RAIN_TARGET_DROPS = 20;
+const HERO_FOOD_RAIN_DROP_VARIANCE = 2;
+const HERO_FOOD_RAIN_MIN_DROPS = HERO_FOOD_RAIN_TARGET_DROPS - HERO_FOOD_RAIN_DROP_VARIANCE;
+const HERO_FOOD_RAIN_MAX_DROPS = HERO_FOOD_RAIN_TARGET_DROPS + HERO_FOOD_RAIN_DROP_VARIANCE;
+const HERO_FOOD_RAIN_RADIUS = 44;
+const HERO_FOOD_RAIN_DAMAGE_MULT = 1;
+const HERO_FOOD_RAIN_BIG_DAMAGE_MULT = 2.4;
+const HERO_FOOD_RAIN_BIG_RADIUS_MULT = 1.35;
+const HERO_FOOD_RAIN_BREAD_KINDS = Object.freeze(['bun', 'loaf', 'baguette', 'bagel', 'toast', 'brioche']);
+const HERO_FOOD_RAIN_RICE_KINDS = Object.freeze(['mochi', 'onigiri', 'riceCake', 'riceBowl', 'sushiRoll', 'senbei']);
+const HERO_FOOD_RAIN_BIG_PROJECTILES = 10;
+const HERO_GROUND_RUMBLE_MIN_CD = 10;
+const HERO_GROUND_RUMBLE_MAX_CD = 30;
+const HERO_GROUND_RUMBLE_MIN_BURSTS = 2;
+const HERO_GROUND_RUMBLE_MAX_BURSTS = 6;
+const HERO_GROUND_RUMBLE_RADIUS = 76;
+const HERO_GROUND_RUMBLE_DAMAGE_MULT = 1.4;
+const HERO_GROUND_RUMBLE_KNOCKBACK = 24;
+const HERO_COOKER_MIN_CD = 30;
+const HERO_COOKER_MAX_CD = 400;
+const HERO_COOKER_MAX_EAT = 10;
+const HERO_COOKER_EAT_RADIUS = 52;
+const HERO_COOKER_COOK_TIME = 10;
+const HERO_COOKER_MOVE_SPEED = 8;
+const HERO_COOKER_HEALTH_COST_FRACTION = 0.1;
+const HERO_ABILITY_MIN_GAP = 2;
+const HERO_ABILITY_TEST_MIN_CD = 5;
+const HERO_ABILITY_TEST_MAX_CD = 10;
 const SHIELD_PUSH_INTERVAL = 5;
 const SHIELD_PUSH_TTL = 0.75;
 const SHIELD_PUSH_SCALE = 1.35;
@@ -414,6 +444,7 @@ function normalizeDebugConfig(raw = null) {
     ? Math.floor(startingGoldRaw)
     : null;
   const colliderDebug = Boolean(cfg.colliderDebug);
+  const heroAbilityRapidTest = Boolean(cfg.heroAbilityRapidTest);
   const candleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
   const forcedSpecialType = (typeof cfg.forceSpecialType === 'string' && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType))
     ? cfg.forceSpecialType
@@ -452,6 +483,7 @@ function normalizeDebugConfig(raw = null) {
     forceSpecialMinAlive,
     startingGold,
     colliderDebug,
+    heroAbilityRapidTest,
     specialChanceOverrides,
     upgrades,
   };
@@ -563,6 +595,7 @@ function serializeSideState(side) {
       SPECIAL_SPAWN_QUEUE_ORDER.map((type) => [type, finiteOrNull(state?.debugSpecialChanceOverrides?.[type], 3)])
     ),
     debugCandleChanceBonus: roundTo(state.debugCandleChanceBonus, 2),
+    debugHeroAbilityRapidTest: Boolean(state.debugHeroAbilityRapidTest),
     debugForceSpecialType: typeof state.debugForceSpecialType === 'string' ? state.debugForceSpecialType : null,
     debugForceSpecialMinAlive: Math.max(0, Math.round(Number(state.debugForceSpecialMinAlive) || 0)),
   };
@@ -682,6 +715,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     debugSpecialSpawnRateMultiplier: 1,
     debugSpecialChanceOverrides: {},
     debugCandleChanceBonus: 0,
+    debugHeroAbilityRapidTest: false,
     debugForceSpecialType: null,
     debugForceSpecialMinAlive: 0,
   };
@@ -1128,6 +1162,7 @@ class GameRoom {
         side.debugSpecialSpawnRateMultiplier = 1;
         side.debugSpecialChanceOverrides = {};
         side.debugCandleChanceBonus = 0;
+        side.debugHeroAbilityRapidTest = false;
         side.debugForceSpecialType = null;
         side.debugForceSpecialMinAlive = 0;
         continue;
@@ -1143,6 +1178,7 @@ class GameRoom {
           : fallback;
       }
       side.debugCandleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
+      side.debugHeroAbilityRapidTest = Boolean(cfg.heroAbilityRapidTest);
       side.debugForceSpecialType = cfg.forceSpecialType && DEBUG_FORCE_SPECIAL_TYPES.has(cfg.forceSpecialType)
         ? cfg.forceSpecialType
         : null;
@@ -1353,6 +1389,14 @@ class GameRoom {
         : -1,
       balloonHitCircleTtl: roundTo(m.balloonHitCircleTtl, 3),
       hero: Boolean(m.hero),
+      heroCooker: Boolean(m.heroCooker),
+      heroCookerFoodType: typeof m.heroCookerFoodType === 'string' ? m.heroCookerFoodType : null,
+      heroCookerState: typeof m.heroCookerState === 'string' ? m.heroCookerState : null,
+      heroCookerEatCount: Math.max(0, Math.round(Number(m.heroCookerEatCount) || 0)),
+      heroCookerCookTtl: roundTo(m.heroCookerCookTtl, 2),
+      heroCookerCookMaxTtl: roundTo(m.heroCookerCookMaxTtl, 2),
+      heroCookerAnimT: roundTo(m.heroCookerAnimT, 3),
+      heroCookerSpin: roundTo(m.heroCookerSpin, 3),
       monk: Boolean(m.monk),
       monkHealScale: roundTo(m.monkHealScale, 3),
       necrominion: Boolean(m.necrominion),
@@ -1507,9 +1551,11 @@ class GameRoom {
     this.damageEvents.push({ amount: dmg, x, y });
   }
 
-  queueLine(text, x, y, side) {
+  queueLine(text, x, y, side, extra = null) {
     if (!text || !Number.isFinite(x) || !Number.isFinite(y)) return;
-    this.lineEvents.push({ text: String(text), x, y, side });
+    const event = { text: String(text), x, y, side };
+    if (extra && typeof extra === 'object') Object.assign(event, extra);
+    this.lineEvents.push(event);
   }
 
   consumeSfxEvents() {
@@ -3944,6 +3990,20 @@ class GameRoom {
           m.heroSwing += (0 - m.heroSwing) * Math.min(1, dt * HERO_SWING_IDLE_RETURN_SPEED);
           if (Math.abs(m.heroSwing) < 0.001) m.heroSwing = 0;
         }
+        const sideState = m.side === 'right' ? this.right : this.left;
+        this.tickHeroAbilities(m, sideState, dt, targetBuckets, MINION_TARGET_BUCKET_W);
+      }
+      if (m.heroCooker) {
+        if (!Number.isFinite(m.heroCookerCookTtl)) m.heroCookerCookTtl = HERO_COOKER_COOK_TIME;
+        if (!Number.isFinite(m.heroCookerCookMaxTtl) || m.heroCookerCookMaxTtl <= 0) {
+          m.heroCookerCookMaxTtl = HERO_COOKER_COOK_TIME;
+        }
+        if (!Number.isFinite(m.heroCookerAnimT)) m.heroCookerAnimT = 0;
+        if (!Number.isFinite(m.heroCookerSpin)) m.heroCookerSpin = 0;
+        if (!Number.isFinite(m.heroCookerBubbleCd)) m.heroCookerBubbleCd = 0.24;
+        if (!Number.isFinite(m.heroCookerEatCount)) m.heroCookerEatCount = 0;
+        if (typeof m.heroCookerFoodType !== 'string') m.heroCookerFoodType = (m.side === 'right' ? 'rice' : 'bread');
+        if (typeof m.heroCookerState !== 'string') m.heroCookerState = 'hunting';
       }
       if (m.shieldBearer) {
         m.dmg = 0;
@@ -4055,6 +4115,10 @@ class GameRoom {
         const sideState = m.side === 'right' ? this.right : this.left;
         m.monkHealCircleUpgraded = (Number(sideState?.monkHealCircleLevel) || 0) > 0;
         this.tickMonk(m, dt);
+        continue;
+      }
+      if (m.heroCooker) {
+        this.tickHeroCooker(m, dt, targetBuckets, MINION_TARGET_BUCKET_W);
         continue;
       }
       if (this.handleCandleMinionIntent(m, dt, carrierCounts)) continue;
@@ -6287,7 +6351,8 @@ class GameRoom {
     this.triggerHeroAttackSwing(hero);
     const sideState = hero.side === 'right' ? this.right : this.left;
     const slashR = Math.max(70, Number(hero.heroSlashRadius) || 88);
-    const damage = this.minionOutgoingDamage(hero, hero.dmg * 0.96);
+    const swingDamageMult = Math.max(0.72, Number(hero.heroLimbSwingDamageMult) || 0.96);
+    const damage = this.minionOutgoingDamage(hero, hero.dmg * swingDamageMult);
     let hitAny = false;
     const victims = [];
     this.forEachEnemyMinionInRadius(
@@ -6332,6 +6397,454 @@ class GameRoom {
     const prev = Number(hero.heroSwingAttackT) || 0;
     hero.heroSwingAttackT = HERO_SWING_ATTACK_WINDOW;
     if (prev <= 0 || !Number.isFinite(hero.heroSwing)) hero.heroSwing = 0;
+  }
+
+  heroAbilityCooldown(minSeconds, maxSeconds) {
+    const min = Math.max(0, Number(minSeconds) || 0);
+    const max = Math.max(min, Number(maxSeconds) || min);
+    return min + Math.random() * (max - min);
+  }
+
+  heroAbilityCooldownForSide(sideState, minSeconds, maxSeconds) {
+    const rapid = Boolean(sideState?.debugHeroAbilityRapidTest);
+    if (rapid) return this.heroAbilityCooldown(HERO_ABILITY_TEST_MIN_CD, HERO_ABILITY_TEST_MAX_CD);
+    return this.heroAbilityCooldown(minSeconds, maxSeconds);
+  }
+
+  queueHeroAbilityAnnouncement(hero, text) {
+    if (!hero || !hero.hero || !text) return;
+    const x = Number(hero.x) || 0;
+    const y = (Number(hero.y) || 0) - Math.max(16, (Number(hero.r) || 16)) - 38;
+    this.queueLine(String(text), x, y, hero.side, {
+      style: 'ability',
+      scale: 2,
+    });
+  }
+
+  sideHasActiveHeroCooker(sideName) {
+    for (const m of this.minions) {
+      if (!m || m.removed || !m.heroCooker || m.side !== sideName) continue;
+      if ((Number(m.hp) || 0) <= 0) continue;
+      return true;
+    }
+    return false;
+  }
+
+  refreshHeroCombatScaling(hero, sideState) {
+    if (!hero || !hero.hero || !sideState) return;
+    const powerLevel = Math.max(1, Number(sideState.powerLevel) || 1);
+    const unitLevel = Math.max(1, Number(sideState.unitLevel) || 1);
+    const hpTech = Math.max(1, Number(sideState.unitHpLevel) || 1);
+
+    hero.heroSlashRadius = Math.max(84, 80 + unitLevel * 2.2 + powerLevel * 1.4);
+    hero.heroLimbSwingDamageMult = 0.84 + Math.min(0.24, (powerLevel - 1) * 0.03) + Math.min(0.18, (unitLevel - 1) * 0.018);
+
+    hero.heroRainDropCount = Math.max(
+      HERO_FOOD_RAIN_MIN_DROPS,
+      Math.min(HERO_FOOD_RAIN_MAX_DROPS, HERO_FOOD_RAIN_TARGET_DROPS + Math.floor((powerLevel - 1) * 0.12))
+    );
+    hero.heroRainRadius = Math.max(HERO_FOOD_RAIN_RADIUS, HERO_FOOD_RAIN_RADIUS + Math.floor((powerLevel - 1) * 2.2));
+    hero.heroRainDamageMult = HERO_FOOD_RAIN_DAMAGE_MULT + Math.min(0.34, (powerLevel - 1) * 0.03);
+
+    hero.heroRumbleBursts = Math.max(
+      HERO_GROUND_RUMBLE_MIN_BURSTS,
+      Math.min(HERO_GROUND_RUMBLE_MAX_BURSTS, 2 + Math.floor((powerLevel - 1) * 0.52) + Math.floor((unitLevel - 1) * 0.2))
+    );
+    hero.heroRumbleRadius = Math.max(HERO_GROUND_RUMBLE_RADIUS, HERO_GROUND_RUMBLE_RADIUS + Math.floor((unitLevel - 1) * 1.35));
+    hero.heroRumbleDamageMult = HERO_GROUND_RUMBLE_DAMAGE_MULT + Math.min(0.36, (powerLevel - 1) * 0.032);
+    hero.heroRumbleKnockback = HERO_GROUND_RUMBLE_KNOCKBACK + Math.min(18, (powerLevel - 1) * 1.45);
+
+    if (!Number.isFinite(hero.heroFoodRainCd)) {
+      hero.heroFoodRainCd = this.heroAbilityCooldownForSide(sideState, HERO_FOOD_RAIN_MIN_CD, HERO_FOOD_RAIN_MAX_CD);
+    }
+    if (!Number.isFinite(hero.heroGroundRumbleCd)) {
+      hero.heroGroundRumbleCd = this.heroAbilityCooldownForSide(sideState, HERO_GROUND_RUMBLE_MIN_CD, HERO_GROUND_RUMBLE_MAX_CD);
+    }
+    if (!Number.isFinite(hero.heroCookerCd)) {
+      hero.heroCookerCd = this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD);
+    }
+    if (!Number.isFinite(hero.heroAbilityGapCd)) hero.heroAbilityGapCd = 0;
+  }
+
+  triggerHeroFoodRain(hero, sideState, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!hero || !hero.hero || !sideState) return;
+    const foodType = hero.side === 'right' ? 'rice' : 'bread';
+    this.queueHeroAbilityAnnouncement(hero, foodType === 'rice' ? 'RICE RAIN!' : 'BREAD RAIN!');
+    const baseDropCount = Math.max(
+      HERO_FOOD_RAIN_MIN_DROPS,
+      Math.min(HERO_FOOD_RAIN_MAX_DROPS, Math.round(Number(hero.heroRainDropCount) || HERO_FOOD_RAIN_MIN_DROPS))
+    );
+    const dropVariance = Math.max(0, HERO_FOOD_RAIN_DROP_VARIANCE);
+    const dropOffset = Math.floor(Math.random() * (dropVariance * 2 + 1)) - dropVariance;
+    const dropCount = Math.max(HERO_FOOD_RAIN_MIN_DROPS, Math.min(HERO_FOOD_RAIN_MAX_DROPS, baseDropCount + dropOffset));
+    const dropRadius = Math.max(HERO_FOOD_RAIN_RADIUS, Number(hero.heroRainRadius) || HERO_FOOD_RAIN_RADIUS);
+    const baseDamage = this.minionOutgoingDamage(
+      hero,
+      (Number(hero.dmg) || 0) * Math.max(HERO_FOOD_RAIN_DAMAGE_MULT, Number(hero.heroRainDamageMult) || HERO_FOOD_RAIN_DAMAGE_MULT)
+    );
+    const minX = TOWER_X_LEFT + 58;
+    const maxX = TOWER_X_RIGHT - 58;
+    const itemKinds = foodType === 'rice' ? HERO_FOOD_RAIN_RICE_KINDS : HERO_FOOD_RAIN_BREAD_KINDS;
+    const bigKind = foodType === 'rice' ? 'balloonRiceBomb' : 'balloonBreadBomb';
+    const bigQuota = Math.max(0, Math.min(HERO_FOOD_RAIN_BIG_PROJECTILES, dropCount));
+    const bigDropIndices = new Set();
+    while (bigDropIndices.size < bigQuota) bigDropIndices.add(Math.floor(Math.random() * dropCount));
+
+    for (let i = 0; i < dropCount; i += 1) {
+      const impactX = minX + Math.random() * (maxX - minX);
+      const impactY = TOWER_Y - 26 + (Math.random() * 156 - 58);
+      const bigProjectile = bigDropIndices.has(i);
+      const itemKind = bigProjectile
+        ? bigKind
+        : itemKinds[Math.floor(Math.random() * itemKinds.length)];
+      this.queueHitSfx('herofoodrain', impactX, impactY, hero.side, {
+        foodType,
+        kind: itemKind,
+        bigProjectile,
+        seed: Math.random() * 100000,
+        // Big payloads start well above the visible world so they clearly fall in from off-screen.
+        fromY: bigProjectile ? (-220 - Math.random() * 120) : (18 + Math.random() * 46),
+        toY: impactY,
+        duration: bigProjectile ? (1.22 + Math.random() * 0.42) : (0.34 + Math.random() * 0.36),
+        size: bigProjectile ? (2.24 + Math.random() * 0.46) : (0.8 + Math.random() * 0.52),
+      });
+      this.queueHitSfx('foodburst', impactX, impactY, hero.side, { foodType, heavy: false });
+      const impactRadius = bigProjectile ? (dropRadius * HERO_FOOD_RAIN_BIG_RADIUS_MULT) : dropRadius;
+      this.forEachEnemyMinionInRadius(
+        hero.side,
+        impactX,
+        impactY,
+        impactRadius,
+        minionBuckets,
+        bucketW,
+        (other) => {
+          if (!other || other.removed || other.side === hero.side || other.id === hero.id) return;
+          const damageJitter = bigProjectile ? (1.12 + Math.random() * 0.58) : (0.95 + Math.random() * 0.4);
+          const damageMult = bigProjectile ? HERO_FOOD_RAIN_BIG_DAMAGE_MULT : 1;
+          this.dealMinionDamage(hero, other, baseDamage * damageJitter * damageMult, 'explosion');
+          if ((Number(other.hp) || 0) <= 0) this.killMinionByRef(other, hero.side, { goldScalar: 0.8 });
+        }
+      );
+    }
+    this.queueHitSfx('powerup', hero.x, hero.y - hero.r * 0.4, hero.side);
+  }
+
+  triggerHeroGroundRumble(hero, sideState, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!hero || !hero.hero || !sideState) return;
+    const foodType = hero.side === 'right' ? 'rice' : 'bread';
+    this.queueHeroAbilityAnnouncement(hero, foodType === 'rice' ? 'SUSHI RUMBLE!' : 'CROISSANT RUMBLE!');
+    const maxBursts = Math.max(
+      HERO_GROUND_RUMBLE_MIN_BURSTS,
+      Math.min(HERO_GROUND_RUMBLE_MAX_BURSTS, Math.round(Number(hero.heroRumbleBursts) || HERO_GROUND_RUMBLE_MIN_BURSTS))
+    );
+    const rumbleRadius = Math.max(HERO_GROUND_RUMBLE_RADIUS, Number(hero.heroRumbleRadius) || HERO_GROUND_RUMBLE_RADIUS);
+    const knockback = Math.max(HERO_GROUND_RUMBLE_KNOCKBACK, Number(hero.heroRumbleKnockback) || HERO_GROUND_RUMBLE_KNOCKBACK);
+    const baseDamage = this.minionOutgoingDamage(
+      hero,
+      (Number(hero.dmg) || 0) * Math.max(HERO_GROUND_RUMBLE_DAMAGE_MULT, Number(hero.heroRumbleDamageMult) || HERO_GROUND_RUMBLE_DAMAGE_MULT)
+    );
+    const candidates = [];
+    this.forEachEnemyMinionInRadius(
+      hero.side,
+      hero.x,
+      hero.y,
+      360,
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.removed || other.side === hero.side || other.id === hero.id) return;
+        candidates.push(other);
+      }
+    );
+    candidates.sort((a, b) => ((Number(a.x) || 0) - (Number(hero.x) || 0)) ** 2 + ((Number(a.y) || 0) - (Number(hero.y) || 0)) ** 2
+      - (((Number(b.x) || 0) - (Number(hero.x) || 0)) ** 2 + ((Number(b.y) || 0) - (Number(hero.y) || 0)) ** 2));
+    const chosenCenters = [];
+    const used = new Set();
+    for (const target of candidates) {
+      if (chosenCenters.length >= maxBursts) break;
+      if (!target || used.has(target.id)) continue;
+      used.add(target.id);
+      chosenCenters.push({ x: Number(target.x) || hero.x, y: Number(target.y) || hero.y });
+    }
+    if (chosenCenters.length === 0) {
+      const dir = hero.side === 'left' ? 1 : -1;
+      chosenCenters.push({
+        x: clamp((Number(hero.x) || 0) + dir * 120, TOWER_X_LEFT + 60, TOWER_X_RIGHT - 60),
+        y: clamp((Number(hero.y) || 0) + (Math.random() * 90 - 45), TOWER_Y - 160, TOWER_Y + 170),
+      });
+    }
+
+    const pushDir = hero.side === 'left' ? 1 : -1;
+    const rumbleKind = foodType === 'rice' ? 'sushiRoll' : 'croissant';
+    const flingLandingDamage = Math.max(2, baseDamage * 0.42 + knockback * 0.1);
+    for (const center of chosenCenters) {
+      const cx = Number(center.x) || 0;
+      const cy = Number(center.y) || 0;
+      const fromY = clamp(cy + 14 + Math.random() * 18, TOWER_Y - 24, GROUND_Y - 6);
+      this.queueHitSfx('herorumble', cx, cy, hero.side, {
+        foodType,
+        kind: rumbleKind,
+        seed: Math.random() * 100000,
+        fromY,
+        toY: -38 - Math.random() * 102,
+        // Intentionally 2x slower than the prior rumble launch timing.
+        duration: (0.56 + Math.random() * 0.24) * 2,
+        size: 1.82 + Math.random() * 0.44,
+      });
+      this.queueHitSfx('foodburst', cx, cy, hero.side, { foodType, heavy: true });
+      this.forEachEnemyMinionInRadius(
+        hero.side,
+        cx,
+        cy,
+        rumbleRadius,
+        minionBuckets,
+        bucketW,
+        (other) => {
+          if (!other || other.removed || other.side === hero.side || other.id === hero.id) return;
+          this.dealMinionDamage(hero, other, baseDamage * (1.16 + Math.random() * 0.42), 'explosion');
+          if ((Number(other.hp) || 0) <= 0) {
+            this.killMinionByRef(other, hero.side, { goldScalar: 0.82 });
+            return;
+          }
+          const resist = other.super || other.dragon || other.stoneGolem ? 0.62 : 1;
+          const delay = 0.04 + Math.random() * 0.08;
+          this.startStoneGolemFling(
+            other,
+            pushDir,
+            flingLandingDamage * resist,
+            hero.side,
+            delay
+          );
+        }
+      );
+    }
+    this.queueHitSfx('explosion', hero.x, hero.y + hero.r * 0.1, hero.side);
+  }
+
+  heroCookerAbsorbNearby(cooker, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!cooker || !cooker.heroCooker) return 0;
+    const cap = Math.max(1, Math.min(HERO_COOKER_MAX_EAT, Math.round(Number(cooker.heroCookerEatCap) || HERO_COOKER_MAX_EAT)));
+    let stored = Math.max(0, Math.round(Number(cooker.heroCookerEatCount) || 0));
+    if (stored >= cap) return 0;
+    const victims = [];
+    this.forEachEnemyMinionInRadius(
+      cooker.side,
+      cooker.x,
+      cooker.y,
+      Math.max(HERO_COOKER_EAT_RADIUS, Number(cooker.heroCookerEatRadius) || HERO_COOKER_EAT_RADIUS),
+      minionBuckets,
+      bucketW,
+      (other) => {
+        if (!other || other.removed || other.side === cooker.side || other.id === cooker.id) return;
+        victims.push(other);
+      }
+    );
+    victims.sort((a, b) => {
+      const adx = (Number(a.x) || 0) - (Number(cooker.x) || 0);
+      const ady = (Number(a.y) || 0) - (Number(cooker.y) || 0);
+      const bdx = (Number(b.x) || 0) - (Number(cooker.x) || 0);
+      const bdy = (Number(b.y) || 0) - (Number(cooker.y) || 0);
+      return adx * adx + ady * ady - (bdx * bdx + bdy * bdy);
+    });
+    let absorbed = 0;
+    for (const victim of victims) {
+      if (stored >= cap) break;
+      if (!victim || victim.removed || victim.side === cooker.side || victim.id === cooker.id) continue;
+      const victimVisual = this.buildMinionGhostSnapshot(victim);
+      const victimR = Math.max(8, Number(victim.r) || 12);
+      const toX = (Number(cooker.x) || 0) + (Math.random() * 8 - 4);
+      const toY = (Number(cooker.y) || 0) - Math.max(7, (Number(cooker.r) || 16) * 0.46);
+      this.queueHitSfx('herocookerswallow', Number(victim.x) || 0, Number(victim.y) || 0, cooker.side, {
+        victim: victimVisual,
+        fromX: Number(victim.x) || 0,
+        fromY: (Number(victim.y) || 0) - victimR * 0.2,
+        toX,
+        toY,
+        duration: 0.34 + Math.random() * 0.2,
+        arc: 18 + victimR * 0.7 + Math.random() * 16,
+      });
+      this.killMinionByRef(victim, cooker.side, { goldScalar: 0.56, suppressDeathGhost: true });
+      stored += 1;
+      absorbed += 1;
+      cooker.heroCookerAnimT += 0.5;
+    }
+    cooker.heroCookerEatCount = stored;
+    return absorbed;
+  }
+
+  startHeroCookerCooking(cooker) {
+    if (!cooker || !cooker.heroCooker) return;
+    cooker.heroCookerState = 'cooking';
+    cooker.heroCookerCookTtl = Math.max(0.1, Number(cooker.heroCookerCookMaxTtl) || HERO_COOKER_COOK_TIME);
+    cooker.heroCookerBubbleCd = 0.24;
+    const maxHp = Math.max(1, Number(cooker.maxHp) || 1);
+    const hpCost = maxHp * HERO_COOKER_HEALTH_COST_FRACTION;
+    cooker.hp = Math.max(0, (Number(cooker.hp) || 0) - hpCost);
+    this.queueHitSfx('herocooker', cooker.x, cooker.y, cooker.side, {
+      foodType: cooker.heroCookerFoodType,
+      count: Math.max(0, Math.round(Number(cooker.heroCookerEatCount) || 0)),
+      pulse: true,
+    });
+  }
+
+  spawnHeroCooker(hero, sideState, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!hero || !hero.hero || !sideState) return null;
+    if (this.sideHasActiveHeroCooker(hero.side)) return null;
+    const foodType = hero.side === 'right' ? 'rice' : 'bread';
+    this.queueHeroAbilityAnnouncement(hero, foodType === 'rice' ? 'RICE COOKER!' : 'BREAD OVEN!');
+    const dir = hero.side === 'left' ? 1 : -1;
+    const x = clamp((Number(hero.x) || 0) + dir * (Math.max(16, Number(hero.r) || 16) + 24), TOWER_X_LEFT + 58, TOWER_X_RIGHT - 58);
+    const y = clamp((Number(hero.y) || 0) + 6, TOWER_Y - 170, TOWER_Y + 170);
+    const hp = Math.max(1, (Number(hero.maxHp) || 1) * 0.5);
+    const radius = Math.max(18, (Number(hero.r) || 20) * 0.82);
+    const cooker = {
+      id: this.seq++,
+      side: hero.side,
+      x,
+      y,
+      hp,
+      maxHp: hp,
+      dmg: 0,
+      speed: HERO_COOKER_MOVE_SPEED,
+      atkCd: 0,
+      r: radius,
+      tier: Math.max(1, Math.min(3, Math.floor((Number(sideState.powerLevel) || 1) / 2))),
+      level: Math.max(1, Math.round(Number(sideState.powerLevel) || 1) + 2),
+      summoned: true,
+      necroRevived: false,
+      super: false,
+      flying: false,
+      heroCooker: true,
+      heroCookerFoodType: foodType,
+      heroCookerState: 'hunting',
+      heroCookerEatCap: HERO_COOKER_MAX_EAT,
+      heroCookerEatCount: 0,
+      heroCookerEatRadius: HERO_COOKER_EAT_RADIUS,
+      heroCookerMoveSpeed: HERO_COOKER_MOVE_SPEED,
+      heroCookerCookTtl: 0,
+      heroCookerCookMaxTtl: HERO_COOKER_COOK_TIME,
+      heroCookerBubbleCd: 0.24,
+      heroCookerAnimT: Math.random() * Math.PI * 2,
+      heroCookerSpin: 0,
+      hitFlashTtl: 0,
+      candleCarrier: false,
+      candleCarrierSide: null,
+      candleBurnTtl: 0,
+      candleBurnTick: 0,
+      dragon: false,
+      balloon: false,
+      digger: false,
+      gunner: false,
+      necrominion: false,
+      rider: false,
+      shieldBearer: false,
+      stoneGolem: false,
+      hero: false,
+      monk: false,
+      president: false,
+      explosive: false,
+      failedSpecialType: null,
+      heroSwing: 0,
+    };
+    this.minions.push(cooker);
+    this.queueHitSfx('powerup', x, y - radius * 0.35, hero.side);
+    return cooker;
+  }
+
+  tickHeroCooker(cooker, dt, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!cooker || !cooker.heroCooker) return;
+    if (!Number.isFinite(cooker.heroCookerAnimT)) cooker.heroCookerAnimT = 0;
+    if (!Number.isFinite(cooker.heroCookerSpin)) cooker.heroCookerSpin = 0;
+    cooker.heroCookerAnimT += dt * 3.2;
+    cooker.heroCookerSpin += dt * 2.8;
+    cooker.atkCd = Math.max(0.2, Number(cooker.atkCd) || 0);
+    const state = typeof cooker.heroCookerState === 'string' ? cooker.heroCookerState : 'hunting';
+    cooker.heroCookerState = state;
+    const dir = cooker.side === 'left' ? 1 : -1;
+    const moveSpeed = Math.max(2, Number(cooker.heroCookerMoveSpeed) || HERO_COOKER_MOVE_SPEED);
+    cooker.x = clamp((Number(cooker.x) || 0) + dir * moveSpeed * dt, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
+    const cap = Math.max(1, Math.min(HERO_COOKER_MAX_EAT, Math.round(Number(cooker.heroCookerEatCap) || HERO_COOKER_MAX_EAT)));
+    if (state !== 'cooking') {
+      const absorbed = this.heroCookerAbsorbNearby(cooker, minionBuckets, bucketW);
+      if (absorbed > 0) {
+        this.queueHitSfx('herocooker', cooker.x, cooker.y - cooker.r * 0.2, cooker.side, {
+          foodType: cooker.heroCookerFoodType,
+          pulse: false,
+        });
+      }
+      if ((Number(cooker.heroCookerEatCount) || 0) >= cap) {
+        this.startHeroCookerCooking(cooker);
+      }
+    }
+    if (!Number.isFinite(cooker.heroCookerCookTtl)) cooker.heroCookerCookTtl = HERO_COOKER_COOK_TIME;
+    if (!Number.isFinite(cooker.heroCookerCookMaxTtl) || cooker.heroCookerCookMaxTtl <= 0) {
+      cooker.heroCookerCookMaxTtl = HERO_COOKER_COOK_TIME;
+    }
+    if (cooker.heroCookerState !== 'cooking') return;
+    cooker.heroCookerCookTtl = Math.max(0, cooker.heroCookerCookTtl - dt);
+    if (!Number.isFinite(cooker.heroCookerBubbleCd)) cooker.heroCookerBubbleCd = 0.24;
+    cooker.heroCookerBubbleCd = Math.max(0, cooker.heroCookerBubbleCd - dt);
+    if (cooker.heroCookerBubbleCd === 0 && cooker.heroCookerCookTtl > 0) {
+      cooker.heroCookerBubbleCd = 0.34 + Math.random() * 0.26;
+      this.queueHitSfx('herocooker', cooker.x, cooker.y - cooker.r * 0.3, cooker.side, {
+        foodType: cooker.heroCookerFoodType,
+        pulse: false,
+      });
+    }
+    if (cooker.heroCookerCookTtl > 0) return;
+    this.queueHitSfx('foodburst', cooker.x, cooker.y, cooker.side, {
+      foodType: cooker.heroCookerFoodType,
+      heavy: true,
+    });
+    cooker.heroCookerState = 'hunting';
+    cooker.heroCookerEatCount = 0;
+    cooker.heroCookerBubbleCd = 0.28;
+  }
+
+  tickHeroAbilities(hero, sideState, dt, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!hero || !hero.hero || !sideState) return;
+    this.refreshHeroCombatScaling(hero, sideState);
+    hero.heroFoodRainCd = Math.max(0, (Number(hero.heroFoodRainCd) || 0) - dt);
+    hero.heroGroundRumbleCd = Math.max(0, (Number(hero.heroGroundRumbleCd) || 0) - dt);
+    hero.heroCookerCd = Math.max(0, (Number(hero.heroCookerCd) || 0) - dt);
+    hero.heroAbilityGapCd = Math.max(0, (Number(hero.heroAbilityGapCd) || 0) - dt);
+
+    if (hero.heroRetreating) return;
+    if ((Number(hero.heroAbilityGapCd) || 0) > 0) return;
+    const ready = [];
+    if ((Number(hero.heroFoodRainCd) || 0) === 0) ready.push('rain');
+    if ((Number(hero.heroGroundRumbleCd) || 0) === 0) ready.push('rumble');
+    if ((Number(hero.heroCookerCd) || 0) === 0) ready.push('cooker');
+    if (!ready.length) return;
+
+    // Avoid hard priority bias when multiple abilities become ready at once.
+    for (let i = ready.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = ready[i];
+      ready[i] = ready[j];
+      ready[j] = tmp;
+    }
+
+    let triggered = false;
+    for (const ability of ready) {
+      if (ability === 'rain') {
+        this.triggerHeroFoodRain(hero, sideState, minionBuckets, bucketW);
+        hero.heroFoodRainCd = this.heroAbilityCooldownForSide(sideState, HERO_FOOD_RAIN_MIN_CD, HERO_FOOD_RAIN_MAX_CD);
+        triggered = true;
+      } else if (ability === 'rumble') {
+        this.triggerHeroGroundRumble(hero, sideState, minionBuckets, bucketW);
+        hero.heroGroundRumbleCd = this.heroAbilityCooldownForSide(sideState, HERO_GROUND_RUMBLE_MIN_CD, HERO_GROUND_RUMBLE_MAX_CD);
+        triggered = true;
+      } else if (ability === 'cooker') {
+        const cooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
+        hero.heroCookerCd = cooker
+          ? this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD)
+          : 6;
+        triggered = Boolean(cooker);
+      }
+      if (triggered) break;
+    }
+    if (triggered) hero.heroAbilityGapCd = HERO_ABILITY_MIN_GAP;
   }
 
   tickMonk(monk, dt) {
@@ -6669,10 +7182,10 @@ class GameRoom {
     return gain;
   }
 
-  queueMinionDeathGhost(minion, killerSide = null) {
+  buildMinionGhostSnapshot(minion) {
     if (!minion) return;
     const sideName = minion.side === 'right' ? 'right' : 'left';
-    const ghost = {
+    return {
       side: sideName,
       x: roundTo(minion.x, 1),
       y: roundTo(minion.y, 1),
@@ -6698,6 +7211,12 @@ class GameRoom {
       stoneGolem: Boolean(minion.stoneGolem),
       monk: Boolean(minion.monk),
       hero: Boolean(minion.hero),
+      heroCooker: Boolean(minion.heroCooker),
+      heroCookerFoodType: typeof minion.heroCookerFoodType === 'string' ? minion.heroCookerFoodType : null,
+      heroCookerCookTtl: roundTo(minion.heroCookerCookTtl, 2),
+      heroCookerCookMaxTtl: roundTo(minion.heroCookerCookMaxTtl, 2),
+      heroCookerAnimT: roundTo(minion.heroCookerAnimT, 3),
+      heroCookerSpin: roundTo(minion.heroCookerSpin, 3),
       president: Boolean(minion.president),
       dragon: Boolean(minion.dragon),
       balloon: Boolean(minion.balloon),
@@ -6723,6 +7242,13 @@ class GameRoom {
       hitFlashTtl: 0,
       monkHealScale: Number.isFinite(minion.monkHealScale) ? minion.monkHealScale : 1,
     };
+  }
+
+  queueMinionDeathGhost(minion, killerSide = null) {
+    if (!minion) return;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const ghost = this.buildMinionGhostSnapshot(minion);
+    if (!ghost) return;
     const killer = killerSide === 'left' || killerSide === 'right' ? killerSide : null;
     this.queueHitSfx('ghostfall', ghost.x, ghost.y, sideName, { killerSide: killer, ghost });
   }
@@ -6735,6 +7261,7 @@ class GameRoom {
       goldScalar = 1,
       triggerExplosion = false,
       impactDamage = null,
+      suppressDeathGhost = false,
     } = options;
 
     if (this.tryNecroExpertRevive(minion, killerSide)) {
@@ -6755,7 +7282,7 @@ class GameRoom {
     this.awardMinionKillGold(killerSide, goldScalar);
     this.recordMinionKill(killerSide);
     if (minion.hero) this.triggerHeroDramaticDeath(minion, killerSide);
-    this.queueMinionDeathGhost(minion, killerSide);
+    if (!suppressDeathGhost) this.queueMinionDeathGhost(minion, killerSide);
     minion.removed = true;
     const currentIndex = this.minions.indexOf(minion);
     if (currentIndex >= 0) this.minions.splice(currentIndex, 1);
@@ -7106,15 +7633,40 @@ class GameRoom {
       monkKeepBehind: 0,
       monkHealCircleCd: 0,
       hero: false,
+      heroBaseDmg: 0,
       heroArrowHits: 0,
       heroSlashRadius: 0,
+      heroLimbSwingDamageMult: 0,
       heroLineCd: 0,
       heroSwing: 0,
       heroSwingAttackT: 0,
+      heroAbilityGapCd: 0,
+      heroFoodRainCd: 0,
+      heroGroundRumbleCd: 0,
+      heroCookerCd: 0,
+      heroRainDropCount: 0,
+      heroRainRadius: 0,
+      heroRainDamageMult: 0,
+      heroRumbleBursts: 0,
+      heroRumbleRadius: 0,
+      heroRumbleDamageMult: 0,
+      heroRumbleKnockback: 0,
       heroRetreating: false,
       heroRetreatHpPct: 0,
       heroReturnHpPct: 0,
       heroHealPerSec: 0,
+      heroCooker: false,
+      heroCookerFoodType: null,
+      heroCookerState: null,
+      heroCookerEatCap: 0,
+      heroCookerEatCount: 0,
+      heroCookerEatRadius: 0,
+      heroCookerMoveSpeed: 0,
+      heroCookerCookTtl: 0,
+      heroCookerCookMaxTtl: 0,
+      heroCookerBubbleCd: 0,
+      heroCookerAnimT: 0,
+      heroCookerSpin: 0,
       president: false,
       presidentSetup: false,
       presidentPodiumX: null,
@@ -7690,15 +8242,40 @@ class GameRoom {
       monkKeepBehind: isMonk ? (138 + side.spawnLevel * 3) : 0,
       monkHealCircleCd: isMonk ? (MONK_HEAL_CIRCLE_INTERVAL + Math.random() * MONK_HEAL_CIRCLE_COOLDOWN_JITTER) : 0,
       hero: isHero,
+      heroBaseDmg: isHero ? dmg : 0,
       heroArrowHits: 0,
       heroSlashRadius: isHero ? (84 + side.unitLevel * 2.4) : 0,
+      heroLimbSwingDamageMult: isHero ? 0.96 : 0,
       heroLineCd: 0,
       heroSwing: 0,
       heroSwingAttackT: 0,
+      heroAbilityGapCd: 0,
+      heroFoodRainCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_FOOD_RAIN_MIN_CD, HERO_FOOD_RAIN_MAX_CD) : 0,
+      heroGroundRumbleCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_GROUND_RUMBLE_MIN_CD, HERO_GROUND_RUMBLE_MAX_CD) : 0,
+      heroCookerCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD) : 0,
+      heroRainDropCount: isHero ? HERO_FOOD_RAIN_MIN_DROPS : 0,
+      heroRainRadius: isHero ? HERO_FOOD_RAIN_RADIUS : 0,
+      heroRainDamageMult: isHero ? HERO_FOOD_RAIN_DAMAGE_MULT : 0,
+      heroRumbleBursts: isHero ? HERO_GROUND_RUMBLE_MIN_BURSTS : 0,
+      heroRumbleRadius: isHero ? HERO_GROUND_RUMBLE_RADIUS : 0,
+      heroRumbleDamageMult: isHero ? HERO_GROUND_RUMBLE_DAMAGE_MULT : 0,
+      heroRumbleKnockback: isHero ? HERO_GROUND_RUMBLE_KNOCKBACK : 0,
       heroRetreating: false,
       heroRetreatHpPct: isHero ? 0.3 : 0,
       heroReturnHpPct: isHero ? 0.92 : 0,
       heroHealPerSec: isHero ? Math.max(96, hp * 0.34) : 0,
+      heroCooker: false,
+      heroCookerFoodType: null,
+      heroCookerState: null,
+      heroCookerEatCap: 0,
+      heroCookerEatCount: 0,
+      heroCookerEatRadius: 0,
+      heroCookerMoveSpeed: 0,
+      heroCookerCookTtl: 0,
+      heroCookerCookMaxTtl: 0,
+      heroCookerBubbleCd: 0,
+      heroCookerAnimT: 0,
+      heroCookerSpin: 0,
       president: isPresident,
       presidentSetup: false,
       presidentPodiumX: isPresident ? presidentPodiumTargetX(sideName) : null,

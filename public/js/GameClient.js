@@ -425,8 +425,10 @@ export class GameClient {
     this.testForceSpecialMinAliveInput = document.getElementById('testForceSpecialMinAliveInput');
     this.testStartingGoldInput = document.getElementById('testStartingGoldInput');
     this.testColliderDebugInput = document.getElementById('testColliderDebugInput');
+    this.testHeroAbilityRapidInput = document.getElementById('testHeroAbilityRapidInput');
     this.testOffBtn = document.getElementById('testOffBtn');
     this.testSpecialsBtn = document.getElementById('testSpecialsBtn');
+    this.testHeroChecklistBtn = document.getElementById('testHeroChecklistBtn');
     this.testResetBtn = document.getElementById('testResetBtn');
     this.testSettingsMsg = document.getElementById('testSettingsMsg');
     this.testQuickSummary = document.getElementById('testQuickSummary');
@@ -776,7 +778,7 @@ export class GameClient {
     this.socket.on('hero_line', (events) => {
       if (this.isController || !Array.isArray(events)) return;
       for (const e of events) {
-        this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
+        this.renderer.emitHeroLine(e.text, e.x, e.y, e.side, e);
       }
     });
   }
@@ -972,7 +974,7 @@ export class GameClient {
       this.renderer.emitHitParticles(payload);
     }
     for (const e of damageEvents) this.renderer.emitDamageNumber(e.amount, e.x, e.y);
-    for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side);
+    for (const e of lineEvents) this.renderer.emitHeroLine(e.text, e.x, e.y, e.side, e);
 
     const now = performance.now();
     if (!force && now < this.nextHostStateEmitAt) return;
@@ -2104,6 +2106,7 @@ export class GameClient {
       forceSpecialMinAlive: 1,
       startingGold: null,
       colliderDebug: false,
+      heroAbilityRapidTest: false,
       upgrades,
     };
   }
@@ -2120,6 +2123,7 @@ export class GameClient {
       forceSpecialMinAlive: Math.max(1, Math.floor(clampNumber(cfg.forceSpecialMinAlive, 1, 12, 1))),
       startingGold: null,
       colliderDebug: Boolean(cfg.colliderDebug),
+      heroAbilityRapidTest: Boolean(cfg.heroAbilityRapidTest),
       upgrades: {},
     };
     const startingGoldRaw = cfg.startingGold;
@@ -2166,6 +2170,7 @@ export class GameClient {
     if (this.testForceSpecialMinAliveInput) this.testForceSpecialMinAliveInput.value = String(cfg.forceSpecialMinAlive || 1);
     if (this.testStartingGoldInput) this.testStartingGoldInput.value = Number.isFinite(cfg.startingGold) ? String(cfg.startingGold) : '';
     if (this.testColliderDebugInput) this.testColliderDebugInput.checked = Boolean(cfg.colliderDebug);
+    if (this.testHeroAbilityRapidInput) this.testHeroAbilityRapidInput.checked = Boolean(cfg.heroAbilityRapidTest);
     const specialByKey = new Map(this.testSpecialUpgradeInputs.map((el) => [el?.dataset?.testSpecialUpgrade, el]));
     for (const key of TEST_SPECIAL_UPGRADE_KEYS) {
       const input = specialByKey.get(key);
@@ -2184,6 +2189,7 @@ export class GameClient {
       forceSpecialMinAlive: this.testForceSpecialMinAliveInput?.value,
       startingGold: this.testStartingGoldInput?.value ?? '',
       colliderDebug: Boolean(this.testColliderDebugInput?.checked),
+      heroAbilityRapidTest: Boolean(this.testHeroAbilityRapidInput?.checked),
       upgrades: { ...base.upgrades },
     };
     for (const input of this.testSpecialUpgradeInputs) {
@@ -2208,7 +2214,8 @@ export class GameClient {
     const liveState = (this.hostAuthoritative && this.localRoom) ? 'LIVE' : 'SAVED';
     const goldLabel = Number.isFinite(cfg.startingGold) ? `Start UPG ${cfg.startingGold}` : 'Start UPG unchanged';
     const colliderLabel = cfg.colliderDebug ? 'Colliders ON' : 'Colliders OFF';
-    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | ${goldLabel} | ${colliderLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
+    const heroAbilityLabel = cfg.heroAbilityRapidTest ? 'Hero Abilities 5-10s ON' : 'Hero Abilities normal';
+    this.testQuickSummary.textContent = `${testState} | ${liveState} | ${forceLabel} | ${goldLabel} | ${colliderLabel} | ${heroAbilityLabel} | Upgrades ON: ${enabledCount}/${TEST_SPECIAL_UPGRADE_KEYS.length}`;
     if (this.testSettingsSummary) {
       this.testSettingsSummary.textContent = cfg.enabled
         ? 'Secret Test Settings - Testing ON'
@@ -2261,6 +2268,7 @@ export class GameClient {
       this.testForceSpecialMinAliveInput,
       this.testStartingGoldInput,
       this.testColliderDebugInput,
+      this.testHeroAbilityRapidInput,
       ...this.testSpecialUpgradeInputs,
     ];
     for (const input of allInputs) {
@@ -2290,6 +2298,21 @@ export class GameClient {
       this.updateTestQuickSummary(next);
       this.applyTestSettingsNow({ silent: true });
       this.setTestSettingsMessage('Special upgrades enabled.');
+    });
+    this.testHeroChecklistBtn?.addEventListener('click', () => {
+      if (this.testSettingsPanel) this.testSettingsPanel.open = true;
+      const next = this.readSettingsFromTestDom();
+      next.enabled = true;
+      next.forceSpecialType = 'hero';
+      next.forceSpecialMinAlive = 1;
+      next.heroAbilityRapidTest = true;
+      this.saveTestSettingsToStorage(next);
+      this.applySettingsToTestDom(next);
+      this.updateTestQuickSummary(next);
+      this.applyTestSettingsNow({ silent: true });
+      this.setTestSettingsMessage(
+        'Hero ability test preset applied. Checklist: 1) Wait 5-10s for ability banner. 2) Rain should hit units, not tower. 3) Rumble should knock enemies back. 4) Cooker should move slowly, absorb on contact to 10, cook for 10s, and lose 10% HP when cooking starts.'
+      );
     });
 
     this.applyTestSettingsNow({ silent: true });

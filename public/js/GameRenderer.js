@@ -313,11 +313,15 @@ const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
 const MAX_UNIT_HIT_IMPACTS = 120;
+const MAX_HERO_FOOD_VISUALS = 320;
+const MAX_HERO_COOKER_SWALLOWS = 180;
 const HERO_LINE_TIME_SCALE = 0.5;
 const HERO_LINE_MOTION_SCALE = 0.5;
 const MILITIA_FOOD_GAG_TTL = 0.62;
 const MILITIA_FOOD_TRIGGER_MIN_CD = 0.2;
 const MILITIA_FOOD_TRIGGER_DELTA = 0.14;
+const HERO_FOOD_RAIN_BREAD_KINDS = ['bun', 'loaf', 'baguette', 'bagel', 'toast', 'brioche'];
+const HERO_FOOD_RAIN_RICE_KINDS = ['mochi', 'onigiri', 'riceCake', 'riceBowl', 'sushiRoll', 'senbei'];
 const TOWER_HIT_PARTICLE_COLORS = ['#b8c6d8', '#8ea0b7', '#6e7f96', '#e3c088'];
 const BLOCKED_PARTICLE_COLORS = ['#f4f8ff', '#cad3de', '#adb8c5', '#8f9aa8'];
 const CANDLE_HIT_FIRE_COLORS = ['#ff5f35', '#ff9f47', '#ffd37a', '#fff0c7'];
@@ -371,6 +375,8 @@ export class GameRenderer {
     this.deathGhosts = [];
     this.reviveSpirits = [];
     this.healCircles = [];
+    this.heroFoodVisuals = [];
+    this.heroCookerSwallows = [];
     this.prevMinionAtkCd = new Map();
     this.militiaFoodFx = new Map();
     this.towerShake = {
@@ -454,6 +460,8 @@ export class GameRenderer {
       this.resourceSpawnTelegraphs.length = 0;
       this.powerupTrails.length = 0;
       this.unitHitImpacts.length = 0;
+      this.heroFoodVisuals.length = 0;
+      this.heroCookerSwallows.length = 0;
       this.barracksDoorActors = { left: null, right: null };
       this.prevBarracksRollState = {
         left: { ttl: 0, key: '' },
@@ -4124,7 +4132,7 @@ export class GameRenderer {
     if (minion.side !== 'left' && minion.side !== 'right') return false;
     if (minion.balloon) return false;
     if (minion.dragon || minion.digger || minion.gunner || minion.necrominion) return false;
-    if (minion.explosive || minion.hero || minion.monk || minion.shieldBearer) return false;
+    if (minion.explosive || minion.hero || minion.heroCooker || minion.monk || minion.shieldBearer) return false;
     if (minion.stoneGolem || minion.president || minion.rider) return false;
     return true;
   }
@@ -5029,6 +5037,10 @@ export class GameRenderer {
       this.drawCandleScorch(snapshot.candleScorch);
     }
     for (const minion of nonBalloonMinions) this.drawMinionSprite(minion);
+    this.updateHeroFoodVisuals(dt);
+    this.drawHeroFoodVisuals();
+    this.updateHeroCookerSwallows(dt);
+    this.drawHeroCookerSwallows();
     this.drawMilitiaFoodAttackOverlays(snapshot.minions);
     this.drawExecutiveOrderEffects(snapshot.minions);
     if (this.fxQuality !== 'low') this.drawMinionHitFlashes(snapshot.minions);
@@ -5131,6 +5143,28 @@ export class GameRenderer {
     }
     if (type === 'resource_telegraph') {
       this.spawnResourceTelegraph(px, py, pside, Number(event?.ttl) || 1);
+      return;
+    }
+    if (type === 'herocookerswallow') {
+      this.spawnHeroCookerSwallow(event, px, py, pside);
+      const puffCount = this.scaledParticleCount(7, 1);
+      const toX = Number.isFinite(event?.toX) ? Number(event.toX) : px;
+      const toY = Number.isFinite(event?.toY) ? Number(event.toY) : py;
+      for (let i = 0; i < puffCount; i += 1) {
+        const ang = -Math.PI / 2 + (Math.random() * 1.4 - 0.7);
+        const mag = 42 + Math.random() * 64;
+        this.spawnParticle(
+          toX + (Math.random() * 6 - 3),
+          toY + (Math.random() * 4 - 2),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 16,
+          0.2 + Math.random() * 0.16,
+          0.34,
+          1.4 + Math.random() * 1.8,
+          pickRandom(['#fff5e2', '#f5e6d1', '#d5ebff', '#e9f3ff']),
+          150
+        );
+      }
       return;
     }
     if (type === 'minion') this.spawnUnitHitImpact(px, py, pside);
@@ -5305,6 +5339,98 @@ export class GameRenderer {
       }
       return;
     }
+    if (type === 'herofoodrain') {
+      const riceSide = event?.foodType === 'rice' || pside === 'right';
+      this.spawnHeroFoodRainVisual(event, px, py, pside);
+      const fromY = Number.isFinite(event?.fromY) ? Number(event.fromY) : (py - 120);
+      const toY = Number.isFinite(event?.toY) ? Number(event.toY) : py;
+      const duration = Math.max(0.18, Number(event?.duration) || 0.46);
+      const sizeMul = Math.max(0.5, Math.min(1.8, Number(event?.size) || 1));
+      const bigProjectile = Boolean(event?.bigProjectile);
+      const travel = Math.max(18, toY - fromY);
+      const speed = travel / duration;
+      const colors = riceSide
+        ? ['#f7fcff', '#dcebf9', '#c7d9ea', '#2a3c4f']
+        : ['#f2d0a4', '#d89f63', '#b4713d', '#7d4b2c'];
+      const dropCount = this.scaledParticleCount(bigProjectile ? 6 : 3, bigProjectile ? 1 : 0);
+      for (let i = 0; i < dropCount; i += 1) {
+        this.spawnParticle(
+          px + (Math.random() * 10 - 5),
+          fromY + (Math.random() * 8 - 4),
+          Math.random() * 40 - 20,
+          speed * (0.88 + Math.random() * 0.24),
+          duration * (0.9 + Math.random() * 0.28),
+          duration * 1.12,
+          (riceSide ? 2 : 2.6) * sizeMul + Math.random() * (riceSide ? 1.1 : 1.4),
+          colors[Math.floor(Math.random() * colors.length)],
+          120
+        );
+      }
+      const splashCount = this.scaledParticleCount(bigProjectile ? 14 : 8, bigProjectile ? 4 : 2);
+      for (let i = 0; i < splashCount; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const mag = (bigProjectile ? 102 : 78) + Math.random() * (bigProjectile ? 142 : 105);
+        this.spawnParticle(
+          px + (Math.random() * 6 - 3),
+          py + (Math.random() * 5 - 2.5),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 40,
+          0.28 + Math.random() * 0.16,
+          0.4,
+          1.5 + Math.random() * 1.6,
+          colors[Math.floor(Math.random() * colors.length)],
+          420
+        );
+      }
+      return;
+    }
+    if (type === 'herorumble') {
+      const riceSide = event?.foodType === 'rice' || pside === 'right';
+      this.spawnHeroFoodRumbleVisual(event, px, py, pside);
+      const colors = riceSide
+        ? ['#f8fdff', '#dceefe', '#c1d6e7', '#2f4155']
+        : ['#f4c792', '#dd9d5e', '#bf7b45', '#844f2f'];
+      const burstCount = this.scaledParticleCount(34, 6);
+      for (let i = 0; i < burstCount; i += 1) {
+        const ang = -Math.PI / 2 + (Math.random() * 1.9 - 0.95);
+        const mag = 150 + Math.random() * 260;
+        this.spawnParticle(
+          px + (Math.random() * 20 - 10),
+          py + (Math.random() * 8 - 4),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 38,
+          0.46 + Math.random() * 0.28,
+          0.64,
+          2 + Math.random() * 2.8,
+          colors[Math.floor(Math.random() * colors.length)],
+          680
+        );
+      }
+      return;
+    }
+    if (type === 'herocooker') {
+      const riceSide = event?.foodType === 'rice' || pside === 'right';
+      const colors = riceSide
+        ? ['#f4fbff', '#d9ebfb', '#c2d7ea']
+        : ['#ffe0ba', '#f2be88', '#d99a5f'];
+      const steamCount = this.scaledParticleCount(event?.pulse ? 26 : 12, 3);
+      for (let i = 0; i < steamCount; i += 1) {
+        const ang = -Math.PI / 2 + (Math.random() * 1.2 - 0.6);
+        const mag = 52 + Math.random() * 118;
+        this.spawnParticle(
+          px + (Math.random() * 10 - 5),
+          py + (Math.random() * 6 - 3),
+          Math.cos(ang) * mag,
+          Math.sin(ang) * mag - 26,
+          0.34 + Math.random() * 0.22,
+          0.52,
+          1.8 + Math.random() * 2.4,
+          colors[Math.floor(Math.random() * colors.length)],
+          160
+        );
+      }
+      return;
+    }
     if (type === 'foodburst') {
       const riceSide = event?.foodType === 'rice' || pside === 'right';
       const heavy = Boolean(event?.heavy);
@@ -5445,6 +5571,12 @@ export class GameRenderer {
       summoned: Boolean(ghost.summoned),
       necroRevived: Boolean(ghost.necroRevived),
       explosive: Boolean(ghost.explosive),
+      heroCooker: Boolean(ghost.heroCooker),
+      heroCookerFoodType: typeof ghost.heroCookerFoodType === 'string' ? ghost.heroCookerFoodType : null,
+      heroCookerCookTtl: Number.isFinite(ghost.heroCookerCookTtl) ? ghost.heroCookerCookTtl : 0,
+      heroCookerCookMaxTtl: Number.isFinite(ghost.heroCookerCookMaxTtl) ? ghost.heroCookerCookMaxTtl : 10,
+      heroCookerAnimT: Number.isFinite(ghost.heroCookerAnimT) ? ghost.heroCookerAnimT : 0,
+      heroCookerSpin: Number.isFinite(ghost.heroCookerSpin) ? ghost.heroCookerSpin : 0,
       gunner: Boolean(ghost.gunner),
       rider: Boolean(ghost.rider),
       riderChargeReady: Boolean(ghost.riderChargeReady),
@@ -5599,16 +5731,22 @@ export class GameRenderer {
     });
   }
 
-  emitHeroLine(text, x, y, side) {
+  emitHeroLine(text, x, y, side, options = null) {
     if (!text) return;
+    const opts = (options && typeof options === 'object') ? options : {};
+    const scale = Math.max(0.8, Math.min(2.4, Number(opts.scale) || 1));
+    const style = typeof opts.style === 'string' ? opts.style : null;
+    const life = style === 'ability' ? 2.45 : 1.8;
     this.pushHeroLine({
       text: String(text).slice(0, 56),
       side,
       x,
       y,
-      life: 1.8,
-      maxLife: 1.8,
+      life,
+      maxLife: life,
       vy: -24,
+      scale,
+      style,
     });
   }
 
@@ -5685,6 +5823,351 @@ export class GameRenderer {
       write += 1;
     }
     this.healCircles.length = write;
+  }
+
+  pickHeroFoodRainKind(foodType) {
+    const riceSide = foodType === 'rice';
+    const kinds = riceSide ? HERO_FOOD_RAIN_RICE_KINDS : HERO_FOOD_RAIN_BREAD_KINDS;
+    return kinds[Math.floor(Math.random() * kinds.length)];
+  }
+
+  pushHeroFoodVisual(entry) {
+    if (!entry) return;
+    this.heroFoodVisuals.push(entry);
+    if (this.heroFoodVisuals.length > MAX_HERO_FOOD_VISUALS) {
+      this.heroFoodVisuals.splice(0, this.heroFoodVisuals.length - MAX_HERO_FOOD_VISUALS);
+    }
+  }
+
+  spawnHeroFoodRainVisual(event, x, y, sideName) {
+    const foodType = event?.foodType === 'rice' || sideName === 'right' ? 'rice' : 'bread';
+    const bigProjectile = Boolean(event?.bigProjectile);
+    const kind = bigProjectile
+      ? (foodType === 'rice' ? 'balloonRiceBomb' : 'balloonBreadBomb')
+      : (
+        (typeof event?.kind === 'string' && event.kind)
+          ? event.kind
+          : this.pickHeroFoodRainKind(foodType)
+      );
+    const fromY = Number.isFinite(event?.fromY) ? Number(event.fromY) : (y - 120);
+    const toY = Number.isFinite(event?.toY) ? Number(event.toY) : y;
+    const duration = bigProjectile
+      ? Math.max(1.05, Number(event?.duration) || 1.35)
+      : Math.max(0.2, Number(event?.duration) || 0.46);
+    const sizeMul = bigProjectile
+      ? Math.max(1.45, Math.min(2.8, Number(event?.size) || 2.05))
+      : Math.max(0.72, Math.min(1.9, Number(event?.size) || 1));
+    this.pushHeroFoodVisual({
+      mode: bigProjectile ? 'rainbig' : 'rain',
+      kind,
+      seed: Number.isFinite(event?.seed) ? Number(event.seed) : (Math.random() * 100000),
+      x: x + (Math.random() * 6 - 3),
+      y: fromY,
+      fromY,
+      toY,
+      driftX: Math.random() * 8 - 4,
+      life: duration,
+      maxLife: duration,
+      rot: Math.random() * Math.PI * 2,
+      spin: (Math.random() * 2 - 1) * 6.4,
+      scale: bigProjectile
+        ? (sizeMul * (foodType === 'rice' ? 1.22 : 1.08))
+        : (sizeMul * (foodType === 'rice' ? 0.68 : 0.78)),
+    });
+  }
+
+  spawnHeroFoodRumbleVisual(event, x, y, sideName) {
+    const foodType = event?.foodType === 'rice' || sideName === 'right' ? 'rice' : 'bread';
+    const fallbackKind = foodType === 'rice' ? 'sushiRoll' : 'croissant';
+    const kind = typeof event?.kind === 'string' && event.kind ? event.kind : fallbackKind;
+    const fromY = Number.isFinite(event?.fromY) ? Number(event.fromY) : (y + 14);
+    const toY = Number.isFinite(event?.toY) ? Number(event.toY) : (-40 - Math.random() * 80);
+    const duration = Math.max(0.84, Number(event?.duration) || 1.44);
+    const sizeMul = Math.max(1.2, Math.min(3.1, Number(event?.size) || 1.95));
+    this.pushHeroFoodVisual({
+      mode: 'rumble',
+      kind,
+      seed: Number.isFinite(event?.seed) ? Number(event.seed) : (Math.random() * 100000),
+      x,
+      y: fromY,
+      fromX: x + (Math.random() * 16 - 8),
+      toX: x + (Math.random() * 34 - 17),
+      fromY,
+      toY,
+      arc: 28 + Math.random() * 26,
+      groundY: fromY,
+      life: duration,
+      maxLife: duration,
+      rot: Math.random() * Math.PI * 2,
+      spin: (Math.random() * 2 - 1) * 8.2,
+      scale: sizeMul * (foodType === 'rice' ? 1.06 : 0.98),
+    });
+  }
+
+  updateHeroFoodVisuals(dt) {
+    if (!Array.isArray(this.heroFoodVisuals) || this.heroFoodVisuals.length === 0) return;
+    let write = 0;
+    for (let i = 0; i < this.heroFoodVisuals.length; i += 1) {
+      const fx = this.heroFoodVisuals[i];
+      if (!fx) continue;
+      fx.life -= dt;
+      if (fx.life <= 0) continue;
+      const t = Math.max(0, Math.min(1, 1 - (fx.life / Math.max(0.001, fx.maxLife))));
+      fx.rot += (Number(fx.spin) || 0) * dt;
+      if (fx.mode === 'rain') {
+        fx.x += (Number(fx.driftX) || 0) * dt;
+        fx.y = lerp(Number(fx.fromY) || 0, Number(fx.toY) || 0, easeInCubic(Math.min(1, t * 1.08)));
+      } else if (fx.mode === 'rumble') {
+        const riseT = easeInCubic(t);
+        fx.x = lerp(Number(fx.fromX) || 0, Number(fx.toX) || Number(fx.fromX) || 0, riseT);
+        fx.y = lerp(Number(fx.fromY) || 0, Number(fx.toY) || 0, riseT) - Math.sin(Math.PI * t) * (Number(fx.arc) || 0);
+      }
+      this.heroFoodVisuals[write] = fx;
+      write += 1;
+    }
+    this.heroFoodVisuals.length = write;
+  }
+
+  spawnHeroCookerSwallow(event, x, y, sideName) {
+    if (!event || typeof event !== 'object') return;
+    const victimData = (event.victim && typeof event.victim === 'object')
+      ? event.victim
+      : event.ghost;
+    const swallowedMinion = this.createGhostMinion(victimData, sideName, x, y);
+    if (!swallowedMinion) return;
+    const fromX = Number.isFinite(event.fromX) ? Number(event.fromX) : (Number(x) || 0);
+    const fromY = Number.isFinite(event.fromY) ? Number(event.fromY) : (Number(y) || 0);
+    const toX = Number.isFinite(event.toX) ? Number(event.toX) : fromX;
+    const toY = Number.isFinite(event.toY) ? Number(event.toY) : fromY;
+    const life = Math.max(0.2, Number(event.duration) || 0.42);
+    const baseR = Math.max(8, Number(swallowedMinion.r) || 12);
+    const arc = Math.max(10, Number(event.arc) || (18 + baseR * 0.7));
+    this.heroCookerSwallows.push({
+      minion: swallowedMinion,
+      x: fromX,
+      y: fromY,
+      fromX,
+      fromY,
+      toX,
+      toY,
+      arc,
+      spin: 0,
+      rot: 0,
+      life,
+      maxLife: life,
+      scaleStart: 1,
+      scaleEnd: 0.06,
+    });
+    if (this.heroCookerSwallows.length > MAX_HERO_COOKER_SWALLOWS) {
+      this.heroCookerSwallows.splice(0, this.heroCookerSwallows.length - MAX_HERO_COOKER_SWALLOWS);
+    }
+  }
+
+  updateHeroCookerSwallows(dt) {
+    if (!Array.isArray(this.heroCookerSwallows) || this.heroCookerSwallows.length === 0) return;
+    let write = 0;
+    for (let i = 0; i < this.heroCookerSwallows.length; i += 1) {
+      const fx = this.heroCookerSwallows[i];
+      if (!fx || !fx.minion) continue;
+      fx.life -= dt;
+      if (fx.life <= 0) continue;
+      const t = Math.max(0, Math.min(1, 1 - (fx.life / Math.max(0.001, fx.maxLife))));
+      const eased = easeInCubic(t);
+      fx.x = lerp(Number(fx.fromX) || 0, Number(fx.toX) || 0, eased);
+      fx.y = lerp(Number(fx.fromY) || 0, Number(fx.toY) || 0, eased) - Math.sin(Math.PI * t) * (Number(fx.arc) || 0);
+      if ((Number(fx.spin) || 0) !== 0) fx.rot += (Number(fx.spin) || 0) * dt;
+      this.heroCookerSwallows[write] = fx;
+      write += 1;
+    }
+    this.heroCookerSwallows.length = write;
+  }
+
+  drawHeroRumbleProjectile(kind, x, y, scale, seed = 0) {
+    const { ctx } = this;
+    const itemKind = typeof kind === 'string' ? kind : '';
+    const sushi = itemKind === 'sushiRoll' || itemKind === 'sushi' || itemKind === 'riceSushi';
+
+    if (sushi) {
+      const rx = 12.6 * scale;
+      const ry = 9.4 * scale;
+      const bodyGrad = ctx.createLinearGradient(x - rx, y, x + rx, y);
+      bodyGrad.addColorStop(0, '#14222e');
+      bodyGrad.addColorStop(0.48, '#203243');
+      bodyGrad.addColorStop(1, '#0f1a24');
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#3f5669';
+      ctx.lineWidth = Math.max(1, 1.6 * scale);
+      ctx.stroke();
+
+      const riceGrad = ctx.createRadialGradient(x - rx * 0.2, y - ry * 0.2, ry * 0.25, x, y, ry * 1.3);
+      riceGrad.addColorStop(0, '#ffffff');
+      riceGrad.addColorStop(0.7, '#edf4fb');
+      riceGrad.addColorStop(1, '#d8e4f0');
+      ctx.fillStyle = riceGrad;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rx * 0.8, ry * 0.68, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      const fillColors = ['#ff8f84', '#8cd680', '#ffcf78'];
+      for (let i = 0; i < 3; i += 1) {
+        const offs = (i - 1) * rx * 0.28 + (stableHash(seed + i * 3.7) - 0.5) * rx * 0.08;
+        const fillR = ry * (0.24 + stableHash(seed + i * 5.1) * 0.08);
+        ctx.fillStyle = fillColors[i];
+        ctx.beginPath();
+        ctx.ellipse(x + offs, y + (stableHash(seed + i * 2.1) - 0.5) * ry * 0.08, fillR, fillR * 0.88, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = this.withAlpha('#ffffff', 0.62);
+      for (let i = 0; i < 11; i += 1) {
+        const gx = x + (stableHash(seed + i * 1.31) - 0.5) * rx * 1.36;
+        const gy = y + (stableHash(seed + i * 2.37) - 0.5) * ry * 1.1;
+        const rr = 0.32 + stableHash(seed + i * 2.91) * 0.48;
+        ctx.beginPath();
+        ctx.ellipse(gx, gy, rr * scale, rr * 0.65 * scale, stableHash(seed + i * 4.1) * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.strokeStyle = this.withAlpha('#f8fdff', 0.75);
+      ctx.lineWidth = Math.max(1, 1.2 * scale);
+      ctx.beginPath();
+      ctx.moveTo(x - rx * 0.52, y - ry * 0.34);
+      ctx.lineTo(x + rx * 0.3, y - ry * 0.45);
+      ctx.stroke();
+      return;
+    }
+
+    const r = 13 * scale;
+    const outerW = Math.max(3, 7.8 * scale);
+    ctx.strokeStyle = '#b56d37';
+    ctx.lineWidth = outerW;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.08, r, Math.PI * 1.06, Math.PI * 1.95);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#e7b782';
+    ctx.lineWidth = Math.max(2, outerW * 0.48);
+    ctx.beginPath();
+    ctx.arc(x, y + r * 0.08, r * 0.72, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#8c522a';
+    ctx.lineWidth = Math.max(1.2, 1.6 * scale);
+    for (let i = 0; i < 5; i += 1) {
+      const t = i / 4;
+      const ang = Math.PI * (1.12 + t * 0.72);
+      const sx = x + Math.cos(ang) * r * 0.9;
+      const sy = y + r * 0.08 + Math.sin(ang) * r * 0.9;
+      const ex = sx + Math.cos(ang + Math.PI / 2) * r * 0.18;
+      const ey = sy + Math.sin(ang + Math.PI / 2) * r * 0.18;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = this.withAlpha('#fff2dc', 0.56);
+    for (let i = 0; i < 9; i += 1) {
+      const ang = Math.PI * (1.14 + stableHash(seed + i * 1.6) * 0.7);
+      const rr = r * (0.56 + stableHash(seed + i * 2.7) * 0.26);
+      const px = x + Math.cos(ang) * rr;
+      const py = y + r * 0.08 + Math.sin(ang) * rr;
+      const dot = 0.42 + stableHash(seed + i * 3.8) * 0.5;
+      ctx.beginPath();
+      ctx.arc(px, py, dot * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawHeroBalloonPayloadProjectile(kind, x, y, scale, seed = 0) {
+    const { ctx } = this;
+    const isRice = kind === 'balloonRiceBomb' || kind === 'sushiRoll';
+    if (!isRice) {
+      // Bread loaf payload, matching the balloon bread-bomb vibe.
+      const loafRx = 11.8 * scale;
+      const loafRy = 7.8 * scale;
+      ctx.fillStyle = '#bd7744';
+      ctx.beginPath();
+      ctx.ellipse(x, y, loafRx, loafRy, 0.22, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#d99b62';
+      ctx.beginPath();
+      ctx.ellipse(x - loafRx * 0.08, y - loafRy * 0.18, loafRx * 0.7, loafRy * 0.5, 0.18, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#7a4321';
+      ctx.lineWidth = Math.max(1.2, 1.9 * scale);
+      ctx.beginPath();
+      ctx.ellipse(x, y, loafRx, loafRy, 0.22, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = this.withAlpha('#6b3d1f', 0.72);
+      ctx.lineWidth = Math.max(1, 1.4 * scale);
+      for (let i = -1; i <= 1; i += 1) {
+        const sx = x + i * loafRx * 0.28;
+        ctx.beginPath();
+        ctx.moveTo(sx - loafRx * 0.1, y - loafRy * 0.2);
+        ctx.lineTo(sx + loafRx * 0.14, y + loafRy * 0.18);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = this.withAlpha('#f6d7a3', 0.72);
+      for (let i = 0; i < 7; i += 1) {
+        const sx = x + (stableHash(seed + i * 1.61) - 0.5) * loafRx * 0.74;
+        const sy = y + (stableHash(seed + i * 2.33) - 0.5) * loafRy * 0.56;
+        const rx = loafRx * (0.03 + stableHash(seed + i * 3.19) * 0.02);
+        const ry = loafRy * (0.02 + stableHash(seed + i * 4.07) * 0.018);
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, rx, ry, stableHash(seed + i * 2.77) * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    // Big rice payload in the same family as balloon rice drops, but exaggerated for readability.
+    const riceR = 9.6 * scale;
+    ctx.fillStyle = '#f8fdff';
+    ctx.beginPath();
+    ctx.arc(x - riceR * 0.8, y + riceR * 0.2, riceR * 0.92, 0, Math.PI * 2);
+    ctx.arc(x + riceR * 0.82, y + riceR * 0.16, riceR * 0.92, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, riceR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = this.withAlpha('#d7eaf7', 0.8);
+    ctx.lineWidth = Math.max(1.1, 1.7 * scale);
+    ctx.beginPath();
+    ctx.arc(x, y, riceR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#1f3646';
+    const noriW = riceR * 1.34;
+    const noriH = riceR * 0.44;
+    ctx.fillRect(x - noriW * 0.5, y + riceR * 0.26, noriW, noriH);
+
+    // Strong top highlight to keep it readable against bright skies.
+    ctx.fillStyle = this.withAlpha('#ffffff', 0.58);
+    ctx.beginPath();
+    ctx.ellipse(x - riceR * 0.22, y - riceR * 0.32, riceR * 0.5, riceR * 0.22, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = this.withAlpha('#e8f7ff', 0.84);
+    for (let i = 0; i < 10; i += 1) {
+      const gx = x + (stableHash(seed + i * 1.41) - 0.5) * riceR * 0.9;
+      const gy = y + (stableHash(seed + i * 2.21) - 0.5) * riceR * 0.74;
+      const grx = riceR * (0.085 + stableHash(seed + i * 3.07) * 0.035);
+      const gry = riceR * (0.038 + stableHash(seed + i * 4.33) * 0.02);
+      ctx.beginPath();
+      ctx.ellipse(gx, gy, grx, gry, stableHash(seed + i * 2.9) * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   updateDamageTexts(dt) {
@@ -5890,32 +6373,38 @@ export class GameRenderer {
     const { ctx } = this;
     for (const b of this.heroLines) {
       const alpha = Math.max(0, b.life / b.maxLife);
-      const w = Math.max(96, Math.min(290, b.text.length * 6.4 + 22));
-      const h = 24;
+      const lineScale = Math.max(0.8, Math.min(2.4, Number(b.scale) || 1));
+      const isAbility = b.style === 'ability';
+      const w = Math.max(96 * lineScale, Math.min(540 * lineScale, b.text.length * 6.4 * lineScale + 22 * lineScale));
+      const h = (isAbility ? 30 : 24) * lineScale;
       const x = b.x;
       const y = b.y;
-      const bg = b.side === 'right' ? '#54231fcc' : '#203d59cc';
-      const stroke = b.side === 'right' ? '#ffb19b' : '#a8d9ff';
+      const bg = isAbility
+        ? (b.side === 'right' ? '#672c248f' : '#22486a8f')
+        : (b.side === 'right' ? '#54231fcc' : '#203d59cc');
+      const stroke = isAbility
+        ? (b.side === 'right' ? '#ffc4a7' : '#b6e4ff')
+        : (b.side === 'right' ? '#ffb19b' : '#a8d9ff');
 
       ctx.globalAlpha = 0.22 + alpha * 0.78;
       ctx.fillStyle = bg;
       ctx.fillRect(x - w / 2, y - h, w, h);
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = (isAbility ? 1.9 : 1.4) * lineScale;
       ctx.strokeRect(x - w / 2, y - h, w, h);
       ctx.beginPath();
-      ctx.moveTo(x - 7, y);
-      ctx.lineTo(x + 7, y);
-      ctx.lineTo(x, y + 8);
+      ctx.moveTo(x - 7 * lineScale, y);
+      ctx.lineTo(x + 7 * lineScale, y);
+      ctx.lineTo(x, y + 8 * lineScale);
       ctx.closePath();
       ctx.fillStyle = bg;
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = '#fff7e0';
-      ctx.font = 'bold 11px sans-serif';
+      ctx.font = `bold ${Math.round((isAbility ? 13 : 11) * lineScale)}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(b.text, x, y - 8);
+      ctx.fillText(b.text, x, y - (isAbility ? 9.5 : 8) * lineScale);
     }
     ctx.globalAlpha = 1;
   }
@@ -6070,6 +6559,104 @@ export class GameRenderer {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  drawHeroFoodVisuals() {
+    if (!Array.isArray(this.heroFoodVisuals) || this.heroFoodVisuals.length === 0) return;
+    const { ctx } = this;
+    for (const fx of this.heroFoodVisuals) {
+      if (!fx) continue;
+      const lifeRatio = Math.max(0, Math.min(1, fx.life / Math.max(0.001, fx.maxLife)));
+      const age = 1 - lifeRatio;
+      const fadeIn = Math.min(1, age / 0.14);
+      const fadeOut = Math.min(1, lifeRatio / 0.2);
+      const alpha = Math.max(0, Math.min(1, fadeIn * fadeOut));
+      if (alpha <= 0.01) continue;
+
+      const scale = Math.max(0.32, Number(fx.scale) || 0.8);
+      const x = Number(fx.x) || 0;
+      const y = Number(fx.y) || 0;
+      const seed = Number.isFinite(fx.seed) ? Number(fx.seed) : 0;
+      const rot = Number(fx.rot) || 0;
+
+      if (fx.mode === 'rumble') {
+        const reveal = Math.max(0.04, Math.min(1, age / 0.22));
+        const halfW = 13.5 * scale;
+        const fullH = 24 * scale;
+        const topY = y - fullH * 0.62;
+        const revealH = Math.max(1, fullH * reveal);
+
+        // Ground slit to sell the "bursting up from below" emergence.
+        const crackY = Number.isFinite(fx.groundY) ? Number(fx.groundY) : y;
+        ctx.save();
+        ctx.globalAlpha = alpha * (0.45 + (1 - reveal) * 0.55);
+        ctx.fillStyle = '#2f2218';
+        ctx.beginPath();
+        ctx.ellipse(x, crackY + 1.2, halfW * (1.05 + (1 - reveal) * 0.24), Math.max(1.4, 2.8 * scale), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.translate(-x, -y);
+        ctx.beginPath();
+        ctx.rect(x - halfW, topY, halfW * 2, revealH);
+        ctx.clip();
+        this.drawHeroRumbleProjectile(fx.kind, x, y, scale, seed);
+        ctx.restore();
+        continue;
+      }
+      if (fx.mode === 'rainbig') {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.translate(-x, -y);
+        this.drawHeroBalloonPayloadProjectile(fx.kind, x, y, scale, seed);
+        ctx.restore();
+        continue;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.translate(-x, -y);
+      this.drawTreasurePileItem(fx.kind, x, y, scale, seed);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawHeroCookerSwallows() {
+    if (!Array.isArray(this.heroCookerSwallows) || this.heroCookerSwallows.length === 0) return;
+    const { ctx } = this;
+    for (const fx of this.heroCookerSwallows) {
+      if (!fx?.minion) continue;
+      const lifeRatio = Math.max(0, Math.min(1, fx.life / Math.max(0.001, fx.maxLife)));
+      const t = 1 - lifeRatio;
+      const alpha = t < 0.92 ? 1 : Math.max(0, 1 - ((t - 0.92) / 0.08));
+      if (alpha <= 0.01) continue;
+      const scale = lerp(
+        Number(fx.scaleStart) || 1,
+        Number(fx.scaleEnd) || 0.1,
+        easeInCubic(t)
+      );
+      if (scale <= 0.02) continue;
+      fx.minion.x = Number(fx.x) || 0;
+      fx.minion.y = Number(fx.y) || 0;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(fx.minion.x, fx.minion.y);
+      ctx.rotate(Number(fx.rot) || 0);
+      ctx.scale(scale, scale);
+      ctx.translate(-fx.minion.x, -fx.minion.y);
+      this.drawMinionSprite(fx.minion, { showHud: false, allowEffects: false });
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   sideArcherPulls(sideName, sideState) {
@@ -10540,26 +11127,129 @@ export class GameRenderer {
     }
   }
 
-  drawHeroSprite(minion, options = {}) {
-    if (this.drawThemedSpecialSprite(minion, 'hero', options)) return;
+  drawHeroCookerSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
     const cacheRender = options.cacheRender === true;
     const { ctx } = this;
     const sideName = minion.side === 'right' ? 'right' : 'left';
-    const palette = TEAM_COLORS[minion.side];
-    const x = minion.x;
-    const y = minion.y;
-    const dir = sideName === 'left' ? 1 : -1;
-    const scale = (minion.super ? 1.26 : 1.08) * 1.5;
-    const bodyR = 14 * scale;
-    const swingInput = Number.isFinite(minion.heroSwing) ? minion.heroSwing : 0;
-    const swing = Math.sin(swingInput * 1.7);
+    const foodType = minion.heroCookerFoodType === 'rice' ? 'rice' : 'bread';
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const r = Math.max(14, Number(minion.r) || 18);
+    const scale = Math.max(0.88, r / 20);
+    const cookMax = Math.max(0.01, Number(minion.heroCookerCookMaxTtl) || 10);
+    const cookLife = Math.max(0, Math.min(1, (Number(minion.heroCookerCookTtl) || 0) / cookMax));
+    const animT = Number.isFinite(minion.heroCookerAnimT) ? Number(minion.heroCookerAnimT) : 0;
+    const lidBounce = Math.sin(animT * 2.8) * (0.8 + (1 - cookLife) * 1.5) * scale;
+
     if (!cacheRender) {
-      const swingBucket = Math.max(0, Math.min(8, Math.round((swing + 1) * 4)));
-      const quantSwing = (Math.asin(swingBucket / 4 - 1) || 0) / 1.7;
-      const cacheKey = `hero:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
-      const cacheWidth = Math.ceil(bodyR * 6 + 56);
-      const cacheHeight = Math.ceil(bodyR * 5.4 + 56);
+      const cookBucket = Math.max(0, Math.min(8, Math.round(cookLife * 8)));
+      const cacheKey = `heroCooker:${sideName}:${foodType}:${cookBucket}`;
+      const cacheWidth = Math.ceil(r * 5.4 + 50);
+      const cacheHeight = Math.ceil(r * 4.6 + 46);
+      const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
+        const proxy = {
+          ...minion,
+          x: w / 2,
+          y: h / 2,
+          heroCookerAnimT: 0,
+          heroCookerCookTtl: (cookBucket / 8) * cookMax,
+          heroCookerCookMaxTtl: cookMax,
+        };
+        this.drawHeroCookerSprite(proxy, { showHud: false, cacheRender: true });
+      });
+      if (drewCached) {
+        if (showHud) {
+          const label = foodType === 'rice' ? 'RICE COOKER' : 'BREAD OVEN';
+          ctx.fillStyle = '#fff1da';
+          ctx.font = `bold ${sideName === 'right' ? 11 : 10}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText(label, x, y - r - 20);
+          this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.96));
+        }
+        return;
+      }
+    }
+
+    const bodyMain = foodType === 'rice' ? '#dbe8f6' : '#d39b5f';
+    const bodyDark = foodType === 'rice' ? '#8da5be' : '#8a5b32';
+    const trim = foodType === 'rice' ? '#f6fcff' : '#ffd9a6';
+    const glow = foodType === 'rice' ? '#dcefff' : '#ffd6ab';
+
+    ctx.fillStyle = '#0000002a';
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 1.08, r * 0.96, r * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = bodyMain;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 1.08, r * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = bodyDark;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = bodyDark;
+    ctx.fillRect(-r * 1.06, -r * 0.08, r * 2.12, r * 0.68);
+    ctx.strokeStyle = trim;
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(-r * 0.84, r * 0.1, r * 1.68, r * 0.34);
+
+    ctx.fillStyle = trim;
+    ctx.beginPath();
+    ctx.ellipse(0, -r * 0.36 + lidBounce, r * 0.9, r * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = bodyDark;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, -r * 0.5 + lidBounce, r * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    const steamPuffs = 3;
+    for (let i = 0; i < steamPuffs; i += 1) {
+      const t = animT * 1.7 + i * 1.2;
+      const sx = Math.sin(t) * r * 0.24;
+      const sy = -r * 0.9 - i * r * 0.22 - Math.abs(Math.cos(t)) * r * 0.18;
+      const puffR = r * (0.12 + (1 - cookLife) * 0.08) * (1 - i * 0.14);
+      ctx.fillStyle = sideName === 'right' ? '#f5fbff9c' : '#ffeecf99';
+      ctx.beginPath();
+      ctx.arc(sx, sy, puffR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    if (showHud) {
+      const label = foodType === 'rice' ? 'RICE COOKER' : 'BREAD OVEN';
+      ctx.fillStyle = '#fff1da';
+      ctx.font = `bold ${sideName === 'right' ? 11 : 10}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x, y - r - 20);
+      this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.96));
+    }
+  }
+
+  drawHeroSprite(minion, options = {}) {
+    const showHud = options.showHud !== false;
+    const cacheRender = options.cacheRender === true;
+    const { ctx } = this;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const x = Number(minion.x) || 0;
+    const y = Number(minion.y) || 0;
+    const scale = (minion.super ? 1.24 : 1.06) * 1.45;
+    const bodyR = 14 * scale;
+    const swingInput = Number.isFinite(minion.heroSwing) ? Number(minion.heroSwing) : 0;
+    const attackSwing = Math.sin(swingInput * 1.95);
+    if (!cacheRender) {
+      const swingBucket = Math.max(0, Math.min(10, Math.round((attackSwing + 1) * 5)));
+      const quantSwing = (Math.asin(swingBucket / 5 - 1) || 0) / 1.95;
+      const cacheKey = `heroJoint:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
+      const cacheWidth = Math.ceil(bodyR * 6.4 + 64);
+      const cacheHeight = Math.ceil(bodyR * 6 + 64);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
         const proxy = {
           ...minion,
@@ -10572,130 +11262,172 @@ export class GameRenderer {
       if (drewCached) {
         this.drawThemedSpecialLook(minion, 'hero', { cacheRender, upgraded: minion.super });
         if (showHud) {
-          ctx.strokeStyle = '#311707';
-          ctx.lineWidth = 2.6;
+          ctx.strokeStyle = '#2d1808';
+          ctx.lineWidth = 2.2;
           ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
           ctx.textAlign = 'center';
-          ctx.strokeText('HERO!!!', minion.x, minion.y - bodyR - 20);
-          ctx.fillStyle = '#ffe4b0';
-          ctx.fillText('HERO!!!', minion.x, minion.y - bodyR - 20);
-          this.drawMinionHpBar(minion, minion.x, minion.y, scale);
+          ctx.strokeText('HERO', x, y - bodyR - 20);
+          ctx.fillStyle = '#ffe6bb';
+          ctx.fillText('HERO', x, y - bodyR - 20);
+          this.drawMinionHpBar(minion, x, y, scale);
         }
         return;
       }
     }
-    ctx.fillStyle = '#0000002a';
-    ctx.beginPath();
-    ctx.ellipse(x, y + bodyR + 5, bodyR * 0.94, 6.2, 0, 0, Math.PI * 2);
-    ctx.fill();
 
-    // Cape.
-    ctx.fillStyle = minion.side === 'left' ? '#2a5f9a' : '#9a2f38';
+    ctx.fillStyle = '#00000028';
     ctx.beginPath();
-    ctx.moveTo(x - dir * 3, y - bodyR * 0.92);
-    ctx.lineTo(x - dir * (bodyR * 1.18), y + bodyR * 0.34);
-    ctx.lineTo(x - dir * (bodyR * 0.72), y + bodyR * 1.1);
-    ctx.lineTo(x - dir * 2, y + bodyR * 0.62);
-    ctx.closePath();
+    ctx.ellipse(x, y + bodyR + 6, bodyR * 1.02, 6.8, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.save();
     ctx.translate(x, y);
 
-    // Torso armor.
-    ctx.fillStyle = '#334864';
+    const capeColor = sideName === 'left' ? '#2f628f' : '#8a3840';
+    ctx.fillStyle = capeColor;
     ctx.beginPath();
-    ctx.arc(0, 0, bodyR, 0, Math.PI * 2);
+    ctx.moveTo(-dir * 2.5, -bodyR * 0.92);
+    ctx.lineTo(-dir * (bodyR * 1.15), bodyR * 0.34);
+    ctx.lineTo(-dir * (bodyR * 0.72), bodyR * 1.04);
+    ctx.lineTo(-dir * 1.8, bodyR * 0.54);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = '#a6c1e5';
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-    ctx.fillStyle = palette.primary;
-    ctx.fillRect(-bodyR * 0.24, -bodyR * 0.88, bodyR * 0.48, bodyR * 1.6);
 
-    // Belt and boots.
-    ctx.fillStyle = '#6d502f';
-    ctx.fillRect(-bodyR * 0.54, bodyR * 0.2, bodyR * 1.08, bodyR * 0.18);
-    ctx.fillStyle = '#202a38';
-    ctx.fillRect(-bodyR * 0.5, bodyR * 0.92, bodyR * 0.28, bodyR * 0.46);
-    ctx.fillRect(bodyR * 0.22, bodyR * 0.92, bodyR * 0.28, bodyR * 0.46);
+    // Torso.
+    ctx.fillStyle = sideName === 'left' ? '#7f5835' : '#4f6a82';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, bodyR * 0.76, bodyR * 0.92, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = sideName === 'left' ? '#d8ae80' : '#bdd5eb';
+    ctx.lineWidth = 1.9;
+    ctx.stroke();
+    ctx.fillStyle = sideName === 'left' ? '#f2ce9f' : '#e8f1fb';
+    ctx.fillRect(-bodyR * 0.16, -bodyR * 0.76, bodyR * 0.32, bodyR * 1.32);
 
-    // Face and hair.
-    ctx.fillStyle = '#f0d2b7';
+    // Head.
+    ctx.fillStyle = '#f2d5ba';
     ctx.beginPath();
-    ctx.arc(0, -bodyR * 0.9, bodyR * 0.46, 0, Math.PI * 2);
+    ctx.arc(0, -bodyR * 1.02, bodyR * 0.42, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#3a2418';
+    ctx.fillStyle = '#2b2018';
     ctx.beginPath();
-    ctx.arc(-dir * bodyR * 0.12, -bodyR * 1.16, bodyR * 0.28, Math.PI * 1.02, Math.PI * 2.05);
+    ctx.arc(-dir * bodyR * 0.06, -bodyR * 1.24, bodyR * 0.24, Math.PI * 1.04, Math.PI * 2.06);
     ctx.fill();
-    ctx.fillStyle = '#1a2233';
+    ctx.fillStyle = '#1a202b';
     ctx.beginPath();
-    ctx.arc(-bodyR * 0.15, -bodyR * 0.92, 1.15, 0, Math.PI * 2);
-    ctx.arc(bodyR * 0.15, -bodyR * 0.92, 1.15, 0, Math.PI * 2);
+    ctx.arc(-bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
+    ctx.arc(bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#7d1616';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-bodyR * 0.04, -bodyR * 0.78);
-    ctx.lineTo(bodyR * 0.2, -bodyR * 0.66);
-    ctx.stroke();
-    ctx.strokeStyle = '#402114';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-bodyR * 0.2, -bodyR * 0.72);
-    ctx.lineTo(bodyR * 0.2, -bodyR * 0.72);
-    ctx.stroke();
 
-    // Sword slash stance.
-    const swordLen = bodyR * 1.85;
-    const swordAng = -0.8 + swing * 0.42;
-    const sx1 = dir * Math.cos(swordAng) * bodyR * 0.2;
-    const sy1 = Math.sin(swordAng) * bodyR * 0.18;
-    const sx2 = dir * Math.cos(swordAng) * swordLen;
-    const sy2 = Math.sin(swordAng) * swordLen;
-    ctx.strokeStyle = '#f0d2b7';
-    ctx.lineWidth = minion.super ? 2.8 : 2.4;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(dir * (bodyR * 0.18), -bodyR * 0.34 + swing * bodyR * 0.07);
-    ctx.lineTo(sx1 - dir * 1.2, sy1 + 0.6);
-    ctx.stroke();
-    ctx.lineWidth = minion.super ? 2.4 : 2;
-    ctx.beginPath();
-    ctx.moveTo(-dir * (bodyR * 0.14), -bodyR * 0.18 - swing * bodyR * 0.05);
-    ctx.lineTo(-dir * (bodyR * 0.68), bodyR * (0.02 + swing * 0.08));
-    ctx.stroke();
-    ctx.strokeStyle = '#e8f3ff';
-    ctx.lineWidth = 3.6;
-    ctx.beginPath();
-    ctx.moveTo(sx1, sy1);
-    ctx.lineTo(sx2, sy2);
-    ctx.stroke();
-    ctx.strokeStyle = '#8ec8ff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(sx2 - dir * 2, sy2 - 1);
-    ctx.lineTo(sx2 + dir * 4, sy2 + 1.2);
-    ctx.stroke();
-    ctx.strokeStyle = '#ffd89a';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(sx1 - dir * 2, sy1 + 2.4);
-    ctx.lineTo(sx1 + dir * 3.5, sy1 - 2.2);
-    ctx.stroke();
+    // Legs with knee joints.
+    const hipY = bodyR * 0.34;
+    const upperLegLen = bodyR * 0.56;
+    const lowerLegLen = bodyR * 0.54;
+    for (const legSign of [-1, 1]) {
+      const gait = Math.sin(swingInput * 1.1 + legSign * 1.6) * 0.18;
+      const hipX = legSign * bodyR * 0.22;
+      const upperA = Math.PI / 2 + gait + legSign * 0.06;
+      const kneeX = hipX + Math.cos(upperA) * upperLegLen;
+      const kneeY = hipY + Math.sin(upperA) * upperLegLen;
+      const lowerA = upperA + legSign * 0.12 - gait * 0.55;
+      const footX = kneeX + Math.cos(lowerA) * lowerLegLen;
+      const footY = kneeY + Math.sin(lowerA) * lowerLegLen;
+      ctx.strokeStyle = '#2d3542';
+      ctx.lineWidth = 4.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(hipX, hipY);
+      ctx.lineTo(kneeX, kneeY);
+      ctx.lineTo(footX, footY);
+      ctx.stroke();
+      ctx.fillStyle = '#d5dee8';
+      ctx.beginPath();
+      ctx.arc(kneeX, kneeY, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const foodIsRice = sideName === 'right';
+    const shoulderY = -bodyR * 0.24;
+    const upperArmLen = bodyR * 0.78;
+    const forearmLen = bodyR * 0.72;
+    const baseForward = dir > 0 ? 0 : Math.PI;
+    const drawWeapon = (wx, wy, armIndex) => {
+      if (foodIsRice) {
+        if (armIndex === 0) {
+          ctx.fillStyle = '#f7fbff';
+          ctx.beginPath();
+          ctx.moveTo(wx, wy - 4.5);
+          ctx.lineTo(wx - 4.2 * dir, wy + 3.8);
+          ctx.lineTo(wx + 4.2 * dir, wy + 3.8);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#2f4258';
+          ctx.fillRect(wx - 2.2 * dir, wy + 1.8, 4.4 * dir, 1.7);
+        } else {
+          ctx.fillStyle = '#f4f8fc';
+          ctx.beginPath();
+          ctx.arc(wx, wy, 4.3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#33465c';
+          ctx.beginPath();
+          ctx.arc(wx, wy, 2.1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (armIndex === 0) {
+        ctx.strokeStyle = '#cf9052';
+        ctx.lineWidth = 2.1;
+        ctx.beginPath();
+        ctx.arc(wx, wy, 4.1, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#d79e61';
+        ctx.beginPath();
+        ctx.ellipse(wx, wy, 5.3, 3.6, 0.08 * dir, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#9c6638';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    };
+
+    for (let i = 0; i < 2; i += 1) {
+      const armSign = i === 0 ? -1 : 1;
+      const shoulderX = armSign * bodyR * 0.5;
+      const armSwing = attackSwing * (armSign === -1 ? 1 : -1);
+      const upperA = baseForward + armSign * 0.72 + armSwing * 0.72;
+      const elbowX = shoulderX + Math.cos(upperA) * upperArmLen;
+      const elbowY = shoulderY + Math.sin(upperA) * upperArmLen;
+      const foreA = upperA + armSign * 0.45 + armSwing * 0.85;
+      const wristX = elbowX + Math.cos(foreA) * forearmLen;
+      const wristY = elbowY + Math.sin(foreA) * forearmLen;
+
+      ctx.strokeStyle = '#f2d5ba';
+      ctx.lineWidth = minion.super ? 4.4 : 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(shoulderX, shoulderY);
+      ctx.lineTo(elbowX, elbowY);
+      ctx.lineTo(wristX, wristY);
+      ctx.stroke();
+      ctx.fillStyle = '#f7e5d0';
+      ctx.beginPath();
+      ctx.arc(elbowX, elbowY, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawWeapon(wristX, wristY, i);
+    }
 
     ctx.restore();
     this.drawThemedSpecialLook(minion, 'hero', { cacheRender, upgraded: minion.super });
 
     if (showHud) {
-      ctx.strokeStyle = '#311707';
-      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = '#2d1808';
+      ctx.lineWidth = 2.2;
       ctx.font = `bold ${minion.super ? 14 : 12}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.strokeText('HERO!!!', x, y - bodyR - 20);
-      ctx.fillStyle = '#ffe4b0';
-      ctx.fillText('HERO!!!', x, y - bodyR - 20);
+      ctx.strokeText('HERO', x, y - bodyR - 20);
+      ctx.fillStyle = '#ffe6bb';
+      ctx.fillText('HERO', x, y - bodyR - 20);
       this.drawMinionHpBar(minion, x, y, scale);
     }
   }
@@ -12733,6 +13465,11 @@ export class GameRenderer {
     }
     if (minion.explosive) {
       this.drawBomberSprite(minion, options);
+      if (!cacheRender) this.drawNecroRevivedOverlay(minion);
+      return;
+    }
+    if (minion.heroCooker) {
+      this.drawHeroCookerSprite(minion, options);
       if (!cacheRender) this.drawNecroRevivedOverlay(minion);
       return;
     }
