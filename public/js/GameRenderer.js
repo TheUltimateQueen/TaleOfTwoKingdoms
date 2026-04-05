@@ -5046,7 +5046,8 @@ export class GameRenderer {
     this.updateParticles(dt);
     this.drawParticles();
     this.frameArrowCount = Array.isArray(snapshot.arrows) ? snapshot.arrows.length : 0;
-    for (const arrow of snapshot.arrows) this.drawArrow(arrow);
+    const topSlotAsCannon = snapshot?.mode === '2v2' || Math.max(1, Number(snapshot?.archersPerSide) || 1) > 1;
+    for (const arrow of snapshot.arrows) this.drawArrow(arrow, topSlotAsCannon);
     this.drawUnitHitImpacts();
     this.updateDamageTexts(dt);
     this.drawDamageTexts();
@@ -13940,7 +13941,7 @@ export class GameRenderer {
     drawDragonHpBar();
   }
 
-  drawArrow(arrow) {
+  drawArrow(arrow, topSlotAsCannon = false) {
     if ((Number(arrow?.launchDelay) || 0) > 0) return;
     const { ctx } = this;
     const isStuck = Boolean(arrow.stuck);
@@ -13961,6 +13962,104 @@ export class GameRenderer {
     const arrowCount = Math.max(0, Number(this.frameArrowCount) || 0);
     const heavyArrowLoad = arrowCount >= 40;
     const veryHeavyArrowLoad = arrowCount >= 80;
+    const archerSlot = Math.max(0, Math.floor(Number(arrow?.archerSlot) || 0));
+    const useCannonVisual = Boolean(topSlotAsCannon && archerSlot === 1);
+
+    if (useCannonVisual) {
+      const x = Number(arrow?.x) || 0;
+      const y = Number(arrow?.y) || 0;
+      const sideName = arrow.side === 'right' ? 'right' : 'left';
+      const vx = Number(arrow?.vx) || 0;
+      const vy = Number(arrow?.vy) || 0;
+      const speed = Math.hypot(vx, vy) || 1;
+      const nx = vx / speed;
+      const ny = vy / speed;
+      const ballR = Math.max(4.2, Number(arrow?.r) || 3.5) * 1.45;
+      let trailTint = sideName === 'left' ? '#87baff' : '#ff9f9f';
+      let shellFill = '#2a2f3a';
+      let shellRim = '#c7d2e8';
+      let shellHighlight = '#ffd8a6';
+      if (arrow.powerType === 'ultraShot') {
+        trailTint = '#fff06d';
+        shellFill = '#4b4732';
+        shellRim = '#fff8b3';
+        shellHighlight = '#fffad6';
+      } else if (arrow.powerType === 'pierceShot') {
+        trailTint = '#9af7ff';
+        shellFill = '#2a434a';
+        shellRim = '#c2fcff';
+        shellHighlight = '#e9fcff';
+      } else if (arrow.powerType === 'flameShot') {
+        trailTint = '#ff8f52';
+        shellFill = '#4a3428';
+        shellRim = '#ffd098';
+        shellHighlight = '#ffe2bf';
+      } else if (arrow.powerType === 'multiShot') {
+        trailTint = '#d2a4ff';
+        shellFill = '#41324d';
+        shellRim = '#e6ccff';
+        shellHighlight = '#f0e0ff';
+      } else if (arrow.powerType === 'flareShot') {
+        trailTint = '#ffd268';
+        shellFill = '#4a4032';
+        shellRim = '#ffe7ad';
+        shellHighlight = '#fff2ce';
+      }
+      if (isImpactStuck) {
+        trailTint = '#ff5a5a';
+        shellFill = '#6e2f2f';
+        shellRim = '#ffb3a9';
+        shellHighlight = '#ffd0cb';
+      }
+
+      ctx.save();
+      if (isStuck) ctx.globalAlpha *= stuckFade;
+
+      if (!isStuck && !veryHeavyArrowLoad) {
+        const trailLen = ballR * (3.1 + comboBoost * 1.9);
+        const trail = ctx.createLinearGradient(x, y, x - nx * trailLen, y - ny * trailLen);
+        trail.addColorStop(0, '#fff5d8');
+        trail.addColorStop(0.45, `${trailTint}b8`);
+        trail.addColorStop(1, `${trailTint}00`);
+        ctx.strokeStyle = trail;
+        ctx.lineWidth = Math.max(1.9, ballR * 0.34);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - nx * trailLen, y - ny * trailLen);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      }
+
+      const glow = ctx.createRadialGradient(x, y, 1.5, x, y, ballR * 2.25);
+      glow.addColorStop(0, '#fff4d1bb');
+      glow.addColorStop(0.45, `${trailTint}70`);
+      glow.addColorStop(1, `${trailTint}00`);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, ballR * 2.25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = shellFill;
+      ctx.beginPath();
+      ctx.arc(x, y, ballR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = shellRim;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+
+      ctx.fillStyle = shellHighlight;
+      ctx.beginPath();
+      ctx.arc(x - ballR * 0.22, y - ballR * 0.24, Math.max(1.2, ballR * 0.22), 0, Math.PI * 2);
+      ctx.fill();
+
+      if (isMainArrow && arrow.powerType) {
+        const iconSize = Math.max(8.6, ballR * 1.32);
+        this.drawShotPowerIcon(arrow.powerType, x, y, iconSize, arrow.side, { drawBadge: false });
+      }
+      ctx.restore();
+      return;
+    }
 
     let body = arrow.side === 'left' ? '#d5ecff' : '#ffe0e0';
     let glow = null;

@@ -1276,6 +1276,7 @@ class GameRoom {
       stuckAngle: finiteOrNull(a.stuckAngle, 3),
       stuckTtl: roundTo(a.stuckTtl, 3),
       stuckTtlMax: roundTo(a.stuckTtlMax, 3),
+      archerSlot: Math.max(0, Math.floor(Number(a.archerSlot) || 0)),
     }));
     const minions = this.minions.map((m) => ({
       id: m.id,
