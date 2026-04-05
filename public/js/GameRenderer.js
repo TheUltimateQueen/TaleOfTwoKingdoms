@@ -4686,7 +4686,7 @@ export class GameRenderer {
     }
   }
 
-  drawArcherHeldInstrument(side, slot, archerX, archerY, aim) {
+  drawArcherHeldInstrument(side, slot, archerX, archerY) {
     const sideKey = side === 'right' ? 'right' : 'left';
     const entries = Array.isArray(this.archerInstruments?.[sideKey]) ? this.archerInstruments[sideKey] : [];
     const info = entries[Math.max(0, Number(slot) || 0)];
@@ -4698,14 +4698,14 @@ export class GameRenderer {
 
     const { ctx } = this;
     const dir = sideKey === 'left' ? 1 : -1;
+    const oppositeDir = -dir;
     const now = performance.now();
     const beat = now * 0.004 + (Number(slot) || 0) * 0.85 + (sideKey === 'right' ? 0.35 : 0);
-    const sway = Math.sin(beat) * 0.45;
-    const bob = Math.cos(beat * 1.05) * 0.2;
-    const handDist = 12;
-    const holdX = archerX + Math.cos(aim) * handDist + dir * 2 + sway;
-    const holdY = archerY - 4 + Math.sin(aim) * handDist - 1 + bob;
-    const iconSize = 13.4 + Math.max(0, Math.sin(beat * 1.22)) * 0.3;
+    const sway = Math.sin(beat) * 0.24;
+    const bob = Math.cos(beat * 1.1) * 0.14;
+    const holdX = archerX + oppositeDir * 6.8 + sway;
+    const holdY = archerY - 3.6 + bob;
+    const iconSize = 13;
 
     ctx.save();
     ctx.drawImage(image, holdX - iconSize / 2, holdY - iconSize / 2, iconSize, iconSize);
@@ -4733,15 +4733,13 @@ export class GameRenderer {
 
     for (let i = 0; i < leftPulls.length; i += 1) {
       const pull = leftPulls[i] || {};
-      const aim = worldAimAngle('left', pull.pullX, pull.pullY);
       const y = Number.isFinite(pull.archerAimY) ? Number(pull.archerAimY) : (Number(world.towerY) - 56 - i * 78);
-      this.drawArcherHeldInstrument('left', i, leftX, y, aim);
+      this.drawArcherHeldInstrument('left', i, leftX, y);
     }
     for (let i = 0; i < rightPulls.length; i += 1) {
       const pull = rightPulls[i] || {};
-      const aim = worldAimAngle('right', pull.pullX, pull.pullY);
       const y = Number.isFinite(pull.archerAimY) ? Number(pull.archerAimY) : (Number(world.towerY) - 56 - i * 78);
-      this.drawArcherHeldInstrument('right', i, rightX, y, aim);
+      this.drawArcherHeldInstrument('right', i, rightX, y);
     }
   }
 
