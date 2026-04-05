@@ -1,5 +1,8 @@
 import {
   SPECIAL_SPAWN_QUEUE_ORDER,
+  SUPPORT_SPECIAL_TYPES,
+  SUPPORT_SPAWN_DEBUFF_FIRST_MULT,
+  SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT,
   SHOT_INTERVAL,
   specialSpawnBaseChanceForType,
   SHOT_POWER_LABELS,
@@ -216,6 +219,10 @@ const ROW_TO_SPECIAL_TYPE = {
   balloon: 'balloon',
   super: 'super',
 };
+const SPECIAL_TYPE_TO_ROW_TYPE = Object.freeze(
+  Object.fromEntries(Object.entries(ROW_TO_SPECIAL_TYPE).map(([rowType, specialType]) => [specialType, rowType]))
+);
+const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 
 const BARRACKS_ROW_GLYPH_BY_TYPE = {
   militia: 'unitLevel',
@@ -6691,6 +6698,29 @@ export class GameRenderer {
     return this.specialSpawnChanceForType(sideState, specialType);
   }
 
+  supportSpawnDebuffMultiplierForAliveCount(aliveCount = 0) {
+    const count = Math.max(0, Math.floor(Number(aliveCount) || 0));
+    if (count <= 0) return 1;
+    const firstMul = Math.max(0.01, Math.min(1, Number(SUPPORT_SPAWN_DEBUFF_FIRST_MULT) || 1));
+    if (count === 1) return firstMul;
+    const additionalMul = Math.max(0.01, Math.min(1, Number(SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT) || 1));
+    return firstMul * Math.pow(additionalMul, count - 1);
+  }
+
+  supportAliveCountForSpecialType(activeCountByType = {}, specialType = null) {
+    if (!specialType || !SUPPORT_SPECIAL_TYPE_SET.has(specialType)) return 0;
+    const rowType = SPECIAL_TYPE_TO_ROW_TYPE[specialType];
+    return Math.max(0, Number(activeCountByType?.[rowType]) || 0);
+  }
+
+  specialSpawnActualChanceForType(sideState, specialType, supportAliveCount = 0) {
+    const displayChance = this.specialSpawnChanceForType(sideState, specialType);
+    if (!Number.isFinite(displayChance)) return null;
+    if (!SUPPORT_SPECIAL_TYPE_SET.has(specialType)) return displayChance;
+    const mul = this.supportSpawnDebuffMultiplierForAliveCount(supportAliveCount);
+    return Math.max(0, Math.min(0.99, displayChance * mul));
+  }
+
   specialCooldownMultiplierAt(matchTimeSec = 0) {
     const safeT = Math.max(0, Number(matchTimeSec) || 0);
     const totalSteps = Math.max(1, Math.round(SPECIAL_COOLDOWN_RAMP_SECONDS / SPECIAL_COOLDOWN_STEP_SECONDS));
@@ -6751,8 +6781,20 @@ export class GameRenderer {
     return Infinity;
   }
 
-  trainingInSpawns(sideState, every) {
+  trainingInSpawns(sideState, every, specialType = null) {
     if (!Number.isFinite(every) || every <= 0) return Infinity;
+    if (specialType) {
+      const progressByType = sideState?.specialSpawnProgressByType;
+      const rawProgress = progressByType?.[specialType];
+      const progress = rawProgress == null ? NaN : Number(rawProgress);
+      if (Number.isFinite(progress)) {
+        const normalized = progress % every;
+        const safeProgress = normalized >= 0 ? normalized : (normalized + every);
+        if (every <= 1) return 1;
+        const remaining = every - safeProgress;
+        return remaining <= 1 ? 1 : remaining;
+      }
+    }
     const spawnCount = Math.max(0, Math.floor(Number(sideState?.spawnCount) || 0));
     if (every <= 1) return 1;
     const rem = spawnCount % every;
@@ -6966,6 +7008,18 @@ export class GameRenderer {
     return rows.map((row) => {
       const rollChance = this.specialSpawnChanceForRow(sideState, row.type);
       const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
+      const supportAliveCount = specialType
+        ? this.supportAliveCountForSpecialType(activeCountByType, specialType)
+        : 0;
+      const rollActualChance = specialType
+        ? this.specialSpawnActualChanceForType(sideState, specialType, supportAliveCount)
+        : rollChance;
+      const rollDebuffLoss = Number.isFinite(rollChance) && Number.isFinite(rollActualChance)
+        ? Math.max(0, rollChance - rollActualChance)
+        : 0;
+      const rollDebuffRatio = Number.isFinite(rollChance) && rollChance > 0
+        ? Math.max(0, Math.min(1, rollDebuffLoss / rollChance))
+        : 0;
       const lastRollEntry = specialType ? specialRollByType[specialType] : null;
       const lastRollSuccess = typeof lastRollEntry?.success === 'boolean' ? lastRollEntry.success : null;
       if (row.type === 'candle') {
@@ -6988,14 +7042,29 @@ export class GameRenderer {
           etaSec,
           candleActive,
           rollChance,
+          rollActualChance,
+          rollDebuffLoss,
+          rollDebuffRatio,
+          supportAliveCount,
           lastRollSuccess: candleRollSuccess,
         };
       }
       const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
       const unlocked = Number.isFinite(every);
-      const inSpawns = unlocked ? this.trainingInSpawns(sideState, every) : Infinity;
+      const inSpawns = unlocked ? this.trainingInSpawns(sideState, every, specialType) : Infinity;
+      const typeProgressValue = specialType && every > 0
+        ? sideState?.specialSpawnProgressByType?.[specialType]
+        : null;
+      const typeProgressNum = typeProgressValue == null ? NaN : Number(typeProgressValue);
+      const normalizedTypeProgress = Number.isFinite(typeProgressNum) && every > 0
+        ? ((typeProgressNum % every) + every) % every
+        : NaN;
       const progress = unlocked && every > 1
-        ? Math.max(0, Math.min(1, (every - inSpawns) / every))
+        ? (
+          Number.isFinite(normalizedTypeProgress)
+            ? Math.max(0, Math.min(1, normalizedTypeProgress / every))
+            : Math.max(0, Math.min(1, (every - inSpawns) / every))
+        )
         : (unlocked ? 1 : 0);
       const etaSec = unlocked
         ? (minionCd + Math.max(0, inSpawns - 1) * spawnEvery)
@@ -7010,6 +7079,10 @@ export class GameRenderer {
         progress,
         etaSec,
         rollChance,
+        rollActualChance,
+        rollDebuffLoss,
+        rollDebuffRatio,
+        supportAliveCount,
         lastRollSuccess,
       };
     });
@@ -7533,8 +7606,16 @@ export class GameRenderer {
     const failTtl = Math.max(0, Number(sideState?.specialFailTtl) || 0);
     const rollType = typeof sideState?.specialRollType === 'string' ? sideState.specialRollType : null;
     const rollSuccess = typeof sideState?.specialRollSuccess === 'boolean' ? sideState.specialRollSuccess : null;
-    const rollChance = Number(sideState?.specialRollChance);
-    const rollValue = Number(sideState?.specialRollValue);
+    const rollDisplayChanceRaw = sideState?.specialRollDisplayChance;
+    const rollChanceRaw = sideState?.specialRollChance;
+    const rollChance = rollChanceRaw == null ? NaN : Number(rollChanceRaw);
+    const rollDisplayChance = rollDisplayChanceRaw == null
+      ? rollChance
+      : Number(rollDisplayChanceRaw);
+    const rollDebuffLoss = Math.max(0, Number(sideState?.specialRollDebuffLoss) || 0);
+    const rollDebuffCausedFail = Boolean(sideState?.specialRollDebuffCausedFail);
+    const rollValueRaw = sideState?.specialRollValue;
+    const rollValue = rollValueRaw == null ? NaN : Number(rollValueRaw);
     const rows = this.barracksRows(
       sideState,
       side,
@@ -7582,17 +7663,30 @@ export class GameRenderer {
     if (
       rollType
       && Number.isFinite(rollChance)
+      && Number.isFinite(rollDisplayChance)
       && Number.isFinite(rollValue)
       && rollSuccess != null
     ) {
-      const statusTag = rollSuccess ? '[OK]' : '[X]';
+      const statusTag = rollSuccess
+        ? '[OK]'
+        : (rollDebuffCausedFail ? '[ORANGE FAIL]' : '[X]');
       ctx.fillStyle = rollSuccess ? '#97f2c2' : '#ffb9a9';
       ctx.fillText(
         `Last roll ${statusTag} ${this.failedSpecialLabel(rollType)}`,
         px + 10,
         py + 48
       );
-      this.drawSpecialRollOutcomeBar(px + 10, py + 52, panelW - 52, 9, rollChance, rollValue, rollSuccess);
+      this.drawSpecialRollOutcomeBar(
+        px + 10,
+        py + 52,
+        panelW - 52,
+        9,
+        rollDisplayChance,
+        rollChance,
+        rollDebuffLoss,
+        rollValue,
+        rollSuccess
+      );
       this.drawSpecialRollTypeBadge(rollType, px + panelW - 20, py + 56, side);
     } else {
       const fallbackText = failType && failTtl > 0
@@ -7604,7 +7698,7 @@ export class GameRenderer {
         px + 10,
         py + 48
       );
-      this.drawSpecialRollOutcomeBar(px + 10, py + 52, panelW - 52, 9, null, null, null);
+      this.drawSpecialRollOutcomeBar(px + 10, py + 52, panelW - 52, 9, null, null, null, null, null);
       if (failType && failTtl > 0) this.drawSpecialRollTypeBadge(failType, px + panelW - 20, py + 56, side);
     }
 
@@ -7679,6 +7773,20 @@ export class GameRenderer {
       ctx.fillRect(barX, barY, barW, barH);
       ctx.fillStyle = row.unlocked ? this.withAlpha(sidePalette.primary, 0.95) : '#6f7688';
       ctx.fillRect(barX, barY, barW * row.progress, barH);
+      if (row.unlocked && row.supportAliveCount > 0 && row.rollDebuffRatio > 0) {
+        const debuffW = barW * Math.max(0, Math.min(1, Number(row.rollDebuffRatio) || 0));
+        if (debuffW > 0.25) {
+          const debuffX = barX + barW - debuffW;
+          ctx.fillStyle = '#f09a2f';
+          ctx.fillRect(debuffX, barY, debuffW, barH);
+          ctx.strokeStyle = '#ffd09d';
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          ctx.moveTo(debuffX + 0.5, barY);
+          ctx.lineTo(debuffX + 0.5, barY + barH);
+          ctx.stroke();
+        }
+      }
       this.drawBarracksMetaChips(
         chipX,
         lineY,
@@ -7762,15 +7870,22 @@ export class GameRenderer {
     return { rows, doorPreviewRow };
   }
 
-  drawSpecialRollOutcomeBar(x, y, w, h, chance, roll, success) {
+  drawSpecialRollOutcomeBar(x, y, w, h, displayChance, actualChance, debuffLoss, roll, success) {
     const { ctx } = this;
-    const chanceClamped = Number.isFinite(chance) ? Math.max(0, Math.min(1, chance)) : null;
+    const displayClamped = Number.isFinite(displayChance) ? Math.max(0, Math.min(1, displayChance)) : null;
+    const actualRaw = Number.isFinite(actualChance) ? Math.max(0, Math.min(1, actualChance)) : displayClamped;
+    const actualClamped = displayClamped == null
+      ? null
+      : Math.max(0, Math.min(displayClamped, Number(actualRaw)));
+    const debuffLossClamped = Number.isFinite(debuffLoss)
+      ? Math.max(0, Math.min(1, Number(debuffLoss) || 0))
+      : 0;
     const rollClamped = Number.isFinite(roll) ? Math.max(0, Math.min(1, roll)) : null;
 
     ctx.fillStyle = '#162133';
     ctx.fillRect(x, y, w, h);
 
-    if (chanceClamped == null) {
+    if (displayClamped == null || actualClamped == null) {
       ctx.strokeStyle = '#2b3a56';
       ctx.lineWidth = 1;
       ctx.strokeRect(x, y, w, h);
@@ -7781,18 +7896,33 @@ export class GameRenderer {
       return;
     }
 
-    const splitX = x + w * chanceClamped;
+    const shownX = x + w * displayClamped;
+    const actualX = x + w * actualClamped;
     ctx.fillStyle = '#6e2b34';
     ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = '#2d784f';
-    ctx.fillRect(x, y, Math.max(0, splitX - x), h);
+    if (actualX > x) {
+      ctx.fillStyle = '#2d784f';
+      ctx.fillRect(x, y, Math.max(0, actualX - x), h);
+    }
+    const debuffZoneW = Math.max(0, shownX - actualX);
+    if (debuffZoneW > 0.2) {
+      ctx.fillStyle = '#e38b2c';
+      ctx.fillRect(actualX, y, debuffZoneW, h);
+    }
 
     ctx.strokeStyle = '#f4f8ffcc';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(splitX + 0.5, y - 1);
-    ctx.lineTo(splitX + 0.5, y + h + 1);
+    ctx.moveTo(shownX + 0.5, y - 1);
+    ctx.lineTo(shownX + 0.5, y + h + 1);
     ctx.stroke();
+    if (Math.abs(actualX - shownX) > 0.5) {
+      ctx.strokeStyle = '#b6ffd7';
+      ctx.beginPath();
+      ctx.moveTo(actualX + 0.5, y - 1);
+      ctx.lineTo(actualX + 0.5, y + h + 1);
+      ctx.stroke();
+    }
 
     if (rollClamped != null) {
       const rollX = x + w * rollClamped;
@@ -7820,7 +7950,13 @@ export class GameRenderer {
     ctx.fillStyle = '#b8c8e2';
     ctx.font = '8px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`spawn ${Math.round(chanceClamped * 100)}%`, x + 3, y + h - 1);
+    ctx.fillText(`shown ${Math.round(displayClamped * 100)}%`, x + 3, y + h - 1);
+    ctx.textAlign = 'center';
+    const debuffPct = Math.max(0, Math.round(Math.max(debuffLossClamped, displayClamped - actualClamped) * 100));
+    const actualLabel = debuffPct > 0
+      ? `actual ${Math.round(actualClamped * 100)}% (-${debuffPct}%)`
+      : `actual ${Math.round(actualClamped * 100)}%`;
+    ctx.fillText(actualLabel, x + w * 0.5, y + h - 1);
     if (rollClamped != null) {
       ctx.textAlign = 'right';
       ctx.fillText(`roll ${Math.round(rollClamped * 100)}%`, x + w - 3, y + h - 1);

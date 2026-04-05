@@ -78,6 +78,15 @@ export const SPECIAL_SPAWN_QUEUE_ORDER = Object.freeze([
   'super',
 ]);
 
+export const SUPPORT_SPECIAL_TYPES = Object.freeze([
+  'necrominion',
+  'monk',
+  'president',
+]);
+
+export const SUPPORT_SPAWN_DEBUFF_FIRST_MULT = 0.9;
+export const SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT = 0.6;
+
 export function specialSpawnBaseChanceForType(type) {
   const chance = Number(SPECIAL_SPAWN_BASE_CHANCE[type]);
   return Number.isFinite(chance) ? chance : null;

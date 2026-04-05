@@ -11,7 +11,13 @@ import {
   UPGRADE_TYPES,
   SHOT_POWER_TYPES,
 } from './simConstants.js';
-import { SPECIAL_SPAWN_QUEUE_ORDER, specialSpawnBaseChanceForType } from './constants.js';
+import {
+  SPECIAL_SPAWN_QUEUE_ORDER,
+  SUPPORT_SPECIAL_TYPES,
+  SUPPORT_SPAWN_DEBUFF_FIRST_MULT,
+  SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT,
+  specialSpawnBaseChanceForType,
+} from './constants.js';
 import {
   DEFAULT_THEME_MODE,
   defaultArcherName,
@@ -112,6 +118,7 @@ const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
       .map((rule) => [rule.specialType, rule])
   )
 );
+const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const DRAGON_SUPER_BREATH_INTERVAL = 5;
 const DRAGON_SUPER_BREATH_COOLDOWN_JITTER = 1.25;
 const DRAGON_SUPER_BREATH_RANGE = 300;
@@ -456,14 +463,22 @@ function serializeSideState(side) {
   const specialRollByTypeRaw = state.specialRollByType && typeof state.specialRollByType === 'object'
     ? state.specialRollByType
     : {};
+  const specialSpawnProgressByTypeRaw = state.specialSpawnProgressByType && typeof state.specialSpawnProgressByType === 'object'
+    ? state.specialSpawnProgressByType
+    : {};
   const specialRollByType = {};
+  const specialSpawnProgressByType = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
     const entry = specialRollByTypeRaw[type];
     specialRollByType[type] = {
       success: typeof entry?.success === 'boolean' ? entry.success : null,
       chance: finiteOrNull(entry?.chance, 3),
+      displayChance: finiteOrNull(entry?.displayChance, 3),
+      debuffLoss: finiteOrNull(entry?.debuffLoss, 3),
+      debuffCausedFail: typeof entry?.debuffCausedFail === 'boolean' ? entry.debuffCausedFail : null,
       roll: finiteOrNull(entry?.roll, 3),
     };
+    specialSpawnProgressByType[type] = finiteOrNull(specialSpawnProgressByTypeRaw[type], 3);
   }
   return {
     towerHp: roundTo(state.towerHp, 1),
@@ -531,10 +546,14 @@ function serializeSideState(side) {
     specialFailTtl: roundTo(state.specialFailTtl, 2),
     specialRollType: typeof state.specialRollType === 'string' ? state.specialRollType : null,
     specialRollSuccess: typeof state.specialRollSuccess === 'boolean' ? state.specialRollSuccess : null,
+    specialRollDisplayChance: finiteOrNull(state.specialRollDisplayChance, 3),
     specialRollChance: finiteOrNull(state.specialRollChance, 3),
+    specialRollDebuffLoss: finiteOrNull(state.specialRollDebuffLoss, 3),
+    specialRollDebuffCausedFail: typeof state.specialRollDebuffCausedFail === 'boolean' ? state.specialRollDebuffCausedFail : null,
     specialRollValue: finiteOrNull(state.specialRollValue, 3),
     specialRollTtl: roundTo(state.specialRollTtl, 2),
     specialRollByType,
+    specialSpawnProgressByType,
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
     towerGolemRescueUsed: Boolean(state.towerGolemRescueUsed),
@@ -632,6 +651,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     pendingShotPower: null,
     pendingShotPowerShots: 0,
     pendingSpecialSpawns: [],
+    specialSpawnProgressByType: {},
     arrowsFired: 0,
     arrowHits: 0,
     comboHitStreak: 0,
@@ -647,7 +667,10 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     specialFailTtl: 0,
     specialRollType: null,
     specialRollSuccess: null,
+    specialRollDisplayChance: null,
     specialRollChance: null,
+    specialRollDebuffLoss: null,
+    specialRollDebuffCausedFail: null,
     specialRollValue: null,
     specialRollTtl: 0,
     specialRollByType: {},
@@ -988,7 +1011,7 @@ class GameRoom {
     this.postGameReportCache = null;
   }
 
-  recordSpecialRoll(sideName, type, success, chance, roll) {
+  recordSpecialRoll(sideName, type, success, chance, roll, meta = null) {
     if (!this.matchReport) return;
     const side = sideName === 'right' ? 'right' : 'left';
     const luck = this.matchReport.luck?.[side];
@@ -1004,6 +1027,9 @@ class GameRoom {
       type,
       success: Boolean(success),
       chance: roundTo(p, 4),
+      displayChance: finiteOrNull(meta?.displayChance, 4),
+      debuffLoss: finiteOrNull(meta?.debuffLoss, 4),
+      debuffCausedFail: Boolean(meta?.debuffCausedFail),
       roll: roundTo(Number(roll) || 0, 4),
     };
     luck.events.push(event);
@@ -1143,8 +1169,15 @@ class GameRoom {
       side.specialFailType = null;
       side.specialFailTtl = 0;
       side.specialRollType = null;
+      side.specialRollDisplayChance = null;
+      side.specialRollChance = null;
+      side.specialRollDebuffLoss = null;
+      side.specialRollDebuffCausedFail = null;
+      side.specialRollValue = null;
       side.specialRollTtl = 0;
+      side.specialRollByType = {};
       side.pendingSpecialSpawns = [];
+      side.specialSpawnProgressByType = {};
     }
 
     if (refreshExisting) {
@@ -5025,7 +5058,101 @@ class GameRoom {
     return Math.min(0.24, (level - 1) * 0.03);
   }
 
-  statSpecialSuccessChance(side, type) {
+  ensureSpecialSpawnProgressMap(side) {
+    if (!side || typeof side !== 'object') return {};
+    if (!side.specialSpawnProgressByType || typeof side.specialSpawnProgressByType !== 'object') {
+      side.specialSpawnProgressByType = {};
+    }
+    return side.specialSpawnProgressByType;
+  }
+
+  specialSpawnQueueGateOpen(side, type) {
+    if (!side) return false;
+    if (type === 'hero') return Boolean(side.towerDamagedOnce);
+    if (type === 'stonegolem') return this.stoneGolemSpawnUnlocked(side);
+    return true;
+  }
+
+  specialSpawnProgressForType(side, type, every) {
+    if (!Number.isFinite(every) || every <= 0) return null;
+    const progressMap = this.ensureSpecialSpawnProgressMap(side);
+    const stored = progressMap[type];
+    const raw = stored == null ? NaN : Number(stored);
+    if (Number.isFinite(raw)) {
+      const normalized = raw % every;
+      return normalized >= 0 ? normalized : (normalized + every);
+    }
+    const spawnCount = Math.max(0, Math.floor(Number(side?.spawnCount) || 0));
+    return ((Math.max(0, spawnCount - 1)) % every);
+  }
+
+  advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns = 0) {
+    const side = this[sideName];
+    if (!side) return 0;
+    const progressMap = this.ensureSpecialSpawnProgressMap(side);
+    if (!Number.isFinite(every) || every <= 0) {
+      progressMap[type] = null;
+      return 0;
+    }
+    let progress = this.specialSpawnProgressForType(side, type, every);
+    progress += Math.max(0, Number(deltaSpawns) || 0);
+    if (!(progress > 0)) {
+      progressMap[type] = progress;
+      return 0;
+    }
+    const dueCount = Math.floor(progress / every);
+    progress -= dueCount * every;
+    progressMap[type] = progress;
+    return Math.max(0, dueCount);
+  }
+
+  enqueuePendingSpecialSpawns(sideName, type, count = 0) {
+    const side = this[sideName];
+    if (!side || count <= 0) return;
+    if (!Array.isArray(side.pendingSpecialSpawns)) side.pendingSpecialSpawns = [];
+    for (let i = 0; i < count; i += 1) side.pendingSpecialSpawns.push(type);
+  }
+
+  queueDueSpecialSpawnsForNaturalSpawn(sideName, everyByType = null) {
+    const side = this[sideName];
+    if (!side) return;
+    for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+      const every = Number(everyByType?.[type]);
+      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, 1);
+      if (dueCount <= 0) continue;
+      if (!this.specialSpawnQueueGateOpen(side, type)) continue;
+      this.enqueuePendingSpecialSpawns(sideName, type, dueCount);
+    }
+  }
+
+  redistributeSupportDebuffFailure(sideName, failedType, failedEvery, everyByType = null) {
+    if (!SUPPORT_SPECIAL_TYPE_SET.has(failedType)) return;
+    const side = this[sideName];
+    if (!side) return;
+    const totalSpawns = Number(failedEvery);
+    if (!(Number.isFinite(totalSpawns) && totalSpawns > 0)) return;
+    const targetTypes = [];
+    for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+      const every = Number(everyByType?.[type]);
+      if (!(Number.isFinite(every) && every > 0)) continue;
+      if (SUPPORT_SPECIAL_TYPE_SET.has(type)) {
+        const alive = this.aliveSpecialCount(sideName, type);
+        if (alive > 0) continue;
+      }
+      targetTypes.push(type);
+    }
+    if (!targetTypes.length) return;
+    const share = totalSpawns / targetTypes.length;
+    for (const type of targetTypes) {
+      const every = Number(everyByType?.[type]);
+      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, share);
+      if (dueCount <= 0) continue;
+      if (!this.specialSpawnQueueGateOpen(side, type)) continue;
+      this.enqueuePendingSpecialSpawns(sideName, type, dueCount);
+    }
+  }
+
+  statSpecialDisplayChance(side, type) {
     const rawOverride = side?.debugSpecialChanceOverrides?.[type];
     const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
@@ -5044,6 +5171,36 @@ class GameRoom {
       chance += repeatLevel * Math.max(0, Number(typeRule.repeatChancePerLevel) || 0);
     }
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
+    return clamp(chance, 0, 0.99);
+  }
+
+  supportSpecialAliveCount(sideName, type) {
+    if (!SUPPORT_SPECIAL_TYPE_SET.has(type)) return 0;
+    return this.aliveSpecialCount(sideName, type);
+  }
+
+  supportSpecialDebuffMultiplier(sideName, type, aliveCountOverride = null) {
+    if (!SUPPORT_SPECIAL_TYPE_SET.has(type)) return 1;
+    const aliveCount = aliveCountOverride == null
+      ? this.supportSpecialAliveCount(sideName, type)
+      : Math.max(0, Math.floor(Number(aliveCountOverride) || 0));
+    if (aliveCount <= 0) return 1;
+    const firstMul = clamp(Number(SUPPORT_SPAWN_DEBUFF_FIRST_MULT) || 1, 0.01, 1);
+    if (aliveCount === 1) return firstMul;
+    const additionalMul = clamp(Number(SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT) || 1, 0.01, 1);
+    return firstMul * Math.pow(additionalMul, aliveCount - 1);
+  }
+
+  statSpecialSuccessChance(side, type, options = null) {
+    const displayChance = this.statSpecialDisplayChance(side, type);
+    if (!Number.isFinite(displayChance) || displayChance <= 0) return 0;
+    const includeSupportDebuff = options?.includeSupportDebuff !== false;
+    if (!includeSupportDebuff || !SUPPORT_SPECIAL_TYPE_SET.has(type)) return displayChance;
+    const sideName = options?.sideName || this.sideNameFromStateRef(side);
+    if (!sideName) return displayChance;
+    const aliveCountOverride = options?.supportAliveCount;
+    const debuffMultiplier = this.supportSpecialDebuffMultiplier(sideName, type, aliveCountOverride);
+    const chance = displayChance * debuffMultiplier;
     return clamp(chance, 0, 0.99);
   }
 
@@ -7176,33 +7333,28 @@ class GameRoom {
     const riderEvery = this.statRiderEvery(side);
     const monkEvery = this.statMonkEvery(side);
     const stoneGolemEvery = this.statStoneGolemEvery(side);
-    const stoneGolemUnlocked = this.stoneGolemSpawnUnlocked(side);
     const heroEvery = this.statHeroEvery(side);
     const presidentEvery = this.statPresidentEvery(side);
     const balloonEvery = this.statBalloonEvery(side);
     const superEvery = this.statSuperEvery(side);
+    const everyByType = {
+      dragon: dragonEvery,
+      shield: shieldEvery,
+      digger: diggerEvery,
+      necrominion: necroEvery,
+      gunner: gunnerEvery,
+      rider: riderEvery,
+      monk: monkEvery,
+      stonegolem: stoneGolemEvery,
+      hero: heroEvery,
+      president: presidentEvery,
+      balloon: balloonEvery,
+      super: superEvery,
+    };
 
     if (naturalSpawn) {
       this.stepCandleSpawnCycle(sideName);
-      const dueByType = {
-        dragon: Number.isFinite(dragonEvery) && side.spawnCount % dragonEvery === 0,
-        shield: side.spawnCount % shieldEvery === 0,
-        digger: side.spawnCount % diggerEvery === 0,
-        necrominion: side.spawnCount % necroEvery === 0,
-        gunner: side.spawnCount % gunnerEvery === 0,
-        rider: side.spawnCount % riderEvery === 0,
-        monk: side.spawnCount % monkEvery === 0,
-        stonegolem: stoneGolemUnlocked && side.spawnCount % stoneGolemEvery === 0,
-        // Hero's signature moment is still tower-first-hit rescue.
-        // Natural hero training only unlocks after this side's tower has been damaged once.
-        hero: side.towerDamagedOnce && side.spawnCount % heroEvery === 0,
-        president: side.spawnCount % presidentEvery === 0,
-        balloon: Number.isFinite(balloonEvery) && side.spawnCount % balloonEvery === 0,
-        super: Number.isFinite(superEvery) && side.spawnCount % superEvery === 0,
-      };
-      for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
-        if (dueByType[type]) side.pendingSpecialSpawns.push(type);
-      }
+      this.queueDueSpecialSpawnsForNaturalSpawn(sideName, everyByType);
     }
 
     const queuedType = naturalSpawn && side.pendingSpecialSpawns.length
@@ -7211,16 +7363,45 @@ class GameRoom {
     let failedSpecialType = null;
     let spawnType = forceType;
     if (!spawnType && queuedType) {
-      const chance = this.statSpecialSuccessChance(side, queuedType);
+      const supportAliveCount = SUPPORT_SPECIAL_TYPE_SET.has(queuedType)
+        ? this.supportSpecialAliveCount(sideName, queuedType)
+        : 0;
+      const displayChance = this.statSpecialSuccessChance(side, queuedType, {
+        sideName,
+        includeSupportDebuff: false,
+      });
+      const chance = this.statSpecialSuccessChance(side, queuedType, {
+        sideName,
+        supportAliveCount,
+      });
       const roll = Math.random();
       const success = roll <= chance;
+      const debuffLoss = Math.max(0, displayChance - chance);
+      const debuffCausedFail = !success
+        && debuffLoss > 0
+        && roll <= displayChance
+        && roll > chance;
       side.specialRollType = queuedType;
       side.specialRollSuccess = success;
+      side.specialRollDisplayChance = displayChance;
       side.specialRollChance = chance;
+      side.specialRollDebuffLoss = debuffLoss;
+      side.specialRollDebuffCausedFail = debuffCausedFail;
       side.specialRollValue = roll;
       side.specialRollTtl = SPECIAL_ROLL_TTL;
-      side.specialRollByType[queuedType] = { success, chance, roll };
-      this.recordSpecialRoll(sideName, queuedType, success, chance, roll);
+      side.specialRollByType[queuedType] = {
+        success,
+        chance,
+        displayChance,
+        debuffLoss,
+        debuffCausedFail,
+        roll,
+      };
+      this.recordSpecialRoll(sideName, queuedType, success, chance, roll, {
+        displayChance,
+        debuffLoss,
+        debuffCausedFail,
+      });
       if (success) {
         spawnType = queuedType;
         side.specialFailType = null;
@@ -7229,6 +7410,10 @@ class GameRoom {
         failedSpecialType = queuedType;
         side.specialFailType = queuedType;
         side.specialFailTtl = SPECIAL_FAIL_TTL;
+        if (debuffCausedFail) {
+          const failedEvery = Number(everyByType[queuedType]);
+          this.redistributeSupportDebuffFailure(sideName, queuedType, failedEvery, everyByType);
+        }
       }
     }
     const isDragon = spawnType === 'dragon';
