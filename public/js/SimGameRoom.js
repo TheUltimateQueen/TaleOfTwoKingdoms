@@ -7993,6 +7993,9 @@ class GameRoom {
     let flameBurn = 0;
     let gravity = 980 - launch.strength * 220;
     let powerType = null;
+    let ultraBonusShot = false;
+    let ultraBonusSpeed = 0;
+    let ultraBonusGravity = 0;
     const powerScale = 1 + (side.powerLevel - 1) * 0.18;
     const slotPowerEntry = Array.isArray(side.pendingShotPowerBySlot) && side.pendingShotPowerBySlot[slot]
       ? side.pendingShotPowerBySlot[slot]
@@ -8004,10 +8007,10 @@ class GameRoom {
       spread = 0.05;
       powerType = 'multiShot';
     } else if (activePower === 'ultraShot') {
-      dmgMul = 2.2 + powerScale * 0.8;
-      speed += 70 + powerScale * 36;
-      radius = 6;
-      gravity = Math.max(620, gravity - 150);
+      dmgMul = 1.3 + powerScale * 0.3;
+      ultraBonusShot = true;
+      ultraBonusSpeed = 70 + powerScale * 36;
+      ultraBonusGravity = Math.max(620, gravity - 150);
       powerType = 'ultraShot';
     } else if (activePower === 'pierceShot') {
       pierce = 2 + Math.floor(powerScale * 2);
@@ -8036,6 +8039,7 @@ class GameRoom {
     }
 
     syncPendingShotPowerState(side);
+    const baseArrowDamage = this.statArrowDamage(side) * dmgMul * chargeMul * comboMul;
 
     for (let i = 0; i < angleSteps.length; i += 1) {
       const angleStep = angleSteps[i];
@@ -8062,7 +8066,7 @@ class GameRoom {
         y: sy,
         vx,
         vy,
-        dmg: this.statArrowDamage(side) * dmgMul * chargeMul * comboMul * sideArrowMul,
+        dmg: baseArrowDamage * sideArrowMul,
         ttl: ARROW_FLIGHT_TTL,
         r: isMainArrow ? radius + 1.4 : radius,
         pierce,
@@ -8072,6 +8076,40 @@ class GameRoom {
         gravity,
         launchDelay,
         mainArrow: isMainArrow,
+        arrowDamageGoldAwarded: 0,
+        shotVolleyId: volleyId,
+        comboTier: comboMul,
+        hitAnyUnit: false,
+        stuck: false,
+        stuckHitUnit: false,
+        stuckAngle: null,
+        stuckTtl: 0,
+        stuckTtlMax: 0,
+        archerSlot: slot,
+      });
+    }
+
+    if (ultraBonusShot) {
+      const ultraSpeed = speed + ultraBonusSpeed;
+      const ultraVx = Math.cos(launch.angle) * ultraSpeed * forwardSign;
+      const ultraVy = -Math.sin(launch.angle) * ultraSpeed;
+      this.arrows.push({
+        id: this.seq++,
+        side: sideName,
+        x: sx,
+        y: sy,
+        vx: ultraVx,
+        vy: ultraVy,
+        dmg: baseArrowDamage,
+        ttl: ARROW_FLIGHT_TTL,
+        r: radius + 1.8,
+        pierce,
+        powerType: 'ultraShot',
+        flameSplash,
+        flameBurn,
+        gravity: ultraBonusGravity,
+        launchDelay: 0.02,
+        mainArrow: false,
         arrowDamageGoldAwarded: 0,
         shotVolleyId: volleyId,
         comboTier: comboMul,
