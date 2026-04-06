@@ -18,6 +18,7 @@ import {
   sideVictoryLabel,
   unitLabel,
 } from './themeConfig.js';
+import { SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE } from './specialUnitUpgradeConfig.js';
 
 function sideCardSlotX(sideName, slot) {
   const leftRegular = [220, 320];
@@ -65,7 +66,6 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'unitHpLevel', code: 'HP', base: 1 },
   { type: 'resourceLevel', code: 'EC', base: 1 },
   { type: 'powerLevel', code: 'PW', base: 1 },
-  { type: 'specialRateLevel', code: 'SR', base: 1 },
   { type: 'balloonLevel', code: 'BA', base: 0 },
   { type: 'dragonLevel', code: 'DR', base: 0 },
   { type: 'dragonSuperBreathLevel', code: 'SB', base: 0 },
@@ -219,6 +219,27 @@ const SPECIAL_TYPE_TO_ROW_TYPE = Object.freeze(
   Object.fromEntries(Object.entries(ROW_TO_SPECIAL_TYPE).map(([rowType, specialType]) => [specialType, rowType]))
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
+const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
+const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
+const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
+  dragon: 0.014,
+  super: 0.018,
+  shield: 0.004,
+});
+const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL = 0.03;
+const SPECIAL_REPEAT_EVERY_BONUS_MAX = 0.24;
+const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
+  shield: 0.02,
+});
+const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set([
+  'necrominion',
+  'gunner',
+  'rider',
+  'digger',
+  'monk',
+  'shield',
+  'president',
+]);
 
 const BARRACKS_ROW_GLYPH_BY_TYPE = {
   militia: 'unitLevel',
@@ -7215,6 +7236,39 @@ export class GameRenderer {
     return Math.min(0.24, (level - 1) * 0.03);
   }
 
+  specialRepeatLevelForType(sideState, specialType) {
+    const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
+    if (!rule?.upgradeType) return 0;
+    return Math.max(0, (Number(sideState?.[rule.upgradeType]) || 0) - 1);
+  }
+
+  specialRepeatChanceBonusPerLevelForType(specialType, rule = null) {
+    const configured = Math.max(0, Number(rule?.repeatChancePerLevel) || 0);
+    if (configured > 0) return configured;
+    const override = Number(SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE[specialType]);
+    return Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
+  }
+
+  specialRepeatSpawnChanceBonus(sideState, specialType) {
+    const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
+    const repeatLevel = this.specialRepeatLevelForType(sideState, specialType);
+    if (repeatLevel <= 0) return 0;
+    const perLevel = this.specialRepeatChanceBonusPerLevelForType(specialType, rule);
+    return Math.min(SPECIAL_REPEAT_CHANCE_BONUS_MAX, repeatLevel * perLevel);
+  }
+
+  specialRepeatSpawnEveryMultiplier(sideState, specialType) {
+    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
+    const repeatLevel = this.specialRepeatLevelForType(sideState, specialType);
+    if (repeatLevel <= 0) return 1;
+    const override = Number(SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE[specialType]);
+    const perLevel = Number.isFinite(override)
+      ? Math.max(0, override)
+      : SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL;
+    const bonus = Math.min(SPECIAL_REPEAT_EVERY_BONUS_MAX, repeatLevel * perLevel);
+    return Math.max(0.4, 1 - bonus);
+  }
+
   candleEveryForSide(sideState) {
     const spawn = Math.max(1, Number(sideState?.spawnLevel) || 1);
     const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
@@ -7240,7 +7294,8 @@ export class GameRenderer {
     const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
     const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
     const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
-    return this.scaledSpecialEveryForUi(NECRO_BASE_EVERY * necroEveryFactor, matchTimeSec);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, 'necrominion');
+    return this.scaledSpecialEveryForUi(NECRO_BASE_EVERY * necroEveryFactor * repeatMul, matchTimeSec);
   }
 
   specialSpawnChanceForType(sideState, specialType) {
@@ -7256,16 +7311,9 @@ export class GameRenderer {
       : specialRateBonus;
     if (specialType === 'stonegolem' && !this.stoneGolemSpawnUnlocked(sideState)) return 0;
     let chance = base + tunedSpecialBonus;
-    if (specialType === 'dragon') {
-      const dragonLevel = Math.max(0, Number(sideState?.dragonLevel) || 0);
-      chance += Math.max(0, dragonLevel - 1) * 0.014;
-    }
+    chance += this.specialRepeatSpawnChanceBonus(sideState, specialType);
     if (specialType === 'shield' && (Number(sideState?.shieldDarkMetalLevel) || 0) > 0) {
       chance *= 2;
-    }
-    if (specialType === 'super') {
-      const superLevel = Math.max(0, Number(sideState?.superMinionLevel) || 0);
-      chance += Math.max(0, superLevel - 1) * 0.018;
     }
     return Math.max(0, Math.min(0.99, chance));
   }
@@ -7341,23 +7389,41 @@ export class GameRenderer {
       return this.candleEveryForSide(s);
     }
     if (type === 'necro') return this.necroTrainingEvery(s, matchTimeSec);
-    if (type === 'gunner') return this.scaledSpecialEveryForUi(Math.max(14, 22 - Math.floor((unit + power + eco) / 6)), matchTimeSec);
-    if (type === 'rider') return this.scaledSpecialEveryForUi(Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)), matchTimeSec);
-    if (type === 'digger') return this.scaledSpecialEveryForUi(Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)), matchTimeSec);
-    if (type === 'monk') return this.scaledSpecialEveryForUi(Math.max(20, 30 - Math.floor((hp + power + resource) / 7)), matchTimeSec);
+    if (type === 'gunner') {
+      const baseEvery = Math.max(14, 22 - Math.floor((unit + power + eco) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'gunner');
+      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+    }
+    if (type === 'rider') {
+      const baseEvery = Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)) * this.specialRepeatSpawnEveryMultiplier(s, 'rider');
+      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+    }
+    if (type === 'digger') {
+      const baseEvery = Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'digger');
+      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+    }
+    if (type === 'monk') {
+      const baseEvery = Math.max(20, 30 - Math.floor((hp + power + resource) / 7)) * this.specialRepeatSpawnEveryMultiplier(s, 'monk');
+      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+    }
     if (type === 'stonegolem') {
       if (!this.stoneGolemSpawnUnlocked(s)) return Infinity;
       return this.stoneGolemEveryForSide(s);
     }
-    if (type === 'shield') return this.scaledSpecialEveryForUi(Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)) * 4, matchTimeSec);
+    if (type === 'shield') {
+      const baseEvery = Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'shield');
+      return this.scaledSpecialEveryForUi(baseEvery * 4, matchTimeSec);
+    }
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
       return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
     }
-    if (type === 'president') return this.scaledSpecialEveryForUi(Math.max(36, 54 - Math.floor((eco + resource + power) / 6)), matchTimeSec);
+    if (type === 'president') {
+      const baseEvery = Math.max(36, 54 - Math.floor((eco + resource + power) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'president');
+      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+    }
     if (type === 'balloon') {
       if (balloon <= 0) return Infinity;
-      const airTech = Math.floor((spawn + power + Math.max(1, Number(s.specialRateLevel) || 1) + eco) / 8);
+      const airTech = Math.floor((spawn + power + balloon + eco) / 8);
       return this.scaledSpecialEveryForUi(Math.max(8, 18 - balloon * 2 - airTech), matchTimeSec);
     }
     if (type === 'dragon') return dragon <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(34, 68 - dragon * 5 - mythicPressure * 2), matchTimeSec);
@@ -7680,8 +7746,8 @@ export class GameRenderer {
     const s = sideState || {};
     const unit = this.barracksUpgradeLevel(s, 'unitLevel', 1);
     const hp = this.barracksUpgradeLevel(s, 'unitHpLevel', 1);
+    const spawn = this.barracksUpgradeLevel(s, 'spawnLevel', 1);
     const power = this.barracksUpgradeLevel(s, 'powerLevel', 1);
-    const specialRate = this.barracksUpgradeLevel(s, 'specialRateLevel', 1);
     const balloon = this.barracksUpgradeLevel(s, 'balloonLevel', 0);
     const dragon = this.barracksUpgradeLevel(s, 'dragonLevel', 0);
     const dragonBreath = this.barracksUpgradeLevel(s, 'dragonSuperBreathLevel', 0);
@@ -7799,7 +7865,7 @@ export class GameRenderer {
         addBaseChip([
           { type: 'balloonLevel', label: 'BA', value: balloon },
         ], balloon <= 0);
-        addChip(`Rate SR${specialRate}`, 'misc');
+        addChip(`Spawn SP${spawn}`, 'misc');
         break;
       case 'dragon':
         addGlyphChip('dragonSuperBreathLevel', dragonBreath > 0);
@@ -7815,7 +7881,7 @@ export class GameRenderer {
       case 'candle':
         addBaseChip([
           { type: 'powerLevel', label: 'PW', value: power },
-          { type: 'specialRateLevel', label: 'SR', value: specialRate },
+          { type: 'spawnLevel', label: 'SP', value: spawn },
         ]);
         break;
       default:
@@ -8183,8 +8249,6 @@ export class GameRenderer {
   drawBarracks(side, sideState, world, snapshot = null, precomputedCounts = null) {
     const { ctx } = this;
     const sidePalette = TEAM_COLORS[side] || TEAM_COLORS.left;
-    const specialRateLevel = Math.max(1, Number(sideState?.specialRateLevel) || 1);
-    const specialBonusPct = Math.round(this.specialSpawnRateBonus(sideState) * 100);
     const failType = typeof sideState?.specialFailType === 'string' ? sideState.specialFailType : null;
     const failTtl = Math.max(0, Number(sideState?.specialFailTtl) || 0);
     const rollType = typeof sideState?.specialRollType === 'string' ? sideState.specialRollType : null;
@@ -8241,8 +8305,6 @@ export class GameRenderer {
       px + 10,
       py + 28
     );
-    ctx.fillStyle = '#9ec0e7';
-    ctx.fillText(`Special Chance L${specialRateLevel} (+${specialBonusPct}%)`, px + 10, py + 38);
     if (
       rollType
       && Number.isFinite(rollChance)

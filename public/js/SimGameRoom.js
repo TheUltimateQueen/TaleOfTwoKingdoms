@@ -311,6 +311,27 @@ const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 0.5;
 const RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 2;
+const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
+const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
+const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
+  dragon: 0.014,
+  super: 0.018,
+  shield: 0.004,
+});
+const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL = 0.03;
+const SPECIAL_REPEAT_EVERY_BONUS_MAX = 0.24;
+const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
+  shield: 0.02,
+});
+const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set([
+  'necrominion',
+  'gunner',
+  'rider',
+  'digger',
+  'monk',
+  'shield',
+  'president',
+]);
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_ROLL_TTL = 6;
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
@@ -5198,31 +5219,31 @@ class GameRoom {
 
   statGunnerEvery(side) {
     const tech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 6);
-    const baseEvery = Math.max(14, 22 - tech);
+    const baseEvery = Math.max(14, 22 - tech) * this.specialRepeatSpawnEveryMultiplier(side, 'gunner');
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statRiderEvery(side) {
     const cavalryTech = Math.floor((side.unitLevel + side.spawnLevel + side.economyLevel) / 5);
-    const baseEvery = Math.max(15, 23 - cavalryTech);
+    const baseEvery = Math.max(15, 23 - cavalryTech) * this.specialRepeatSpawnEveryMultiplier(side, 'rider');
     return this.scaleSpecialCooldownEvery(baseEvery, side, RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE);
   }
 
   statDiggerEvery(side) {
     const burrowTech = Math.floor((side.unitHpLevel + side.spawnLevel + side.economyLevel) / 6);
-    const baseEvery = Math.max(14, 24 - burrowTech);
+    const baseEvery = Math.max(14, 24 - burrowTech) * this.specialRepeatSpawnEveryMultiplier(side, 'digger');
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statMonkEvery(side) {
     const supportTech = Math.floor((side.unitHpLevel + side.powerLevel + side.resourceLevel) / 7);
-    const baseEvery = Math.max(20, 30 - supportTech);
+    const baseEvery = Math.max(20, 30 - supportTech) * this.specialRepeatSpawnEveryMultiplier(side, 'monk');
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statShieldEvery(side) {
     const wallTech = Math.floor((side.unitHpLevel + side.powerLevel + side.spawnLevel) / 6);
-    const baseEvery = Math.max(17, 26 - wallTech);
+    const baseEvery = Math.max(17, 26 - wallTech) * this.specialRepeatSpawnEveryMultiplier(side, 'shield');
     return this.scaleSpecialCooldownEvery(baseEvery * 4, side);
   }
 
@@ -5234,14 +5255,14 @@ class GameRoom {
 
   statPresidentEvery(side) {
     const civicTech = Math.floor((side.economyLevel + side.resourceLevel + side.powerLevel) / 6);
-    const baseEvery = Math.max(36, 54 - civicTech);
+    const baseEvery = Math.max(36, 54 - civicTech) * this.specialRepeatSpawnEveryMultiplier(side, 'president');
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statBalloonEvery(side) {
     if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
     const level = Math.max(1, Number(side?.balloonLevel) || 1);
-    const airTech = Math.floor((side.spawnLevel + side.powerLevel + side.specialRateLevel + side.economyLevel) / 8);
+    const airTech = Math.floor((side.spawnLevel + side.powerLevel + level + side.economyLevel) / 8);
     const baseEvery = Math.max(8, 18 - level * 2 - airTech);
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
@@ -5254,7 +5275,7 @@ class GameRoom {
     const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
     const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
     return this.scaleSpecialCooldownEvery(
-      NECRO_BASE_EVERY * necroEveryFactor,
+      NECRO_BASE_EVERY * necroEveryFactor * this.specialRepeatSpawnEveryMultiplier(side, 'necrominion'),
       side,
       NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE
     );
@@ -5269,6 +5290,39 @@ class GameRoom {
   statSpecialRateBonus(side) {
     const level = Math.max(1, Number(side?.specialRateLevel) || 1);
     return Math.min(0.24, (level - 1) * 0.03);
+  }
+
+  specialRepeatLevel(side, specialType) {
+    const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
+    if (!rule?.upgradeType) return 0;
+    return Math.max(0, (Number(side?.[rule.upgradeType]) || 0) - 1);
+  }
+
+  specialRepeatChanceBonusPerLevel(specialType, rule = null) {
+    const configured = Math.max(0, Number(rule?.repeatChancePerLevel) || 0);
+    if (configured > 0) return configured;
+    const override = Number(SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE[specialType]);
+    return Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
+  }
+
+  specialRepeatSpawnChanceBonus(side, specialType) {
+    const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
+    const repeatLevel = this.specialRepeatLevel(side, specialType);
+    if (repeatLevel <= 0) return 0;
+    const perLevel = this.specialRepeatChanceBonusPerLevel(specialType, rule);
+    return Math.min(SPECIAL_REPEAT_CHANCE_BONUS_MAX, repeatLevel * perLevel);
+  }
+
+  specialRepeatSpawnEveryMultiplier(side, specialType) {
+    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
+    const repeatLevel = this.specialRepeatLevel(side, specialType);
+    if (repeatLevel <= 0) return 1;
+    const override = Number(SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE[specialType]);
+    const perLevel = Number.isFinite(override)
+      ? Math.max(0, override)
+      : SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL;
+    const bonus = Math.min(SPECIAL_REPEAT_EVERY_BONUS_MAX, repeatLevel * perLevel);
+    return Math.max(0.4, 1 - bonus);
   }
 
   ensureSpecialSpawnProgressMap(side) {
@@ -5378,11 +5432,7 @@ class GameRoom {
       : specialRateBonus;
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
     let chance = base + tunedSpecialBonus;
-    const typeRule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[type] || null;
-    if (typeRule?.upgradeType) {
-      const repeatLevel = Math.max(0, (Number(side?.[typeRule.upgradeType]) || 0) - 1);
-      chance += repeatLevel * Math.max(0, Number(typeRule.repeatChancePerLevel) || 0);
-    }
+    chance += this.specialRepeatSpawnChanceBonus(side, type);
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     return clamp(chance, 0, 0.99);
   }

@@ -14,7 +14,6 @@ export const UPGRADE_TYPES = [
   'unitHpLevel',
   'resourceLevel',
   'powerLevel',
-  'specialRateLevel',
   'balloonLevel',
   'dragonLevel',
   'dragonSuperBreathLevel',
