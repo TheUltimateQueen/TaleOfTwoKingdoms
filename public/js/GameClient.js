@@ -93,7 +93,7 @@ const POST_UPGRADE_CODES = {
   volleyLevel: 'VO',
   spawnLevel: 'SP',
   unitHpLevel: 'HP',
-  resourceLevel: 'RS',
+  resourceLevel: 'EC',
   bountyLevel: 'CG',
   powerLevel: 'PW',
   specialRateLevel: 'SR',
@@ -288,8 +288,8 @@ function escapeHtml(value) {
 }
 
 function killGoldMultiplier(sideState) {
-  const level = Math.max(1, sideState?.bountyLevel || 1);
-  return (1 + (level - 1) * 0.2).toFixed(2);
+  const level = Math.max(1, sideState?.resourceLevel || 1);
+  return (1 + (level - 1) * 0.1).toFixed(2);
 }
 
 export class GameClient {
@@ -3162,8 +3162,8 @@ export class GameClient {
     const rightRoster = Array.isArray(s.players?.right)
       ? s.players.right.map((p) => p?.name).filter(Boolean).join(' + ')
       : (s.players?.right?.name || s.primaryPlayers?.right?.name || sideDisplayName('right', this.state.themeMode));
-    this.leftHud.textContent = `${leftRoster || sideDisplayName('left', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | CombatGold x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
-    this.rightHud.textContent = `${rightRoster || sideDisplayName('right', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | CombatGold x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
+    this.leftHud.textContent = `${leftRoster || sideDisplayName('left', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.left.towerHp))} | Gold ${Math.floor(s.left.gold)} | Upg ${leftUpg} | Eco ${s.left.economyLevel} | GoldBoost x${killGoldMultiplier(s.left)} | Power ${powerStatus(s.left.pendingShotPower, s.left.pendingShotPowerShots)} | Hit ${arrowHitRate(s.left)}% (${s.left.arrowHits || 0}) | Combo ${comboStatus(s.left)}`;
+    this.rightHud.textContent = `${rightRoster || sideDisplayName('right', this.state.themeMode)} | HP ${Math.max(0, Math.floor(s.right.towerHp))} | Gold ${Math.floor(s.right.gold)} | Upg ${rightUpg} | Eco ${s.right.economyLevel} | GoldBoost x${killGoldMultiplier(s.right)} | Power ${powerStatus(s.right.pendingShotPower, s.right.pendingShotPowerShots)} | Hit ${arrowHitRate(s.right)}% (${s.right.arrowHits || 0}) | Combo ${comboStatus(s.right)}`;
     if (s.gameOver) {
       this.centerHud.textContent = '';
       return;

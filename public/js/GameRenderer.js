@@ -59,13 +59,11 @@ function arrowAccuracy(sideState) {
 }
 
 const UPGRADE_BADGE_SPECS = [
-  { type: 'arrowLevel', code: 'AR', base: 1 },
   { type: 'unitLevel', code: 'AT', base: 1 },
   { type: 'volleyLevel', code: 'VO', base: 0 },
   { type: 'spawnLevel', code: 'SP', base: 1 },
   { type: 'unitHpLevel', code: 'HP', base: 1 },
-  { type: 'resourceLevel', code: 'RS', base: 1 },
-  { type: 'bountyLevel', code: 'CG', base: 1 },
+  { type: 'resourceLevel', code: 'EC', base: 1 },
   { type: 'powerLevel', code: 'PW', base: 1 },
   { type: 'specialRateLevel', code: 'SR', base: 1 },
   { type: 'balloonLevel', code: 'BA', base: 0 },
@@ -82,13 +80,11 @@ const UPGRADE_BADGE_SPECS = [
 ];
 
 const UPGRADE_CATEGORY_BY_TYPE = {
-  arrowLevel: 'arrow',
   volleyLevel: 'arrow',
   unitLevel: 'unit',
   unitHpLevel: 'unit',
   spawnLevel: 'unit',
   resourceLevel: 'economy',
-  bountyLevel: 'economy',
   powerLevel: 'power',
   specialRateLevel: 'special',
   balloonLevel: 'special',
@@ -227,7 +223,7 @@ const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const BARRACKS_ROW_GLYPH_BY_TYPE = {
   militia: 'unitLevel',
   necro: 'unitLevel',
-  gunner: 'arrowLevel',
+  gunner: 'gunnerSkyCannonLevel',
   rider: 'unitLevel',
   digger: 'unitHpLevel',
   monk: 'powerLevel',
@@ -3781,11 +3777,9 @@ export class GameRenderer {
   }
 
   harvestBackdropWorkerCount(sideState) {
-    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
-    const bounty = Math.max(1, Number(sideState?.bountyLevel) || 1);
-    const resourceFarmers = Math.max(0, resource - 1);
-    const bountyFarmers = Math.max(0, bounty - 1);
-    return Math.min(12, 1 + resourceFarmers + bountyFarmers);
+    const economy = Math.max(1, Number(sideState?.resourceLevel) || 1);
+    const workers = Math.max(0, economy - 1);
+    return Math.min(12, 1 + workers);
   }
 
   drawBackdropHarvester(sideName, x, y, scale = 1, animT = 0) {
@@ -5914,9 +5908,14 @@ export class GameRenderer {
       if (fx.life <= 0) continue;
       const t = Math.max(0, Math.min(1, 1 - (fx.life / Math.max(0.001, fx.maxLife))));
       fx.rot += (Number(fx.spin) || 0) * dt;
-      if (fx.mode === 'rain') {
-        fx.x += (Number(fx.driftX) || 0) * dt;
-        fx.y = lerp(Number(fx.fromY) || 0, Number(fx.toY) || 0, easeInCubic(Math.min(1, t * 1.08)));
+      if (fx.mode === 'rain' || fx.mode === 'rainbig') {
+        const big = fx.mode === 'rainbig';
+        const driftMul = big ? 0.42 : 1;
+        const fallT = big
+          ? easeInCubic(Math.min(1, t))
+          : easeInCubic(Math.min(1, t * 1.08));
+        fx.x += (Number(fx.driftX) || 0) * dt * driftMul;
+        fx.y = lerp(Number(fx.fromY) || 0, Number(fx.toY) || 0, fallT);
       } else if (fx.mode === 'rumble') {
         const riseT = easeInCubic(t);
         fx.x = lerp(Number(fx.fromX) || 0, Number(fx.toX) || Number(fx.fromX) || 0, riseT);
@@ -7329,7 +7328,6 @@ export class GameRenderer {
     const s = sideState || {};
     const unit = Math.max(1, Number(s.unitLevel) || 1);
     const hp = Math.max(1, Number(s.unitHpLevel) || 1);
-    const arrow = Math.max(1, Number(s.arrowLevel) || 1);
     const spawn = Math.max(1, Number(s.spawnLevel) || 1);
     const resource = Math.max(1, Number(s.resourceLevel) || 1);
     const power = Math.max(1, Number(s.powerLevel) || 1);
@@ -7343,7 +7341,7 @@ export class GameRenderer {
       return this.candleEveryForSide(s);
     }
     if (type === 'necro') return this.necroTrainingEvery(s, matchTimeSec);
-    if (type === 'gunner') return this.scaledSpecialEveryForUi(Math.max(14, 22 - Math.floor((unit + arrow + eco) / 6)), matchTimeSec);
+    if (type === 'gunner') return this.scaledSpecialEveryForUi(Math.max(14, 22 - Math.floor((unit + power + eco) / 6)), matchTimeSec);
     if (type === 'rider') return this.scaledSpecialEveryForUi(Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)), matchTimeSec);
     if (type === 'digger') return this.scaledSpecialEveryForUi(Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)), matchTimeSec);
     if (type === 'monk') return this.scaledSpecialEveryForUi(Math.max(20, 30 - Math.floor((hp + power + resource) / 7)), matchTimeSec);
@@ -7555,7 +7553,7 @@ export class GameRenderer {
     const levelOf = {
       militia: Math.max(1, Number(sideState?.unitLevel) || 1),
       necro: Math.max(1, Number(sideState?.unitLevel) || 1),
-      gunner: Math.max(1, Number(sideState?.arrowLevel) || 1),
+      gunner: Math.max(1, Number(sideState?.powerLevel) || 1),
       rider: Math.max(1, Number(sideState?.unitLevel) || 1),
       digger: Math.max(1, Number(sideState?.unitHpLevel) || 1),
       monk: Math.max(1, Number(sideState?.powerLevel) || 1),
@@ -7682,7 +7680,6 @@ export class GameRenderer {
     const s = sideState || {};
     const unit = this.barracksUpgradeLevel(s, 'unitLevel', 1);
     const hp = this.barracksUpgradeLevel(s, 'unitHpLevel', 1);
-    const arrow = this.barracksUpgradeLevel(s, 'arrowLevel', 1);
     const power = this.barracksUpgradeLevel(s, 'powerLevel', 1);
     const specialRate = this.barracksUpgradeLevel(s, 'specialRateLevel', 1);
     const balloon = this.barracksUpgradeLevel(s, 'balloonLevel', 0);
@@ -7734,7 +7731,7 @@ export class GameRenderer {
         break;
       case 'gunner':
         addBaseChip([
-          { type: 'arrowLevel', label: 'AR', value: arrow },
+          { type: 'powerLevel', label: 'PW', value: power },
           { type: 'unitLevel', label: 'AT', value: unit },
         ]);
         addGlyphChip('gunnerSkyCannonLevel', this.barracksUpgradeLevel(s, 'gunnerSkyCannonLevel', 0) > 0);

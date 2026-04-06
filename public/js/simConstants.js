@@ -8,13 +8,11 @@ export const CARD_Y = 90;
 export const CARD_W = 90;
 export const CARD_H = 44;
 export const UPGRADE_TYPES = [
-  'arrowLevel',
   'unitLevel',
   'volleyLevel',
   'spawnLevel',
   'unitHpLevel',
   'resourceLevel',
-  'bountyLevel',
   'powerLevel',
   'specialRateLevel',
   'balloonLevel',

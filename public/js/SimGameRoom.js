@@ -55,6 +55,14 @@ const RESOURCE_SPAWN_TELEGRAPH_DURATION = 1;
 const RESOURCE_VALUE_BASE = 22;
 const RESOURCE_VALUE_REFERENCE_WAIT_SECONDS = (RESOURCE_SPAWN_START_MIN_SECONDS + RESOURCE_SPAWN_START_MAX_SECONDS) * 0.5;
 const MINION_KILL_GOLD_BASE = 12;
+const ECONOMY_RESOURCE_GOLD_BONUS_PER_LEVEL = 0.11;
+const ECONOMY_COMBAT_GOLD_BONUS_PER_LEVEL = 0.1;
+const ECONOMY_ARROW_HIT_FLAT_GOLD_PER_LEVEL = 1;
+const NORMAL_MINION_HP_REFERENCE = 75 + 30;
+const ARROW_DAMAGE_MIN_UNIT_HP_FRACTION = 0.2;
+const ARROW_DAMAGE_BASE_UNIT_HP_FRACTION = 0.24;
+const ARROW_DAMAGE_PER_UPGRADE_FRACTION = 0.01;
+const ARROW_DAMAGE_MAX_UNIT_HP_FRACTION = 0.75;
 const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1.35;
 const ARROW_DAMAGE_GOLD_MAX_COMBO_MULT = 1.2;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
@@ -222,8 +230,8 @@ const HERO_ARROW_FINISHER_HITS = 9;
 const HERO_SWING_ATTACK_WINDOW = 0.34;
 const HERO_SWING_ATTACK_SPEED = 20;
 const HERO_SWING_IDLE_RETURN_SPEED = 9;
-const HERO_FOOD_RAIN_MIN_CD = 20;
-const HERO_FOOD_RAIN_MAX_CD = 120;
+const HERO_FOOD_RAIN_MIN_CD = 5;
+const HERO_FOOD_RAIN_MAX_CD = 30;
 const HERO_FOOD_RAIN_TARGET_DROPS = 20;
 const HERO_FOOD_RAIN_DROP_VARIANCE = 2;
 const HERO_FOOD_RAIN_MIN_DROPS = HERO_FOOD_RAIN_TARGET_DROPS - HERO_FOOD_RAIN_DROP_VARIANCE;
@@ -234,22 +242,24 @@ const HERO_FOOD_RAIN_BIG_DAMAGE_MULT = 2.4;
 const HERO_FOOD_RAIN_BIG_RADIUS_MULT = 1.35;
 const HERO_FOOD_RAIN_BREAD_KINDS = Object.freeze(['bun', 'loaf', 'baguette', 'bagel', 'toast', 'brioche']);
 const HERO_FOOD_RAIN_RICE_KINDS = Object.freeze(['mochi', 'onigiri', 'riceCake', 'riceBowl', 'sushiRoll', 'senbei']);
-const HERO_FOOD_RAIN_BIG_PROJECTILES = 10;
-const HERO_GROUND_RUMBLE_MIN_CD = 10;
-const HERO_GROUND_RUMBLE_MAX_CD = 30;
+const HERO_FOOD_RAIN_BIG_PROJECTILES = 8;
+const HERO_FOOD_RAIN_ENEMY_BASE_SAFE_RADIUS = 170;
+const HERO_GROUND_RUMBLE_MIN_CD = 2.5;
+const HERO_GROUND_RUMBLE_MAX_CD = 7.5;
 const HERO_GROUND_RUMBLE_MIN_BURSTS = 2;
 const HERO_GROUND_RUMBLE_MAX_BURSTS = 6;
 const HERO_GROUND_RUMBLE_RADIUS = 76;
 const HERO_GROUND_RUMBLE_DAMAGE_MULT = 1.4;
 const HERO_GROUND_RUMBLE_KNOCKBACK = 24;
-const HERO_COOKER_MIN_CD = 30;
-const HERO_COOKER_MAX_CD = 400;
+const HERO_COOKER_MIN_CD = 7.5;
+const HERO_COOKER_MAX_CD = 100;
 const HERO_COOKER_MAX_EAT = 10;
 const HERO_COOKER_EAT_RADIUS = 52;
 const HERO_COOKER_COOK_TIME = 10;
 const HERO_COOKER_MOVE_SPEED = 8;
 const HERO_COOKER_HEALTH_COST_FRACTION = 0.1;
-const HERO_ABILITY_MIN_GAP = 2;
+const HERO_ABILITY_MIN_GAP = 0.5;
+const HERO_GROUND_RUMBLE_PATH_PULSE_GAP_MULT = 2.05;
 const HERO_ABILITY_TEST_MIN_CD = 5;
 const HERO_ABILITY_TEST_MAX_CD = 10;
 const SHIELD_PUSH_INTERVAL = 5;
@@ -748,6 +758,8 @@ class GameRoom {
     this.resources = [];
     this.shotPowers = [];
     this.cannonBalls = [];
+    this.heroFoodRainImpacts = [];
+    this.heroRumblePulses = [];
     this.upgradeCards = [];
     this.sfxEvents = [];
     this.damageEvents = [];
@@ -1668,6 +1680,8 @@ class GameRoom {
     this.resources = [];
     this.shotPowers = [];
     this.cannonBalls = [];
+    this.heroFoodRainImpacts = [];
+    this.heroRumblePulses = [];
     this.upgradeCards = [];
     this.candles = { left: null, right: null };
     this.candleScorches = [];
@@ -1959,6 +1973,8 @@ class GameRoom {
     const preBuckets = this.buildDualMinionBuckets(ARROW_TARGET_BUCKET_W, MINION_TARGET_BUCKET_W);
     this.tickCannonBalls(dt, preBuckets.minion);
     this.tickArrows(dt, preBuckets.arrow);
+    this.tickHeroFoodRainImpacts(dt, preBuckets.minion, MINION_TARGET_BUCKET_W);
+    this.tickHeroRumblePulses(dt, preBuckets.minion, MINION_TARGET_BUCKET_W);
     this.tickMinions(dt, preBuckets.minion, preBuckets.carrierCounts);
     const candleBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const candleHolders = this.collectAllCandleHolders();
@@ -2075,6 +2091,129 @@ class GameRoom {
       write += 1;
     }
     this.cannonBalls.length = write;
+  }
+
+  queueHeroFoodRainImpact(entry) {
+    if (!entry || typeof entry !== 'object') return;
+    if (!Array.isArray(this.heroFoodRainImpacts)) this.heroFoodRainImpacts = [];
+    const sideName = entry.side === 'right' ? 'right' : 'left';
+    this.heroFoodRainImpacts.push({
+      side: sideName,
+      x: clamp(Number(entry.x) || 0, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38),
+      y: clamp(Number(entry.y) || 0, TOWER_Y - 180, TOWER_Y + 212),
+      r: Math.max(1, Number(entry.r) || HERO_FOOD_RAIN_RADIUS),
+      ttl: Math.max(0.05, Number(entry.ttl) || 0.9),
+      preStyleDamage: Math.max(0, Number(entry.preStyleDamage) || 0),
+      foodType: entry.foodType === 'rice' ? 'rice' : 'bread',
+      goldScalar: Math.max(0, Number(entry.goldScalar) || 0.8),
+    });
+  }
+
+  tickHeroFoodRainImpacts(dt, precomputedBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!Array.isArray(this.heroFoodRainImpacts) || this.heroFoodRainImpacts.length === 0) return;
+    const minionBuckets = precomputedBuckets || this.buildMinionBuckets(bucketW);
+    let write = 0;
+    for (let i = 0; i < this.heroFoodRainImpacts.length; i += 1) {
+      const impact = this.heroFoodRainImpacts[i];
+      if (!impact) continue;
+      impact.ttl = Math.max(0, (Number(impact.ttl) || 0) - dt);
+      if (impact.ttl > 0) {
+        this.heroFoodRainImpacts[write] = impact;
+        write += 1;
+        continue;
+      }
+
+      const sideName = impact.side === 'right' ? 'right' : 'left';
+      const x = Number.isFinite(impact.x) ? impact.x : 0;
+      const y = Number.isFinite(impact.y) ? impact.y : 0;
+      const radius = Math.max(1, Number(impact.r) || HERO_FOOD_RAIN_RADIUS);
+      const preStyleDamage = Math.max(0, Number(impact.preStyleDamage) || 0);
+      const goldScalar = Math.max(0, Number(impact.goldScalar) || 0.8);
+      const foodType = impact.foodType === 'rice' ? 'rice' : 'bread';
+
+      this.queueHitSfx('explosion', x, y, sideName);
+      this.queueHitSfx('foodburst', x, y, sideName, {
+        foodType,
+        heavy: true,
+      });
+
+      this.forEachEnemyMinionInRadius(
+        sideName,
+        x,
+        y,
+        radius,
+        minionBuckets,
+        bucketW,
+        (other) => {
+          if (!other || other.removed || other.side === sideName) return;
+          const styleMul = this.minionDamageMultiplier(null, other, 'explosion');
+          const damage = preStyleDamage * styleMul;
+          if (damage <= 0) return;
+          this.dealDamageToMinion(other, damage, sideName, 'unit');
+          if ((Number(other.hp) || 0) <= 0) this.killMinionByRef(other, sideName, { goldScalar });
+        }
+      );
+    }
+    this.heroFoodRainImpacts.length = write;
+  }
+
+  queueHeroRumblePulse(entry) {
+    if (!entry || typeof entry !== 'object') return;
+    if (!Array.isArray(this.heroRumblePulses)) this.heroRumblePulses = [];
+    const sideName = entry.side === 'right' ? 'right' : 'left';
+    this.heroRumblePulses.push({
+      side: sideName,
+      x: clamp(Number(entry.x) || 0, TOWER_X_LEFT + 24, TOWER_X_RIGHT - 24),
+      y: clamp(Number(entry.y) || 0, -180, WORLD_H + 40),
+      r: Math.max(1, Number(entry.r) || HERO_GROUND_RUMBLE_RADIUS),
+      ttl: Math.max(0.01, Number(entry.ttl) || 0.01),
+      preStyleDamage: Math.max(0, Number(entry.preStyleDamage) || 0),
+      foodType: entry.foodType === 'rice' ? 'rice' : 'bread',
+      goldScalar: Math.max(0, Number(entry.goldScalar) || 0.82),
+    });
+  }
+
+  tickHeroRumblePulses(dt, precomputedBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
+    if (!Array.isArray(this.heroRumblePulses) || this.heroRumblePulses.length === 0) return;
+    const minionBuckets = precomputedBuckets || this.buildMinionBuckets(bucketW);
+    let write = 0;
+    for (let i = 0; i < this.heroRumblePulses.length; i += 1) {
+      const pulse = this.heroRumblePulses[i];
+      if (!pulse) continue;
+      pulse.ttl = Math.max(0, (Number(pulse.ttl) || 0) - dt);
+      if (pulse.ttl > 0) {
+        this.heroRumblePulses[write] = pulse;
+        write += 1;
+        continue;
+      }
+
+      const sideName = pulse.side === 'right' ? 'right' : 'left';
+      const x = Number.isFinite(pulse.x) ? pulse.x : 0;
+      const y = Number.isFinite(pulse.y) ? pulse.y : 0;
+      const radius = Math.max(1, Number(pulse.r) || HERO_GROUND_RUMBLE_RADIUS);
+      const preStyleDamage = Math.max(0, Number(pulse.preStyleDamage) || 0);
+      const goldScalar = Math.max(0, Number(pulse.goldScalar) || 0.82);
+      const foodType = pulse.foodType === 'rice' ? 'rice' : 'bread';
+
+      this.queueHitSfx('foodburst', x, y, sideName, { foodType, heavy: true });
+      this.forEachEnemyMinionInRadius(
+        sideName,
+        x,
+        y,
+        radius,
+        minionBuckets,
+        bucketW,
+        (other) => {
+          if (!other || other.removed || other.side === sideName) return;
+          const styleMul = this.minionDamageMultiplier(null, other, 'explosion');
+          const damage = preStyleDamage * styleMul;
+          if (damage <= 0) return;
+          this.dealDamageToMinion(other, damage, sideName, 'unit');
+          if ((Number(other.hp) || 0) <= 0) this.killMinionByRef(other, sideName, { goldScalar });
+        }
+      );
+    }
+    this.heroRumblePulses.length = write;
   }
 
   candleSpawnX(sideName) {
@@ -4664,7 +4803,15 @@ class GameRoom {
   }
 
   statArrowDamage(side) {
-    return 20 + side.arrowLevel * 8;
+    const progress = Math.max(0, this.sideUpgradeScore(side));
+    const ratio = clamp(
+      ARROW_DAMAGE_BASE_UNIT_HP_FRACTION + progress * ARROW_DAMAGE_PER_UPGRADE_FRACTION,
+      ARROW_DAMAGE_MIN_UNIT_HP_FRACTION,
+      ARROW_DAMAGE_MAX_UNIT_HP_FRACTION
+    );
+    const minDamage = NORMAL_MINION_HP_REFERENCE * ARROW_DAMAGE_MIN_UNIT_HP_FRACTION;
+    const maxDamage = NORMAL_MINION_HP_REFERENCE * ARROW_DAMAGE_MAX_UNIT_HP_FRACTION;
+    return clamp(NORMAL_MINION_HP_REFERENCE * ratio, minDamage, maxDamage);
   }
 
   statArrowCount(side) {
@@ -5049,7 +5196,7 @@ class GameRoom {
   }
 
   statGunnerEvery(side) {
-    const tech = Math.floor((side.unitLevel + side.arrowLevel + side.economyLevel) / 6);
+    const tech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 6);
     const baseEvery = Math.max(14, 22 - tech);
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
@@ -6466,6 +6613,28 @@ class GameRoom {
     if (!Number.isFinite(hero.heroAbilityGapCd)) hero.heroAbilityGapCd = 0;
   }
 
+  heroFoodRainImpactX(sideName, minX, maxX) {
+    const left = Math.min(Number(minX) || 0, Number(maxX) || 0);
+    const right = Math.max(Number(minX) || 0, Number(maxX) || 0);
+    if (right <= left) return left;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const enemyTowerX = side === 'left' ? TOWER_X_RIGHT : TOWER_X_LEFT;
+    const safeRadius = Math.max(1, HERO_FOOD_RAIN_ENEMY_BASE_SAFE_RADIUS);
+    const safeMin = enemyTowerX - safeRadius;
+    const safeMax = enemyTowerX + safeRadius;
+
+    const leftEnd = Math.min(right, safeMin);
+    const rightStart = Math.max(left, safeMax);
+    const leftSpan = Math.max(0, leftEnd - left);
+    const rightSpan = Math.max(0, right - rightStart);
+    const totalSpan = leftSpan + rightSpan;
+
+    if (totalSpan <= 0) return left + Math.random() * (right - left);
+    const roll = Math.random() * totalSpan;
+    if (roll < leftSpan) return left + Math.random() * leftSpan;
+    return rightStart + Math.random() * rightSpan;
+  }
+
   triggerHeroFoodRain(hero, sideState, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!hero || !hero.hero || !sideState) return;
     const foodType = hero.side === 'right' ? 'rice' : 'bread';
@@ -6478,9 +6647,12 @@ class GameRoom {
     const dropOffset = Math.floor(Math.random() * (dropVariance * 2 + 1)) - dropVariance;
     const dropCount = Math.max(HERO_FOOD_RAIN_MIN_DROPS, Math.min(HERO_FOOD_RAIN_MAX_DROPS, baseDropCount + dropOffset));
     const dropRadius = Math.max(HERO_FOOD_RAIN_RADIUS, Number(hero.heroRainRadius) || HERO_FOOD_RAIN_RADIUS);
+    const rainDamageBaseRaw = (Number(hero.dmg) || 0)
+      * Math.max(HERO_FOOD_RAIN_DAMAGE_MULT, Number(hero.heroRainDamageMult) || HERO_FOOD_RAIN_DAMAGE_MULT);
+    const auraMulAtCast = this.presidentAuraMultiplier(hero);
     const baseDamage = this.minionOutgoingDamage(
       hero,
-      (Number(hero.dmg) || 0) * Math.max(HERO_FOOD_RAIN_DAMAGE_MULT, Number(hero.heroRainDamageMult) || HERO_FOOD_RAIN_DAMAGE_MULT)
+      rainDamageBaseRaw
     );
     const minX = TOWER_X_LEFT + 58;
     const maxX = TOWER_X_RIGHT - 58;
@@ -6491,25 +6663,48 @@ class GameRoom {
     while (bigDropIndices.size < bigQuota) bigDropIndices.add(Math.floor(Math.random() * dropCount));
 
     for (let i = 0; i < dropCount; i += 1) {
-      const impactX = minX + Math.random() * (maxX - minX);
+      const impactX = this.heroFoodRainImpactX(hero.side, minX, maxX);
       const impactY = TOWER_Y - 26 + (Math.random() * 156 - 58);
       const bigProjectile = bigDropIndices.has(i);
       const itemKind = bigProjectile
         ? bigKind
         : itemKinds[Math.floor(Math.random() * itemKinds.length)];
+      const fromY = bigProjectile ? (-220 - Math.random() * 120) : (18 + Math.random() * 46);
+      const duration = bigProjectile ? (1.22 + Math.random() * 0.42) : (0.34 + Math.random() * 0.36);
+      const size = bigProjectile ? (2.24 + Math.random() * 0.46) : (0.8 + Math.random() * 0.52);
       this.queueHitSfx('herofoodrain', impactX, impactY, hero.side, {
         foodType,
         kind: itemKind,
         bigProjectile,
         seed: Math.random() * 100000,
         // Big payloads start well above the visible world so they clearly fall in from off-screen.
-        fromY: bigProjectile ? (-220 - Math.random() * 120) : (18 + Math.random() * 46),
+        fromY,
         toY: impactY,
-        duration: bigProjectile ? (1.22 + Math.random() * 0.42) : (0.34 + Math.random() * 0.36),
-        size: bigProjectile ? (2.24 + Math.random() * 0.46) : (0.8 + Math.random() * 0.52),
+        duration,
+        size,
       });
-      this.queueHitSfx('foodburst', impactX, impactY, hero.side, { foodType, heavy: false });
       const impactRadius = bigProjectile ? (dropRadius * HERO_FOOD_RAIN_BIG_RADIUS_MULT) : dropRadius;
+      if (bigProjectile) {
+        const damageJitter = 1.12 + Math.random() * 0.58;
+        const preStyleDamage = rainDamageBaseRaw
+          * auraMulAtCast
+          * auraMulAtCast
+          * damageJitter
+          * HERO_FOOD_RAIN_BIG_DAMAGE_MULT;
+        this.queueHeroFoodRainImpact({
+          side: hero.side,
+          x: impactX,
+          y: impactY,
+          r: impactRadius,
+          ttl: duration,
+          preStyleDamage,
+          foodType,
+          goldScalar: 0.8,
+        });
+        continue;
+      }
+
+      this.queueHitSfx('foodburst', impactX, impactY, hero.side, { foodType, heavy: false });
       this.forEachEnemyMinionInRadius(
         hero.side,
         impactX,
@@ -6519,9 +6714,8 @@ class GameRoom {
         bucketW,
         (other) => {
           if (!other || other.removed || other.side === hero.side || other.id === hero.id) return;
-          const damageJitter = bigProjectile ? (1.12 + Math.random() * 0.58) : (0.95 + Math.random() * 0.4);
-          const damageMult = bigProjectile ? HERO_FOOD_RAIN_BIG_DAMAGE_MULT : 1;
-          this.dealMinionDamage(hero, other, baseDamage * damageJitter * damageMult, 'explosion');
+          const damageJitter = 0.95 + Math.random() * 0.4;
+          this.dealMinionDamage(hero, other, baseDamage * damageJitter, 'explosion');
           if ((Number(other.hp) || 0) <= 0) this.killMinionByRef(other, hero.side, { goldScalar: 0.8 });
         }
       );
@@ -6587,8 +6781,8 @@ class GameRoom {
         seed: Math.random() * 100000,
         fromY,
         toY: -38 - Math.random() * 102,
-        // Intentionally 2x slower than the prior rumble launch timing.
-        duration: (0.56 + Math.random() * 0.24) * 2,
+        // Half current speed (2x longer than current rumble launch timing).
+        duration: (0.56 + Math.random() * 0.24) * 4,
         size: 1.82 + Math.random() * 0.44,
       });
       this.queueHitSfx('foodburst', cx, cy, hero.side, { foodType, heavy: true });
@@ -6839,7 +7033,7 @@ class GameRoom {
         const cooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
         hero.heroCookerCd = cooker
           ? this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD)
-          : 6;
+          : 3;
         triggered = Boolean(cooker);
       }
       if (triggered) break;
@@ -7127,11 +7321,12 @@ class GameRoom {
     if (dmg <= 0 || !side) return 0;
     const maxHp = Math.max(1, Number(target?.maxHp) || 1);
     const hpRatio = clamp(dmg / maxHp, 0, 1);
-    const bountyLevel = Math.max(1, Number(side.bountyLevel) || 1);
-    const bountyBonus = 1 + (bountyLevel - 1) * 0.2;
+    const economyLevel = Math.max(1, Number(side.resourceLevel) || 1);
+    const combatBonus = 1 + (economyLevel - 1) * ECONOMY_COMBAT_GOLD_BONUS_PER_LEVEL;
     const comboBonus = this.hasMaxCombo(side) ? ARROW_DAMAGE_GOLD_MAX_COMBO_MULT : 1;
-    const fullUnitGold = MINION_KILL_GOLD_BASE * ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV * bountyBonus * comboBonus;
-    return hpRatio * fullUnitGold;
+    const fullUnitGold = MINION_KILL_GOLD_BASE * ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV * combatBonus * comboBonus;
+    const flatBonus = Math.max(0, economyLevel - 1) * ECONOMY_ARROW_HIT_FLAT_GOLD_PER_LEVEL;
+    return hpRatio * fullUnitGold + flatBonus;
   }
 
   maxCurrentResourceCoinValue() {
@@ -8012,7 +8207,7 @@ class GameRoom {
     }
 
     if (isGunner) {
-      const gunScale = 1 + (side.arrowLevel - 1) * 0.08;
+      const gunScale = 1 + (side.powerLevel - 1) * 0.08;
       hp *= 0.82;
       dmg *= 1.22 * gunScale;
       speed *= 0.94;
@@ -8294,8 +8489,8 @@ class GameRoom {
       executiveOrderHitsLeft: 0,
       executiveOrderHitsMax: PRESIDENT_EXECUTIVE_ORDER_HITS,
       executiveOrderBreakTtl: 0,
-      gunRange: isGunner ? 198 + side.arrowLevel * 10 + side.unitLevel * 6 : 0,
-      gunDragonMul: isGunner ? (1.95 + side.arrowLevel * 0.05) : 1,
+      gunRange: isGunner ? 198 + side.powerLevel * 10 + side.unitLevel * 6 : 0,
+      gunDragonMul: isGunner ? (1.95 + side.powerLevel * 0.05) : 1,
       gunFlashTtl: 0,
       gunnerSkyCannonCd: isGunner ? (GUNNER_SKY_CANNON_INTERVAL + Math.random() * GUNNER_SKY_CANNON_COOLDOWN_JITTER) : 0,
       gunnerFoodThrowCd: isGunner && (Number(side.gunnerSkyCannonLevel) || 0) >= GUNNER_FOOD_THROW_UNLOCK_LEVEL
@@ -8344,7 +8539,8 @@ class GameRoom {
 
   goldFromMinionKill(side, scalar = 1) {
     const base = MINION_KILL_GOLD_BASE * scalar;
-    const bonus = 1 + (side.bountyLevel - 1) * 0.2;
+    const level = Math.max(1, Number(side?.resourceLevel) || 1);
+    const bonus = 1 + (level - 1) * ECONOMY_COMBAT_GOLD_BONUS_PER_LEVEL;
     return Math.floor(base * bonus);
   }
 
@@ -8689,7 +8885,7 @@ class GameRoom {
   resourceValueForSide(sideName, waitSeconds = RESOURCE_SPAWN_START_MIN_SECONDS) {
     const side = sideName === 'right' ? this.right : this.left;
     const baseValue = this.resourceBaseValueForInterval(waitSeconds);
-    const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * 0.22;
+    const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * ECONOMY_RESOURCE_GOLD_BONUS_PER_LEVEL;
     return Math.max(1, Math.floor(baseValue * bonus));
   }
 
@@ -8999,7 +9195,7 @@ class GameRoom {
     }
 
     // For non-summon upgrades, accelerate the relevant cooldown so impact is immediate.
-    if (type === 'arrowLevel' || type === 'volleyLevel' || type === 'powerLevel') {
+    if (type === 'volleyLevel' || type === 'powerLevel') {
       this.sharedShotCd = Math.min(this.sharedShotCd, 0.16);
       this.left.shotCd = this.sharedShotCd;
       this.right.shotCd = this.sharedShotCd;
