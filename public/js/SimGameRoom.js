@@ -6733,9 +6733,12 @@ class GameRoom {
     );
     const rumbleRadius = Math.max(HERO_GROUND_RUMBLE_RADIUS, Number(hero.heroRumbleRadius) || HERO_GROUND_RUMBLE_RADIUS);
     const knockback = Math.max(HERO_GROUND_RUMBLE_KNOCKBACK, Number(hero.heroRumbleKnockback) || HERO_GROUND_RUMBLE_KNOCKBACK);
+    const rumbleDamageBaseRaw = (Number(hero.dmg) || 0)
+      * Math.max(HERO_GROUND_RUMBLE_DAMAGE_MULT, Number(hero.heroRumbleDamageMult) || HERO_GROUND_RUMBLE_DAMAGE_MULT);
+    const auraMulAtCast = this.presidentAuraMultiplier(hero);
     const baseDamage = this.minionOutgoingDamage(
       hero,
-      (Number(hero.dmg) || 0) * Math.max(HERO_GROUND_RUMBLE_DAMAGE_MULT, Number(hero.heroRumbleDamageMult) || HERO_GROUND_RUMBLE_DAMAGE_MULT)
+      rumbleDamageBaseRaw
     );
     const candidates = [];
     this.forEachEnemyMinionInRadius(
@@ -6775,14 +6778,16 @@ class GameRoom {
       const cx = Number(center.x) || 0;
       const cy = Number(center.y) || 0;
       const fromY = clamp(cy + 14 + Math.random() * 18, TOWER_Y - 24, GROUND_Y - 6);
+      const toY = -38 - Math.random() * 102;
+      const rumbleVisualDuration = (0.56 + Math.random() * 0.24) * 4;
       this.queueHitSfx('herorumble', cx, cy, hero.side, {
         foodType,
         kind: rumbleKind,
         seed: Math.random() * 100000,
         fromY,
-        toY: -38 - Math.random() * 102,
+        toY,
         // Half current speed (2x longer than current rumble launch timing).
-        duration: (0.56 + Math.random() * 0.24) * 4,
+        duration: rumbleVisualDuration,
         size: 1.82 + Math.random() * 0.44,
       });
       this.queueHitSfx('foodburst', cx, cy, hero.side, { foodType, heavy: true });
@@ -6811,6 +6816,30 @@ class GameRoom {
           );
         }
       );
+
+      // Add spaced AoE pulses along the upward path to hit airborne units in discrete circles.
+      // Gap is slightly above 2r so neighboring checks do not overlap.
+      const pathDistance = Math.max(0, Math.abs(toY - fromY));
+      const pulseGap = Math.max(1, rumbleRadius * HERO_GROUND_RUMBLE_PATH_PULSE_GAP_MULT);
+      for (let distAlong = pulseGap; distAlong < pathDistance; distAlong += pulseGap) {
+        const t = pathDistance <= 0 ? 0 : (distAlong / pathDistance);
+        const pulseY = lerp(fromY, toY, t);
+        const delay = rumbleVisualDuration * t;
+        const preStyleDamage = rumbleDamageBaseRaw
+          * auraMulAtCast
+          * auraMulAtCast
+          * (1.02 + Math.random() * 0.34);
+        this.queueHeroRumblePulse({
+          side: hero.side,
+          x: cx,
+          y: pulseY,
+          r: rumbleRadius,
+          ttl: delay,
+          preStyleDamage,
+          foodType,
+          goldScalar: 0.82,
+        });
+      }
     }
     this.queueHitSfx('explosion', hero.x, hero.y + hero.r * 0.1, hero.side);
   }
@@ -7033,7 +7062,7 @@ class GameRoom {
         const cooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
         hero.heroCookerCd = cooker
           ? this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD)
-          : 3;
+          : 1.5;
         triggered = Boolean(cooker);
       }
       if (triggered) break;
