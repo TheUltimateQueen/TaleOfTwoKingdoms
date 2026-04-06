@@ -46,6 +46,7 @@ const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
 const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
+const SHOT_POWER_FLARE_SPAWN_CHANCE_MULT = 0.25;
 const RESOURCE_SPAWN_START_MIN_SECONDS = 2;
 const RESOURCE_SPAWN_START_MAX_SECONDS = 10;
 const RESOURCE_SPAWN_END_MIN_SECONDS = 8;
@@ -8005,6 +8006,7 @@ class GameRoom {
     if (activePower === 'multiShot') {
       count += 2 + Math.floor(powerScale * 2);
       spread = 0.05;
+      dmgMul = 1.08 + powerScale * 0.08;
       powerType = 'multiShot';
     } else if (activePower === 'ultraShot') {
       dmgMul = 1.3 + powerScale * 0.3;
@@ -8013,6 +8015,7 @@ class GameRoom {
       ultraBonusGravity = Math.max(620, gravity - 150);
       powerType = 'ultraShot';
     } else if (activePower === 'pierceShot') {
+      dmgMul = 1.14 + powerScale * 0.16;
       pierce = 2 + Math.floor(powerScale * 2);
       speed += 50 + powerScale * 25;
       powerType = 'pierceShot';
@@ -8024,6 +8027,7 @@ class GameRoom {
       powerType = 'flameShot';
     } else if (activePower === 'flareShot') {
       // Main arrow marks a flare location on hit and calls in a sky cannon impact.
+      dmgMul = 1.16 + powerScale * 0.14;
       powerType = 'flareShot';
     }
     count = Math.min(29, count);
@@ -9021,7 +9025,9 @@ class GameRoom {
       : ((targetMultiChance * nonMultiCount) / Math.max(0.0001, 1 - targetMultiChance));
     const weightedTypes = SHOT_POWER_TYPES.map((type) => ({
       type,
-      weight: type === 'multiShot' ? multiWeight : 1,
+      weight: type === 'multiShot'
+        ? multiWeight
+        : (type === 'flareShot' ? SHOT_POWER_FLARE_SPAWN_CHANCE_MULT : 1),
     }));
     const picked = weightedRandomFrom(weightedTypes);
     const type = picked?.type || randomFrom(SHOT_POWER_TYPES);
