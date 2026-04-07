@@ -45,10 +45,10 @@ const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
 
 // Shot power drop frequency (seconds)
-const SHOT_POWER_SPAWN_MIN_INTERVAL = 1.8; // minimum spacing between spawns
-const SHOT_POWER_SPAWN_BASE_INTERVAL = 6.2; // starting slower than original 5.2
-const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
-const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
+const SHOT_POWER_SPAWN_MIN_INTERVAL = 10;
+const SHOT_POWER_SPAWN_MAX_INTERVAL = 50;
+const SHOT_POWER_POWER_UPGRADE_MIN_INTERVAL = 5;
+const SHOT_POWER_POWER_UPGRADE_MAX_INTERVAL = 10;
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
 const SHOT_POWER_FLARE_SPAWN_CHANCE_MULT = 0.25;
 const RESOURCE_SPAWN_START_MIN_SECONDS = 2;
@@ -844,7 +844,7 @@ class GameRoom {
     this.nextResourceTelegraphAt = 0;
     this.pendingResourceInterval = RESOURCE_SPAWN_START_MIN_SECONDS;
     this.pendingResourceSpawns = null;
-    this.nextShotPowerAt = 7;
+    this.nextShotPowerAt = 0;
     this.seq = 1;
     this.candles = {
       left: null,
@@ -868,7 +868,7 @@ class GameRoom {
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
     this.scheduleNextResourceSpawn(this.t);
-    this.nextShotPowerAt = this.t + 7 / Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
+    this.scheduleNextShotPower(this.t);
 
     this.seedUpgradeCards();
     this.resetMatchReport();
@@ -1508,6 +1508,7 @@ class GameRoom {
     const cannonBalls = this.cannonBalls.map((ball) => ({
       id: ball.id,
       side: ball.side,
+      isFlareStrike: Boolean(ball.isFlareStrike),
       x: roundTo(ball.x, 1),
       y: roundTo(ball.y, 1),
       r: roundTo(ball.r, 1),
@@ -1723,7 +1724,7 @@ class GameRoom {
     this.nextResourceTelegraphAt = 0;
     this.pendingResourceInterval = RESOURCE_SPAWN_START_MIN_SECONDS;
     this.pendingResourceSpawns = null;
-    this.nextShotPowerAt = 7;
+    this.nextShotPowerAt = 0;
     this.seq = 1;
     this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
     this.right.candleSpawnInSpawns = this.statCandleEvery(this.right);
@@ -1732,9 +1733,8 @@ class GameRoom {
     this.left.candleActive = false;
     this.right.candleActive = false;
     this.applyDebugConfigToRoom(false);
-    const powerMul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
     this.scheduleNextResourceSpawn(this.t);
-    this.nextShotPowerAt = this.t + 7 / powerMul;
+    this.scheduleNextShotPower(this.t);
     this.seedUpgradeCards();
     this.resetMatchReport();
     this.started = this.isReadyToStart();
@@ -1987,11 +1987,7 @@ class GameRoom {
 
     if (this.t >= this.nextShotPowerAt) {
       this.spawnMirroredShotPower();
-      const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
-      this.nextShotPowerAt = this.t + Math.max(
-        SHOT_POWER_SPAWN_MIN_INTERVAL,
-        Math.max(SHOT_POWER_SPAWN_BASE_INTERVAL, SHOT_POWER_SPAWN_DECAY_RANGE - this.t / SHOT_POWER_SPAWN_DECAY_DIVISOR) / mul
-      );
+      this.scheduleNextShotPower(this.t);
     }
 
     this.syncUpgradeCards('left');
@@ -3196,6 +3192,8 @@ class GameRoom {
       const candleSide = scorch.candleSide === 'right' ? 'right' : 'left';
       const enemyDps = Number.isFinite(scorch.enemyDps) ? Math.max(0, scorch.enemyDps) : CANDLE_SCORCH_DPS_ENEMY;
       const scorchSide = scorch.side === 'right' ? 'right' : (scorch.side === 'left' ? 'left' : null);
+      const scorchSourceType = scorch.sourceType === 'arrow' ? 'arrow' : 'unit';
+      const scorchSourceRef = scorchSourceType === 'arrow' ? (scorch.sourceRef || null) : null;
       this.forEachEnemyMinionInRadius(
         candleSide,
         scorch.x,
@@ -3204,7 +3202,7 @@ class GameRoom {
         minionBuckets,
         MINION_TARGET_BUCKET_W,
         (minion) => {
-          if (enemyDps > 0) this.dealDamageToMinion(minion, enemyDps * dt, scorchSide, 'unit');
+          if (enemyDps > 0) this.dealDamageToMinion(minion, enemyDps * dt, scorchSide, scorchSourceType, scorchSourceRef);
         }
       );
       if (scorch.towerSide === 'left' || scorch.towerSide === 'right') {
@@ -3335,7 +3333,7 @@ class GameRoom {
         this.markArrowMiss(a);
         if (a.powerType === 'flareShot' && a.mainArrow && !a.flareShotTriggered) {
           a.flareShotTriggered = true;
-          this.spawnFlareShotCannonBall(a.side, a.x, ARROW_STICK_GROUND_Y);
+          this.spawnFlareShotCannonBall(a.side, a.x, ARROW_STICK_GROUND_Y, a);
         }
         this.stickArrowInGround(a);
         continue;
@@ -3468,7 +3466,7 @@ class GameRoom {
           a.hitAnyUnit = true;
           if (a.powerType === 'flareShot' && a.mainArrow && !a.flareShotTriggered) {
             a.flareShotTriggered = true;
-            this.spawnFlareShotCannonBall(a.side, minion.x, minion.y);
+            this.spawnFlareShotCannonBall(a.side, minion.x, minion.y, a);
           }
           let damage = a.dmg;
           if (minion.digger) damage *= 0.76;
@@ -4833,14 +4831,22 @@ class GameRoom {
 
   statArrowDamage(side) {
     const progress = Math.max(0, this.sideUpgradeScore(side));
+    const sideName = this.sideNameFromStateRef(side);
+    const enemySide = sideName === 'left'
+      ? this.right
+      : (sideName === 'right' ? this.left : null);
+    const referenceHp = Math.max(
+      1,
+      enemySide ? this.statMinionHp(enemySide) : NORMAL_MINION_HP_REFERENCE
+    );
     const ratio = clamp(
       ARROW_DAMAGE_BASE_UNIT_HP_FRACTION + progress * ARROW_DAMAGE_PER_UPGRADE_FRACTION,
       ARROW_DAMAGE_MIN_UNIT_HP_FRACTION,
       ARROW_DAMAGE_MAX_UNIT_HP_FRACTION
     );
-    const minDamage = NORMAL_MINION_HP_REFERENCE * ARROW_DAMAGE_MIN_UNIT_HP_FRACTION;
-    const maxDamage = NORMAL_MINION_HP_REFERENCE * ARROW_DAMAGE_MAX_UNIT_HP_FRACTION;
-    return clamp(NORMAL_MINION_HP_REFERENCE * ratio, minDamage, maxDamage);
+    const minDamage = referenceHp * ARROW_DAMAGE_MIN_UNIT_HP_FRACTION;
+    const maxDamage = referenceHp * ARROW_DAMAGE_MAX_UNIT_HP_FRACTION;
+    return clamp(referenceHp * ratio, minDamage, maxDamage);
   }
 
   statArrowCount(side) {
@@ -4939,6 +4945,8 @@ class GameRoom {
         smokeShieldYOffset: 0,
         side: arrow.side,
         candleSide: arrow.side,
+        sourceType: 'arrow',
+        sourceRef: arrow,
         allyDps: 0,
         enemyDps: FLAME_SHOT_SCORCH_ENEMY_DPS,
         towerSide: null,
@@ -5892,6 +5900,7 @@ class GameRoom {
       id: this.seq++,
       side: sideName,
       phase: 'flare',
+      isFlareStrike: false,
       x: muzzleX + dir * 2,
       y: muzzleY - 2,
       r: 13 + (gunner.super ? 1.5 : 0),
@@ -5922,7 +5931,7 @@ class GameRoom {
     }
   }
 
-  spawnFlareShotCannonBall(sideName, x, y) {
+  spawnFlareShotCannonBall(sideName, x, y, sourceArrowRef = null) {
     const side = sideName === 'right' ? this.right : this.left;
     if (!side) return;
     const targetX = clamp(Number(x) || 0, TOWER_X_LEFT + 38, TOWER_X_RIGHT - 38);
@@ -5935,6 +5944,8 @@ class GameRoom {
       id: this.seq++,
       side: sideName,
       phase: 'mark',
+      isFlareStrike: true,
+      arrowSourceRef: sourceArrowRef && typeof sourceArrowRef === 'object' ? sourceArrowRef : null,
       x: targetX,
       y: targetY,
       r: 14,
@@ -5981,7 +5992,9 @@ class GameRoom {
         'gunshot'
       );
       const damage = baseDamage * styleMul * GUNNER_SKY_CANNON_MINION_DAMAGE_MULT * (0.66 + t * 0.44);
-      this.dealDamageToMinion(victim, damage, sideName, 'unit');
+      const sourceType = ball.isFlareStrike ? 'arrow' : 'unit';
+      const sourceRef = ball.isFlareStrike ? (ball.arrowSourceRef || null) : null;
+      this.dealDamageToMinion(victim, damage, sideName, sourceType, sourceRef);
       victim.hitFlashTtl = Math.max(Number(victim.hitFlashTtl) || 0, MINION_HIT_FLASH_TTL);
       if (victim.hp <= 0) this.killMinionByRef(victim, sideName, { goldScalar: 0.88 });
     }
@@ -9103,6 +9116,32 @@ class GameRoom {
     return Math.max(0.2, roll / mul);
   }
 
+  shotPowerSpawnInterval(minSeconds = SHOT_POWER_SPAWN_MIN_INTERVAL, maxSeconds = SHOT_POWER_SPAWN_MAX_INTERVAL) {
+    const minBase = Math.max(0.2, Number(minSeconds) || SHOT_POWER_SPAWN_MIN_INTERVAL);
+    const maxBase = Math.max(minBase, Number(maxSeconds) || SHOT_POWER_SPAWN_MAX_INTERVAL);
+    const roll = minBase + Math.random() * Math.max(0, maxBase - minBase);
+    const mul = Math.max(DEBUG_RATE_MIN, Number(this.debugPowerDropRateMultiplier) || 1);
+    return Math.max(0.2, roll / mul);
+  }
+
+  scheduleNextShotPower(
+    fromTime = this.t,
+    minSeconds = SHOT_POWER_SPAWN_MIN_INTERVAL,
+    maxSeconds = SHOT_POWER_SPAWN_MAX_INTERVAL,
+    options = null
+  ) {
+    const now = Math.max(0, Number(fromTime) || 0);
+    const delay = this.shotPowerSpawnInterval(minSeconds, maxSeconds);
+    const targetAt = now + delay;
+    if (options?.preferEarlier) {
+      const existing = Number(this.nextShotPowerAt);
+      this.nextShotPowerAt = Number.isFinite(existing) ? Math.min(existing, targetAt) : targetAt;
+      return this.nextShotPowerAt;
+    }
+    this.nextShotPowerAt = targetAt;
+    return targetAt;
+  }
+
   scheduleNextResourceSpawn(fromTime = this.t) {
     const now = Math.max(0, Number(fromTime) || 0);
     const delay = this.resourceSpawnInterval(now);
@@ -9399,6 +9438,13 @@ class GameRoom {
       this.sharedShotCd = Math.min(this.sharedShotCd, 0.16);
       this.left.shotCd = this.sharedShotCd;
       this.right.shotCd = this.sharedShotCd;
+      if (type === 'powerLevel') {
+        this.scheduleNextShotPower(
+          this.t,
+          SHOT_POWER_POWER_UPGRADE_MIN_INTERVAL,
+          SHOT_POWER_POWER_UPGRADE_MAX_INTERVAL
+        );
+      }
     } else {
       side.minionCd = Math.min(side.minionCd, 0.16);
     }

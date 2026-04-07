@@ -9826,6 +9826,7 @@ export class GameRenderer {
     const sideName = ball.side === 'right' ? 'right' : 'left';
     const tint = sideName === 'left' ? '#87baff' : '#ff9f9f';
     const phase = typeof ball.phase === 'string' ? ball.phase : 'fall';
+    const isFlareStrike = Boolean(ball.isFlareStrike);
     const flareX = Number.isFinite(Number(ball.impactX)) ? Number(ball.impactX) : x;
     const flareY = Number.isFinite(Number(ball.impactY)) ? Number(ball.impactY) : y;
     const pulseT = performance.now() * 0.001 + (Number(ball.id) || 0) * 0.27;
@@ -9926,6 +9927,80 @@ export class GameRenderer {
       ctx.beginPath();
       ctx.arc(flareX + Math.sin(pulseT * 7) * 1.2, flareY - 5.8, 1.8 + pulse * 0.9, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    if (isFlareStrike) {
+      const vx = Number(ball.vx) || 0;
+      const vy = Number(ball.vy) || 1;
+      const ang = Math.atan2(vy, vx || 0.0001);
+      const nx = Math.cos(ang);
+      const ny = Math.sin(ang);
+      const len = Math.max(34, r * 4.4);
+      const shaftW = Math.max(2.8, r * 0.34);
+      const trailLen = len * 2.4;
+
+      ctx.save();
+      const trail = ctx.createLinearGradient(x, y, x - nx * trailLen, y - ny * trailLen);
+      trail.addColorStop(0, '#fff6e2');
+      trail.addColorStop(0.42, '#ffc36eb8');
+      trail.addColorStop(1, '#ff9c5c00');
+      ctx.strokeStyle = trail;
+      ctx.lineWidth = Math.max(2.6, r * 0.36);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - nx * trailLen, y - ny * trailLen);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
+      const glow = ctx.createRadialGradient(x, y, 2, x, y, len * 0.95);
+      glow.addColorStop(0, '#fff7deaa');
+      glow.addColorStop(0.5, '#ffbd7066');
+      glow.addColorStop(1, '#ff9a5f00');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, len * 0.95, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+
+      ctx.strokeStyle = '#f5dfc0';
+      ctx.lineWidth = shaftW;
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.52, 0);
+      ctx.lineTo(len * 0.42, 0);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#fff5e6';
+      ctx.lineWidth = Math.max(1.1, shaftW * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.48, 0);
+      ctx.lineTo(len * 0.34, 0);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffbf74';
+      ctx.beginPath();
+      ctx.moveTo(len * 0.55, 0);
+      ctx.lineTo(len * 0.3, -Math.max(5.5, r * 0.62));
+      ctx.lineTo(len * 0.3, Math.max(5.5, r * 0.62));
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#8a5f39';
+      ctx.fillRect(-len * 0.52, -1.3, len * 0.1, 2.6);
+
+      ctx.fillStyle = '#ffdca9';
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.58, 0);
+      ctx.lineTo(-len * 0.34, -Math.max(4.4, r * 0.46));
+      ctx.lineTo(-len * 0.38, 0);
+      ctx.lineTo(-len * 0.34, Math.max(4.4, r * 0.46));
+      ctx.closePath();
+      ctx.fill();
+
       ctx.restore();
       return;
     }
