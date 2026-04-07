@@ -47,6 +47,13 @@ const SHOT_POWER_SPAWN_DECAY_RANGE = 10.2; // original 8.8
 const SHOT_POWER_SPAWN_DECAY_DIVISOR = 260; // same pacing factor
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
 const SHOT_POWER_FLARE_SPAWN_CHANCE_MULT = 0.25;
+const SPAWN_EVERY_MIN_SECONDS = 0.65;
+const SPAWN_EVERY_BASE_SECONDS = 2.2;
+const SPAWN_EVERY_PER_LEVEL_REDUCTION = 0.09;
+const SPAWN_LEVEL_EFFECTIVE_CAP = Math.max(
+  1,
+  Math.ceil((SPAWN_EVERY_BASE_SECONDS - SPAWN_EVERY_MIN_SECONDS) / SPAWN_EVERY_PER_LEVEL_REDUCTION)
+);
 const RESOURCE_SPAWN_START_MIN_SECONDS = 2;
 const RESOURCE_SPAWN_START_MAX_SECONDS = 10;
 const RESOURCE_SPAWN_END_MIN_SECONDS = 8;
@@ -121,6 +128,7 @@ const UPGRADE_PATH_BY_TYPE = {
 };
 const UPGRADE_LEVEL_CAPS = {
   volleyLevel: 2,
+  spawnLevel: SPAWN_LEVEL_EFFECTIVE_CAP,
   balloonLevel: 4,
   dragonSuperBreathLevel: 1,
 };
@@ -5183,7 +5191,10 @@ class GameRoom {
 
   baseSpawnEveryForLevel(spawnLevel) {
     const level = Math.max(1, Number(spawnLevel) || 1);
-    return Math.max(0.65, 2.2 - level * 0.09);
+    return Math.max(
+      SPAWN_EVERY_MIN_SECONDS,
+      SPAWN_EVERY_BASE_SECONDS - level * SPAWN_EVERY_PER_LEVEL_REDUCTION
+    );
   }
 
   statSpawnEvery(side) {
