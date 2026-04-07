@@ -29,3 +29,20 @@ export const UPGRADE_TYPES = [
   'superMinionLevel',
 ];
 export const SHOT_POWER_TYPES = ['multiShot', 'ultraShot', 'pierceShot', 'flameShot', 'flareShot'];
+
+// Spawn cadence tuning shared by sim + renderer-facing cap displays.
+export const SPAWN_EVERY_MIN_SECONDS = 0.65;
+export const SPAWN_EVERY_BASE_SECONDS = 2.2;
+export const SPAWN_EVERY_PER_LEVEL_REDUCTION = 0.09;
+export const SPAWN_LEVEL_EFFECTIVE_CAP = Math.max(
+  1,
+  Math.ceil((SPAWN_EVERY_BASE_SECONDS - SPAWN_EVERY_MIN_SECONDS) / SPAWN_EVERY_PER_LEVEL_REDUCTION)
+);
+
+// Central place for level caps so "final upgrade" UI and sim card eligibility stay aligned.
+export const UPGRADE_LEVEL_CAPS = Object.freeze({
+  volleyLevel: 2,
+  spawnLevel: SPAWN_LEVEL_EFFECTIVE_CAP,
+  balloonLevel: 4,
+  dragonSuperBreathLevel: 1,
+});

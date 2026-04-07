@@ -19,6 +19,7 @@ import {
   unitLabel,
 } from './themeConfig.js';
 import { SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE } from './specialUnitUpgradeConfig.js';
+import { UPGRADE_LEVEL_CAPS } from './simConstants.js';
 
 function sideCardSlotX(sideName, slot) {
   const leftRegular = [220, 320];
@@ -57,6 +58,12 @@ function arrowAccuracy(sideState) {
   const hits = Math.max(0, sideState?.arrowHits || 0);
   const rate = fired ? Math.round((hits / fired) * 100) : 0;
   return { fired, hits, rate };
+}
+
+function upgradeLevelCap(type) {
+  const raw = Number(UPGRADE_LEVEL_CAPS?.[type]);
+  if (!Number.isFinite(raw)) return null;
+  return Math.max(0, Math.floor(raw));
 }
 
 const UPGRADE_BADGE_SPECS = [
@@ -9637,13 +9644,34 @@ export class GameRenderer {
     const category = upgradeCategory(card.type);
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
     const textX = card.x + 10;
+    const cardLevel = Math.max(0, Number(sideState?.[card.type]) || 0);
+    const capLevel = upgradeLevelCap(card.type);
+    const isFinalCapUpgrade = Number.isFinite(capLevel) && capLevel > 0 && (cardLevel + 1 >= capLevel);
     ctx.fillStyle = style.panel;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
     ctx.fillStyle = style.glow;
     ctx.fillRect(card.x - card.w / 2 + 1, card.y - card.h / 2 + 1, card.w - 2, card.h - 2);
-    ctx.strokeStyle = style.border;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = isFinalCapUpgrade ? '#f6ce62' : style.border;
+    ctx.lineWidth = isFinalCapUpgrade ? 2.4 : 2;
     ctx.strokeRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
+    if (isFinalCapUpgrade) {
+      ctx.strokeStyle = '#fff1b4';
+      ctx.lineWidth = 1.05;
+      ctx.strokeRect(card.x - card.w / 2 + 2.2, card.y - card.h / 2 + 2.2, card.w - 4.4, card.h - 4.4);
+      const badgeW = 24;
+      const badgeH = 10;
+      const badgeX = card.x + card.w / 2 - badgeW - 4;
+      const badgeY = card.y - card.h / 2 + 3;
+      ctx.fillStyle = '#4a340aeb';
+      ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+      ctx.strokeStyle = '#ffd77b';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(badgeX + 0.5, badgeY + 0.5, badgeW - 1, badgeH - 1);
+      ctx.fillStyle = '#fff0bf';
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('CAP', badgeX + badgeW / 2, badgeY + 7.2);
+    }
 
     const iconX = card.x - card.w / 2 + 11;
     const iconY = card.y - card.h / 2 + 10.5;
@@ -9667,7 +9695,6 @@ export class GameRenderer {
 
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
-    const cardLevel = Math.max(0, Number(sideState?.[card.type]) || 0);
     const titleText = this.fitUpgradeCardText(
       upgradeLabelForLevel(card.type, cardLevel),
       Math.max(20, card.w - 22),
