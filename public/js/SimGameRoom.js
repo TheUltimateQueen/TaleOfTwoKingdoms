@@ -33,7 +33,7 @@ import {
 } from './themeConfig.js';
 import {
   REPEAT_SPECIAL_UPGRADE_CONFIG,
-  REPEAT_SPECIAL_UPGRADE_TYPES,
+  SPECIAL_BUCKET_UPGRADE_TYPES,
   SPECIAL_UNIT_UPGRADE_RULES,
 } from './specialUnitUpgradeConfig.js';
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
@@ -69,21 +69,26 @@ const ARROW_DAMAGE_GOLD_MAX_COMBO_MULT = 1.2;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
 const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 5;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
+const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
+const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
+const FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES = Object.freeze([
+  'stoneGolemAncientCoreLevel',
+  'heroDestinedChampionLevel',
+]);
 
 const TOWER_MAX_HP = 6000;
 const UPGRADE_COST_RULES = {
-  arrowLevel: { base: 130, growth: 18, start: 1 },
   unitLevel: { base: 138, growth: 18, start: 1 },
   volleyLevel: { base: 190, growth: 24, start: 0 },
   spawnLevel: { base: 150, growth: 16, start: 1 },
   unitHpLevel: { base: 138, growth: 16, start: 1 },
   resourceLevel: { base: 122, growth: 14, start: 1 },
-  bountyLevel: { base: 118, growth: 14, start: 1 },
   powerLevel: { base: 164, growth: 20, start: 1 },
-  specialRateLevel: { base: 182, growth: 22, start: 1 },
   balloonLevel: { base: 252, growth: 28, start: 0 },
   dragonLevel: { base: 236, growth: 26, start: 0 },
   dragonSuperBreathLevel: { base: 328, growth: 0, start: 0 },
+  stoneGolemAncientCoreLevel: { base: 392, growth: 34, start: 0 },
+  heroDestinedChampionLevel: { base: 408, growth: 36, start: 0 },
   shieldDarkMetalLevel: { base: 304, growth: 22, start: 0 },
   monkHealCircleLevel: { base: 286, growth: 18, start: 0 },
   necroExpertSummonerLevel: { base: 274, growth: 18, start: 0 },
@@ -94,18 +99,17 @@ const UPGRADE_COST_RULES = {
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
 const UPGRADE_PATH_BY_TYPE = {
-  arrowLevel: 'arrow',
   volleyLevel: 'arrow',
   unitLevel: 'unit',
   unitHpLevel: 'unit',
   spawnLevel: 'unit',
   resourceLevel: 'economy',
-  bountyLevel: 'economy',
   powerLevel: 'power',
-  specialRateLevel: 'special',
   balloonLevel: 'special',
   dragonLevel: 'special',
   dragonSuperBreathLevel: 'special',
+  stoneGolemAncientCoreLevel: 'special',
+  heroDestinedChampionLevel: 'special',
   shieldDarkMetalLevel: 'special',
   monkHealCircleLevel: 'special',
   necroExpertSummonerLevel: 'special',
@@ -163,7 +167,6 @@ const PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL = 0.55;
 const PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT = 0.1;
 const PRESIDENT_EXECUTIVE_ORDER_HITS = 1;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
-const NECRO_SPECIAL_RATE_BONUS_SCALE = 1 / 3;
 const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
 const NECRO_BASE_EVERY = 12;
 const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
@@ -404,6 +407,13 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+function lerp(from, to, t) {
+  const a = Number(from) || 0;
+  const b = Number(to) || 0;
+  const p = Math.max(0, Math.min(1, Number(t) || 0));
+  return a + (b - a) * p;
+}
+
 function dist2(a, b) {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -556,16 +566,15 @@ function serializeSideState(side) {
     nextEcoCost: Math.max(0, Math.round(Number(state.nextEcoCost) || 0)),
     unitLevel: Math.max(0, Math.round(Number(state.unitLevel) || 0)),
     unitHpLevel: Math.max(0, Math.round(Number(state.unitHpLevel) || 0)),
-    arrowLevel: Math.max(0, Math.round(Number(state.arrowLevel) || 0)),
     volleyLevel: Math.max(0, Math.round(Number(state.volleyLevel) || 0)),
     spawnLevel: Math.max(0, Math.round(Number(state.spawnLevel) || 0)),
     resourceLevel: Math.max(0, Math.round(Number(state.resourceLevel) || 0)),
-    bountyLevel: Math.max(0, Math.round(Number(state.bountyLevel) || 0)),
     powerLevel: Math.max(0, Math.round(Number(state.powerLevel) || 0)),
-    specialRateLevel: Math.max(0, Math.round(Number(state.specialRateLevel) || 0)),
     balloonLevel: Math.max(0, Math.round(Number(state.balloonLevel) || 0)),
     dragonLevel: Math.max(0, Math.round(Number(state.dragonLevel) || 0)),
     dragonSuperBreathLevel: Math.max(0, Math.round(Number(state.dragonSuperBreathLevel) || 0)),
+    stoneGolemAncientCoreLevel: Math.max(0, Math.round(Number(state.stoneGolemAncientCoreLevel) || 0)),
+    heroDestinedChampionLevel: Math.max(0, Math.round(Number(state.heroDestinedChampionLevel) || 0)),
     shieldDarkMetalLevel: Math.max(0, Math.round(Number(state.shieldDarkMetalLevel) || 0)),
     monkHealCircleLevel: Math.max(0, Math.round(Number(state.monkHealCircleLevel) || 0)),
     necroExpertSummonerLevel: Math.max(0, Math.round(Number(state.necroExpertSummonerLevel) || 0)),
@@ -684,16 +693,15 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     nextEcoCost: 120,
     unitLevel: 1,
     unitHpLevel: 1,
-    arrowLevel: 1,
     volleyLevel: 0,
     spawnLevel: 1,
     resourceLevel: 1,
-    bountyLevel: 1,
     powerLevel: 1,
-    specialRateLevel: 1,
     balloonLevel: 0,
     dragonLevel: 0,
     dragonSuperBreathLevel: 0,
+    stoneGolemAncientCoreLevel: 0,
+    heroDestinedChampionLevel: 0,
     shieldDarkMetalLevel: 0,
     monkHealCircleLevel: 0,
     necroExpertSummonerLevel: 0,
@@ -2256,7 +2264,7 @@ class GameRoom {
   }
 
   statCandleSpawnChance(side) {
-    const bonus = this.statSpecialRateBonus(side) + clamp(Number(side?.debugCandleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
+    const bonus = clamp(Number(side?.debugCandleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
     return clamp(CANDLE_SPAWN_BASE_CHANCE + bonus, CANDLE_SPAWN_BASE_CHANCE, 0.92);
   }
 
@@ -5287,11 +5295,6 @@ class GameRoom {
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
-  statSpecialRateBonus(side) {
-    const level = Math.max(1, Number(side?.specialRateLevel) || 1);
-    return Math.min(0.24, (level - 1) * 0.03);
-  }
-
   specialRepeatLevel(side, specialType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     if (!rule?.upgradeType) return 0;
@@ -5426,12 +5429,8 @@ class GameRoom {
       ? overrideBase
       : specialSpawnBaseChanceForType(type);
     if (!Number.isFinite(base)) return 0;
-    const specialRateBonus = this.statSpecialRateBonus(side);
-    const tunedSpecialBonus = type === 'necrominion'
-      ? specialRateBonus * NECRO_SPECIAL_RATE_BONUS_SCALE
-      : specialRateBonus;
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
-    let chance = base + tunedSpecialBonus;
+    let chance = base;
     chance += this.specialRepeatSpawnChanceBonus(side, type);
     if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     return clamp(chance, 0, 0.99);
@@ -8780,6 +8779,8 @@ class GameRoom {
     const types = [
       'dragonLevel',
       'dragonSuperBreathLevel',
+      'stoneGolemAncientCoreLevel',
+      'heroDestinedChampionLevel',
       'shieldDarkMetalLevel',
       'monkHealCircleLevel',
       'necroExpertSummonerLevel',
@@ -8799,7 +8800,7 @@ class GameRoom {
   countUnlockedRepeatSpecialUnits(side) {
     let count = 0;
     for (const rule of Object.values(SPECIAL_UNIT_UPGRADE_RULES)) {
-      if (!rule?.hasInitialUnlock || !rule?.upgradeType) continue;
+      if (!rule?.hasInitialUnlock || !rule?.repeatEligible || !rule?.upgradeType) continue;
       if ((Number(side?.[rule.upgradeType]) || 0) > 0) count += 1;
     }
     return count;
@@ -8813,16 +8814,22 @@ class GameRoom {
       return specialCount >= 3;
     }
     if (type === 'dragonSuperBreathLevel') return (Number(side?.dragonLevel) || 0) > 0;
+    if (type === 'stoneGolemAncientCoreLevel') {
+      return (Number(side?.stoneGolemAncientCoreLevel) || 0) > 0 || this.stoneGolemSpawnUnlocked(side);
+    }
+    if (type === 'heroDestinedChampionLevel') {
+      return (Number(side?.heroDestinedChampionLevel) || 0) > 0 || Boolean(side?.towerDamagedOnce);
+    }
     return true;
   }
 
   isRepeatSpecialUpgradeType(type) {
-    return REPEAT_SPECIAL_UPGRADE_TYPES.includes(type);
+    return SPECIAL_BUCKET_UPGRADE_TYPES.includes(type);
   }
 
   isRegularUpgradeCardEligible(side, type) {
     if (!this.isUpgradeUnlocked(side, type)) return false;
-    if (this.isRepeatSpecialUpgradeType(type) && (Number(side?.[type]) || 0) > 0) return false;
+    if (this.isRepeatSpecialUpgradeType(type)) return false;
     if (this.isUpgradeCapped(side, type)) return false;
     return true;
   }
@@ -8841,6 +8848,22 @@ class GameRoom {
       && (Number(side?.[rule.upgradeType]) || 0) > 0
       && !this.isUpgradeCapped(side, rule.upgradeType)
     ));
+  }
+
+  specialBucketEligibleRules(side, excludedTypes = new Set()) {
+    const repeatUnlocked = this.isRepeatSpecialBucketUnlocked(side);
+    return Object.values(SPECIAL_UNIT_UPGRADE_RULES).filter((rule) => {
+      if (!rule?.hasInitialUnlock) return false;
+      if (typeof rule?.upgradeType !== 'string' || !rule.upgradeType) return false;
+      if (excludedTypes.has(rule.upgradeType)) return false;
+      if (!this.isUpgradeUnlocked(side, rule.upgradeType)) return false;
+      if (this.isUpgradeCapped(side, rule.upgradeType)) return false;
+      const level = Number(side?.[rule.upgradeType]) || 0;
+      if (level <= 0) return true;
+      if (!rule.repeatEligible) return false;
+      if (FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(rule.upgradeType)) return true;
+      return repeatUnlocked;
+    });
   }
 
   repeatSpecialExpectedSpawnSeconds(side, rule) {
@@ -8941,10 +8964,45 @@ class GameRoom {
     };
   }
 
+  fixedRareSpecialUpgradeCardChance(side, type) {
+    if (!FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(type)) return null;
+    const level = Math.max(0, Number(side?.[type]) || 0);
+    return level > 0
+      ? RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED
+      : RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED;
+  }
+
+  applyFixedRareSpecialUpgradeCardChances(side, candidates = []) {
+    if (!Array.isArray(candidates) || !candidates.length) return;
+    const targets = [];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate.type !== 'string') continue;
+      const p = this.fixedRareSpecialUpgradeCardChance(side, candidate.type);
+      if (!(Number.isFinite(p) && p > 0)) continue;
+      targets.push({ candidate, p });
+    }
+    if (!targets.length) return;
+    const targetP = targets.reduce((sum, entry) => sum + entry.p, 0);
+    if (!(targetP > 0 && targetP < 0.9)) return;
+    let otherWeight = 0;
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const p = this.fixedRareSpecialUpgradeCardChance(side, candidate.type);
+      if (Number.isFinite(p) && p > 0) continue;
+      otherWeight += Math.max(0, Number(candidate.weight) || 0);
+    }
+    if (!(otherWeight > 0)) return;
+    const denom = Math.max(0.0001, 1 - targetP);
+    for (const entry of targets) {
+      entry.candidate.weight = Math.max(0.0001, otherWeight * (entry.p / denom));
+    }
+  }
+
   buildUpgradeCardCandidates(side, excludedTypes = new Set()) {
     const candidates = [];
     const regularWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.regularUpgradeWeight) || 0);
     for (const type of UPGRADE_TYPES) {
+      if (this.isRepeatSpecialUpgradeType(type)) continue;
       if (excludedTypes.has(type)) continue;
       if (!this.isRegularUpgradeCardEligible(side, type)) continue;
       candidates.push({
@@ -8956,12 +9014,14 @@ class GameRoom {
     }
 
     const repeatRules = this.repeatSpecialEligibleRules(side, excludedTypes);
-    if (repeatRules.length) {
+    const specialRules = this.specialBucketEligibleRules(side, excludedTypes);
+    if (specialRules.length) {
       const bucketWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.bucketWeight) || 0);
-      const weightedRules = repeatRules.map((rule) => {
+      const weightedRules = specialRules.map((rule) => {
         const base = Math.max(0.05, Number(rule.baseOfferWeight) || 1);
-        const dynamic = this.repeatSpecialDynamicFactor(side, rule, repeatRules);
-        const leaderPenalty = this.repeatSpecialLeaderPenalty(side, rule, repeatRules);
+        const level = Number(side?.[rule.upgradeType]) || 0;
+        const dynamic = level > 0 ? this.repeatSpecialDynamicFactor(side, rule, repeatRules) : 1;
+        const leaderPenalty = level > 0 ? this.repeatSpecialLeaderPenalty(side, rule, repeatRules) : 1;
         return {
           rule,
           rawWeight: Math.max(0.0001, base * dynamic * leaderPenalty),
@@ -8980,6 +9040,7 @@ class GameRoom {
       }
     }
 
+    this.applyFixedRareSpecialUpgradeCardChances(side, candidates);
     return candidates;
   }
 
@@ -9235,6 +9296,20 @@ class GameRoom {
     if (type === 'dragonSuperBreathLevel') {
       this.spawnMinion(sideName, { forceType: 'dragon', countSpawn: false });
       this.queueHitSfx('dragonfire', towerX + dir * 34, towerY - 14, sideName);
+      return;
+    }
+
+    if (type === 'stoneGolemAncientCoreLevel') {
+      this.spawnMinion(sideName, { forceType: 'stonegolem', countSpawn: false });
+      this.queueHitSfx('explosion', towerX + dir * 30, towerY + 4, sideName);
+      this.queueHitSfx('blocked', towerX + dir * 26, towerY - 4, sideName);
+      return;
+    }
+
+    if (type === 'heroDestinedChampionLevel') {
+      this.spawnMinion(sideName, { forceType: 'hero', countSpawn: false });
+      this.queueHitSfx('powerup', towerX + dir * 22, towerY - 16, sideName);
+      this.queueHitSfx('upgrade', towerX + dir * 42, towerY - 24, sideName);
       return;
     }
 

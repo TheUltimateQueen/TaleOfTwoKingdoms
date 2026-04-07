@@ -69,6 +69,8 @@ const UPGRADE_BADGE_SPECS = [
   { type: 'balloonLevel', code: 'BA', base: 0 },
   { type: 'dragonLevel', code: 'DR', base: 0 },
   { type: 'dragonSuperBreathLevel', code: 'SB', base: 0 },
+  { type: 'stoneGolemAncientCoreLevel', code: 'GO', base: 0 },
+  { type: 'heroDestinedChampionLevel', code: 'HE', base: 0 },
   { type: 'shieldDarkMetalLevel', code: 'DM', base: 0 },
   { type: 'monkHealCircleLevel', code: 'HC', base: 0 },
   { type: 'necroExpertSummonerLevel', code: 'NS', base: 0 },
@@ -86,10 +88,11 @@ const UPGRADE_CATEGORY_BY_TYPE = {
   spawnLevel: 'unit',
   resourceLevel: 'economy',
   powerLevel: 'power',
-  specialRateLevel: 'special',
   balloonLevel: 'special',
   dragonLevel: 'special',
   dragonSuperBreathLevel: 'special',
+  stoneGolemAncientCoreLevel: 'special',
+  heroDestinedChampionLevel: 'special',
   shieldDarkMetalLevel: 'special',
   monkHealCircleLevel: 'special',
   necroExpertSummonerLevel: 'special',
@@ -102,11 +105,11 @@ const UPGRADE_CATEGORY_BY_TYPE = {
 
 const UPGRADE_TWEMOJI_GLYPHS = {
   resourceLevel: { src: '/icons/twemoji/1f4b0.svg', scale: 2.08, yOffset: 0.03 },
-  bountyLevel: { src: '/icons/twemoji/1f3af.svg', scale: 1.98, yOffset: 0.02 },
-  specialRateLevel: { src: '/icons/twemoji/2728.svg', scale: 2.02, yOffset: 0.01 },
   balloonLevel: { src: '/icons/twemoji/1f388.svg', scale: 2.08, yOffset: 0.01 },
   dragonLevel: { src: '/icons/twemoji/1f409.svg', scale: 2, yOffset: 0.02 },
   dragonSuperBreathLevel: { src: '/icons/twemoji/1f525.svg', scale: 2.04, yOffset: 0.02 },
+  stoneGolemAncientCoreLevel: { src: '/icons/twemoji/1faa8.svg', scale: 2.02, yOffset: 0.02 },
+  heroDestinedChampionLevel: { src: '/icons/twemoji/1f9b8.svg', scale: 1.94, yOffset: 0.02 },
   monkHealCircleLevel: { src: '/icons/twemoji/1f49a.svg', scale: 1.98, yOffset: 0.02 },
   necroExpertSummonerLevel: { src: '/icons/twemoji/2620.svg', scale: 1.9, yOffset: 0.02 },
   riderSuperHorseLevel: { src: '/icons/twemoji/1f40e.svg', scale: 2, yOffset: 0.02 },
@@ -323,7 +326,6 @@ const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
-const NECRO_SPECIAL_RATE_BONUS_SCALE = 1 / 3;
 const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
 const NECRO_BASE_EVERY = 12;
 const MAX_REVIVE_SPIRITS = 90;
@@ -6897,16 +6899,6 @@ export class GameRenderer {
     }
 
     switch (type) {
-      case 'arrowLevel': {
-        drawArrow(-0.62 * s, 0.52 * s, 0.58 * s, -0.5 * s, 0.34);
-        ctx.beginPath();
-        ctx.moveTo(-0.58 * s, 0.4 * s);
-        ctx.lineTo(-0.38 * s, 0.58 * s);
-        ctx.lineTo(-0.52 * s, 0.62 * s);
-        ctx.closePath();
-        ctx.fill();
-        break;
-      }
       case 'unitLevel': {
         ctx.lineWidth = Math.max(1.2, s * 0.2);
         ctx.beginPath();
@@ -6977,14 +6969,6 @@ export class GameRenderer {
         ctx.stroke();
         break;
       }
-      case 'bountyLevel': {
-        ctx.beginPath();
-        ctx.arc(0, 0, 0.56 * s, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.font = `bold ${Math.max(7, Math.round(s * 1.2))}px sans-serif`;
-        ctx.fillText('$', 0, 0);
-        break;
-      }
       case 'powerLevel': {
         ctx.beginPath();
         for (let i = 0; i < 10; i += 1) {
@@ -6996,29 +6980,6 @@ export class GameRenderer {
           else ctx.lineTo(px, py);
         }
         ctx.closePath();
-        ctx.fill();
-        break;
-      }
-      case 'specialRateLevel': {
-        const box = 1.06 * s;
-        const half = box / 2;
-        const radius = Math.max(1.8, s * 0.16);
-        ctx.beginPath();
-        ctx.moveTo(-half + radius, -half);
-        ctx.lineTo(half - radius, -half);
-        ctx.quadraticCurveTo(half, -half, half, -half + radius);
-        ctx.lineTo(half, half - radius);
-        ctx.quadraticCurveTo(half, half, half - radius, half);
-        ctx.lineTo(-half + radius, half);
-        ctx.quadraticCurveTo(-half, half, -half, half - radius);
-        ctx.lineTo(-half, -half + radius);
-        ctx.quadraticCurveTo(-half, -half, -half + radius, -half);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(-0.22 * s, -0.18 * s, 0.13 * s, 0, Math.PI * 2);
-        ctx.arc(0.22 * s, 0.02 * s, 0.13 * s, 0, Math.PI * 2);
-        ctx.arc(-0.02 * s, 0.24 * s, 0.13 * s, 0, Math.PI * 2);
         ctx.fill();
         break;
       }
@@ -7231,11 +7192,6 @@ export class GameRenderer {
     return Math.max(0.65, 2.2 - level * 0.09);
   }
 
-  specialSpawnRateBonus(sideState) {
-    const level = Math.max(1, Number(sideState?.specialRateLevel) || 1);
-    return Math.min(0.24, (level - 1) * 0.03);
-  }
-
   specialRepeatLevelForType(sideState, specialType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     if (!rule?.upgradeType) return 0;
@@ -7305,12 +7261,8 @@ export class GameRenderer {
       ? overrideBase
       : specialSpawnBaseChanceForType(specialType);
     if (!Number.isFinite(base)) return null;
-    const specialRateBonus = this.specialSpawnRateBonus(sideState);
-    const tunedSpecialBonus = specialType === 'necrominion'
-      ? specialRateBonus * NECRO_SPECIAL_RATE_BONUS_SCALE
-      : specialRateBonus;
     if (specialType === 'stonegolem' && !this.stoneGolemSpawnUnlocked(sideState)) return 0;
-    let chance = base + tunedSpecialBonus;
+    let chance = base;
     chance += this.specialRepeatSpawnChanceBonus(sideState, specialType);
     if (specialType === 'shield' && (Number(sideState?.shieldDarkMetalLevel) || 0) > 0) {
       chance *= 2;
@@ -7319,7 +7271,7 @@ export class GameRenderer {
   }
 
   candleSpawnChance(sideState) {
-    const chance = CANDLE_SPAWN_BASE_CHANCE + this.specialSpawnRateBonus(sideState);
+    const chance = CANDLE_SPAWN_BASE_CHANCE;
     return Math.max(CANDLE_SPAWN_BASE_CHANCE, Math.min(0.92, chance));
   }
 

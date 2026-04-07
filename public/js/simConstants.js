@@ -17,6 +17,8 @@ export const UPGRADE_TYPES = [
   'balloonLevel',
   'dragonLevel',
   'dragonSuperBreathLevel',
+  'stoneGolemAncientCoreLevel',
+  'heroDestinedChampionLevel',
   'shieldDarkMetalLevel',
   'monkHealCircleLevel',
   'necroExpertSummonerLevel',

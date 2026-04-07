@@ -3,7 +3,7 @@ import { ControllerPad } from './ControllerPad.js';
 import { SoundEngine } from './SoundEngine.js';
 import { SHOT_POWER_LABELS, TEAM_COLORS, upgradeLabelForLevel } from './constants.js';
 import { GameRoom as SimGameRoom } from './SimGameRoom.js';
-import { REPEAT_SPECIAL_UPGRADE_TYPES } from './specialUnitUpgradeConfig.js';
+import { SPECIAL_BUCKET_UPGRADE_TYPES } from './specialUnitUpgradeConfig.js';
 import {
   DEFAULT_THEME_MODE,
   THEME_MODE_THEMED,
@@ -55,15 +55,14 @@ const BASE_TEAM_COLORS = {
   left: { ...TEAM_COLORS.left },
   right: { ...TEAM_COLORS.right },
 };
-const TEST_SPECIAL_UPGRADE_KEYS = [
-  ...REPEAT_SPECIAL_UPGRADE_TYPES,
-  'dragonSuperBreathLevel',
-];
+const TEST_SPECIAL_UPGRADE_KEYS = [...SPECIAL_BUCKET_UPGRADE_TYPES];
 const TEST_UPGRADE_MAX = {
   balloonLevel: 4,
   dragonLevel: 30,
-  superMinionLevel: 30,
   dragonSuperBreathLevel: 1,
+  stoneGolemAncientCoreLevel: 30,
+  heroDestinedChampionLevel: 30,
+  superMinionLevel: 30,
   shieldDarkMetalLevel: 30,
   monkHealCircleLevel: 30,
   necroExpertSummonerLevel: 30,
@@ -88,18 +87,17 @@ const TEST_SPECIAL_LABELS = {
   super: 'Super',
 };
 const POST_UPGRADE_CODES = {
-  arrowLevel: 'AR',
   unitLevel: 'UN',
   volleyLevel: 'VO',
   spawnLevel: 'SP',
   unitHpLevel: 'HP',
   resourceLevel: 'EC',
-  bountyLevel: 'CG',
   powerLevel: 'PW',
-  specialRateLevel: 'SR',
   balloonLevel: 'BA',
   dragonLevel: 'DR',
   dragonSuperBreathLevel: 'SB',
+  stoneGolemAncientCoreLevel: 'GO',
+  heroDestinedChampionLevel: 'HE',
   shieldDarkMetalLevel: 'DM',
   monkHealCircleLevel: 'HC',
   necroExpertSummonerLevel: 'NE',
@@ -110,18 +108,17 @@ const POST_UPGRADE_CODES = {
   superMinionLevel: 'SU',
 };
 const POST_UPGRADE_ICONS = {
-  arrowLevel: '🏹',
   unitLevel: '⚔️',
   volleyLevel: '🪶',
   spawnLevel: '👥',
   unitHpLevel: '🛡️',
   resourceLevel: '💰',
-  bountyLevel: '🎯',
   powerLevel: '⚡',
-  specialRateLevel: '✨',
   balloonLevel: '🎈',
   dragonLevel: '🐉',
   dragonSuperBreathLevel: '🔥',
+  stoneGolemAncientCoreLevel: '🪨',
+  heroDestinedChampionLevel: '🦸',
   shieldDarkMetalLevel: '🧱',
   monkHealCircleLevel: '💚',
   necroExpertSummonerLevel: '☠️',
@@ -133,11 +130,11 @@ const POST_UPGRADE_ICONS = {
 };
 const POST_UPGRADE_TWEMOJI = {
   resourceLevel: { src: '/icons/twemoji/1f4b0.svg', scale: 1.98, yOffset: 0.03 },
-  bountyLevel: { src: '/icons/twemoji/1f3af.svg', scale: 1.9, yOffset: 0.02 },
-  specialRateLevel: { src: '/icons/twemoji/2728.svg', scale: 1.94, yOffset: 0.01 },
   balloonLevel: { src: '/icons/twemoji/1f388.svg', scale: 1.98, yOffset: 0.01 },
   dragonLevel: { src: '/icons/twemoji/1f409.svg', scale: 1.9, yOffset: 0.02 },
   dragonSuperBreathLevel: { src: '/icons/twemoji/1f525.svg', scale: 1.94, yOffset: 0.02 },
+  stoneGolemAncientCoreLevel: { src: '/icons/twemoji/1faa8.svg', scale: 1.92, yOffset: 0.02 },
+  heroDestinedChampionLevel: { src: '/icons/twemoji/1f9b8.svg', scale: 1.84, yOffset: 0.02 },
   monkHealCircleLevel: { src: '/icons/twemoji/1f49a.svg', scale: 1.9, yOffset: 0.02 },
   necroExpertSummonerLevel: { src: '/icons/twemoji/2620.svg', scale: 1.82, yOffset: 0.02 },
   riderSuperHorseLevel: { src: '/icons/twemoji/1f40e.svg', scale: 1.92, yOffset: 0.02 },
@@ -2078,19 +2075,18 @@ export class GameClient {
 
   defaultTestSettings() {
     const upgrades = {
-      arrowLevel: 1,
       unitLevel: 1,
       volleyLevel: 0,
       spawnLevel: 1,
       unitHpLevel: 1,
       resourceLevel: 1,
-      bountyLevel: 1,
       powerLevel: 1,
-      specialRateLevel: 1,
       balloonLevel: 0,
       dragonLevel: 0,
       superMinionLevel: 0,
       dragonSuperBreathLevel: 0,
+      stoneGolemAncientCoreLevel: 0,
+      heroDestinedChampionLevel: 0,
       shieldDarkMetalLevel: 0,
       monkHealCircleLevel: 0,
       necroExpertSummonerLevel: 0,

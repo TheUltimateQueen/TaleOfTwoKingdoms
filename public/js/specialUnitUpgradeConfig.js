@@ -22,10 +22,10 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
       hpMultPerLevel: 1.1,
       dmgMultPerLevel: 1.1,
     },
-    unlockLabel: 'Necro Death Revival',
+    unlockLabel: 'Necro Revival',
     repeatLabel: 'Necro+',
-    unlockHint: 'nearby deaths revive at 1/8 hp',
-    repeatHint: '+necro hp/dmg',
+    unlockHint: 'nearby deaths revive as allied minions at 1/8 hp',
+    repeatHint: 'increases necro hp and damage',
   },
   {
     unitType: 'gunner',
@@ -42,7 +42,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Gunner Sky Cannon',
     repeatLabel: 'Gunner+',
     unlockHint: 'gunners fire periodic sky-cannon AoE blasts',
-    repeatHint: '+gunner hp/dmg',
+    repeatHint: 'increases gunner hp and damage',
   },
   {
     unitType: 'rider',
@@ -59,7 +59,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Rider Super Horse',
     repeatLabel: 'Rider+',
     unlockHint: 'rider hp x4, larger horse, stronger charge hit',
-    repeatHint: '+rider hp/dmg',
+    repeatHint: 'increases rider hp and damage',
   },
   {
     unitType: 'digger',
@@ -76,7 +76,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Digger Gold Finder',
     repeatLabel: 'Digger+',
     unlockHint: 'diggers seek and collect gold resources',
-    repeatHint: '+digger hp/dmg',
+    repeatHint: 'increases digger hp and damage',
   },
   {
     unitType: 'monk',
@@ -95,20 +95,24 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Monk Heal Circle',
     repeatLabel: 'Monk+',
     unlockHint: 'unlocks 10s monk healing pulse',
-    repeatHint: '+monk hp/healing',
+    repeatHint: 'increases monk hp and healing',
   },
   {
     unitType: 'stonegolem',
     specialType: 'stonegolem',
-    upgradeType: null,
-    hasInitialUnlock: false,
-    repeatEligible: false,
-    baseOfferWeight: 0.58,
+    upgradeType: 'stoneGolemAncientCoreLevel',
+    hasInitialUnlock: true,
+    repeatEligible: true,
+    baseOfferWeight: 0.18,
     repeatChancePerLevel: 0,
-    unlockLabel: 'Stone Golem Upgrade',
+    repeatScaling: {
+      hpMultPerLevel: 1.1,
+      dmgMultPerLevel: 1.08,
+    },
+    unlockLabel: 'Stone Golem Ancient Core',
     repeatLabel: 'Golem+',
-    unlockHint: 'future stone golem unlock',
-    repeatHint: '+stone golem spawn chance',
+    unlockHint: 'summons a stone golem',
+    repeatHint: 'increases golem hp and damage',
   },
   {
     unitType: 'shield',
@@ -125,20 +129,24 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Shield Dark Metal',
     repeatLabel: 'Shield+',
     unlockHint: '10s cycle: 5s at 95% damage reduction, shield chance x2',
-    repeatHint: '+shield hp/push',
+    repeatHint: 'increases shield hp and push strength',
   },
   {
     unitType: 'hero',
     specialType: 'hero',
-    upgradeType: null,
-    hasInitialUnlock: false,
-    repeatEligible: false,
-    baseOfferWeight: 0.55,
+    upgradeType: 'heroDestinedChampionLevel',
+    hasInitialUnlock: true,
+    repeatEligible: true,
+    baseOfferWeight: 0.18,
     repeatChancePerLevel: 0,
-    unlockLabel: 'Hero Upgrade',
+    repeatScaling: {
+      hpMultPerLevel: 1.08,
+      dmgMultPerLevel: 1.08,
+    },
+    unlockLabel: 'Hero Champion',
     repeatLabel: 'Hero+',
-    unlockHint: 'future hero unlock',
-    repeatHint: '+hero rescue chance',
+    unlockHint: 'summons the hero',
+    repeatHint: 'increases hero hp and damage',
   },
   {
     unitType: 'president',
@@ -153,10 +161,10 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
       dmgMultPerLevel: 1.04,
       presidentAuraMultPerLevel: 1.08,
     },
-    unlockLabel: 'Pardon President',
+    unlockLabel: 'President Executive Order',
     repeatLabel: 'President+',
-    unlockHint: 'signs a pardon paper: first hit takes 10% damage',
-    repeatHint: '+president hp/aura',
+    unlockHint: 'first hit on marked allies only deals 10% damage',
+    repeatHint: 'increases president hp and aura power',
   },
   {
     unitType: 'balloon',
@@ -173,7 +181,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Unlock Balloon',
     repeatLabel: 'Balloon+',
     unlockHint: 'BA1 unlocks sky balloons',
-    repeatHint: '+balloon hp/dmg',
+    repeatHint: 'increases balloon hp and damage',
   },
   {
     unitType: 'dragon',
@@ -190,7 +198,20 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Unlock Dragon',
     repeatLabel: 'Dragon+',
     unlockHint: 'DR1 unlocks dragons',
-    repeatHint: '+dragon hp/dmg',
+    repeatHint: 'increases dragon hp and damage',
+  },
+  {
+    unitType: 'dragonSuperBreath',
+    specialType: null,
+    upgradeType: 'dragonSuperBreathLevel',
+    hasInitialUnlock: true,
+    repeatEligible: false,
+    baseOfferWeight: 0.62,
+    repeatChancePerLevel: 0,
+    unlockLabel: 'Dragon Breath Burst',
+    repeatLabel: 'Dragon Breath Burst',
+    unlockHint: 'unlocks dragon cone breath burst (5s cycle)',
+    repeatHint: 'unlocks dragon cone breath burst (5s cycle)',
   },
   {
     unitType: 'super',
@@ -207,7 +228,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     unlockLabel: 'Unlock Super',
     repeatLabel: 'Super+',
     unlockHint: 'SU1 unlocks super minions',
-    repeatHint: '+super hp/dmg',
+    repeatHint: 'increases super minion hp and damage',
   },
   {
     unitType: 'candle',
@@ -238,9 +259,23 @@ export const SPECIAL_UNIT_UPGRADE_RULES_BY_TYPE = Object.freeze(
   )
 );
 
+export const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
+  Object.fromEntries(
+    SPECIAL_UNIT_UPGRADE_ENTRIES
+      .filter((entry) => typeof entry.specialType === 'string' && entry.specialType)
+      .map((entry) => [entry.specialType, Object.freeze({ ...entry })])
+  )
+);
+
 export const REPEAT_SPECIAL_UPGRADE_TYPES = Object.freeze(
   SPECIAL_UNIT_UPGRADE_ENTRIES
     .filter((entry) => entry.repeatEligible && typeof entry.upgradeType === 'string' && entry.upgradeType)
+    .map((entry) => entry.upgradeType)
+);
+
+export const SPECIAL_BUCKET_UPGRADE_TYPES = Object.freeze(
+  SPECIAL_UNIT_UPGRADE_ENTRIES
+    .filter((entry) => entry.hasInitialUnlock && typeof entry.upgradeType === 'string' && entry.upgradeType)
     .map((entry) => entry.upgradeType)
 );
 
