@@ -263,6 +263,8 @@ const HERO_COOKER_COOK_TIME = 10;
 const HERO_COOKER_MOVE_SPEED = 9.4;
 const HERO_COOKER_EMPTY_LOAD_SPEED_MULT = 2;
 const HERO_COOKER_FULL_LOAD_SPEED_MULT = 1;
+const HERO_COOKER_FLYOVER_CAPTURE_HALF_WIDTH = 34;
+const HERO_COOKER_FLYOVER_MAX_HEIGHT = 240;
 const HERO_COOKER_HEALTH_COST_FRACTION = 0.1;
 const HERO_COOKER_READY_CAST_CHANCE = 0.46;
 const HERO_COOKER_RETRY_MIN_CD = 3;
@@ -6929,6 +6931,13 @@ class GameRoom {
     const cap = Math.max(1, Math.min(HERO_COOKER_MAX_EAT, Math.round(Number(cooker.heroCookerEatCap) || HERO_COOKER_MAX_EAT)));
     let stored = Math.max(0, Math.round(Number(cooker.heroCookerEatCount) || 0));
     if (stored >= cap) return 0;
+    const canAbsorb = (other) => {
+      if (!other || other.removed || other.side === cooker.side || other.id === cooker.id) return false;
+      // Cooker should not eat enemy hero, golem, or other cooker units.
+      if (other.hero || other.stoneGolem || other.heroCooker) return false;
+      return true;
+    };
+    const seen = new Set();
     const victims = [];
     this.forEachEnemyMinionInRadius(
       cooker.side,
@@ -6938,10 +6947,26 @@ class GameRoom {
       minionBuckets,
       bucketW,
       (other) => {
-        if (!other || other.removed || other.side === cooker.side || other.id === cooker.id) return;
+        if (!canAbsorb(other)) return;
+        if (seen.has(other.id)) return;
+        seen.add(other.id);
         victims.push(other);
       }
     );
+    // Airborne flyover capture: if a flying enemy crosses directly above the cooker, it falls in.
+    const cookerX = Number(cooker.x) || 0;
+    const cookerY = Number(cooker.y) || 0;
+    const potTopY = cookerY - Math.max(8, (Number(cooker.r) || 16) * 0.52);
+    for (const other of this.minions) {
+      if (!canAbsorb(other) || !other.flying) continue;
+      if (seen.has(other.id)) continue;
+      const dx = Math.abs((Number(other.x) || 0) - cookerX);
+      if (dx > HERO_COOKER_FLYOVER_CAPTURE_HALF_WIDTH) continue;
+      const yAbove = potTopY - (Number(other.y) || 0);
+      if (yAbove < 0 || yAbove > HERO_COOKER_FLYOVER_MAX_HEIGHT) continue;
+      seen.add(other.id);
+      victims.push(other);
+    }
     victims.sort((a, b) => {
       const adx = (Number(a.x) || 0) - (Number(cooker.x) || 0);
       const ady = (Number(a.y) || 0) - (Number(cooker.y) || 0);
@@ -6952,7 +6977,7 @@ class GameRoom {
     let absorbed = 0;
     for (const victim of victims) {
       if (stored >= cap) break;
-      if (!victim || victim.removed || victim.side === cooker.side || victim.id === cooker.id) continue;
+      if (!canAbsorb(victim)) continue;
       const victimVisual = this.buildMinionGhostSnapshot(victim);
       const victimR = Math.max(8, Number(victim.r) || 12);
       const toX = (Number(cooker.x) || 0) + (Math.random() * 8 - 4);

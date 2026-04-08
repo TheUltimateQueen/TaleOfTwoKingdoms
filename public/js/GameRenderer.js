@@ -408,6 +408,8 @@ export class GameRenderer {
     this.healCircles = [];
     this.heroFoodVisuals = [];
     this.heroCookerSwallows = [];
+    this.heroPunchState = new Map();
+    this.heroIdleState = new Map();
     this.prevMinionAtkCd = new Map();
     this.militiaFoodFx = new Map();
     this.towerShake = {
@@ -495,6 +497,8 @@ export class GameRenderer {
       this.unitHitImpacts.length = 0;
       this.heroFoodVisuals.length = 0;
       this.heroCookerSwallows.length = 0;
+      this.heroPunchState.clear();
+      this.heroIdleState.clear();
       this.barracksDoorActors = { left: null, right: null };
       this.prevBarracksRollState = {
         left: { ttl: 0, key: '' },
@@ -560,6 +564,93 @@ export class GameRenderer {
 
   winnerLabel(side) {
     return sideVictoryLabel(side, this.themeMode);
+  }
+
+  heroPunchJitter(minionId, attackSwing) {
+    const id = Math.round(Number(minionId) || 0);
+    if (id <= 0) return { x: 0, y: 0, bucket: 0 };
+    const swing = Math.max(-1, Math.min(1, Number(attackSwing) || 0));
+    const absSwing = Math.abs(swing);
+    const dir = swing >= 0 ? 1 : -1;
+    let state = this.heroPunchState.get(id);
+    if (!state) {
+      state = {
+        lastAbs: 0,
+        lastDir: dir,
+        x: 0,
+        y: 0,
+        bucket: 0,
+      };
+      this.heroPunchState.set(id, state);
+    }
+
+    // Pick a fresh, subtle endpoint variation when a new punch starts.
+    if (absSwing > 0.56 && (state.lastAbs <= 0.56 || state.lastDir !== dir)) {
+      const angle = (Math.random() * 2 - 1) * 0.32;
+      const radius = 0.46 + Math.random() * 0.62;
+      state.x = Math.cos(angle) * radius;
+      state.y = Math.sin(angle) * radius;
+      const bx = Math.max(0, Math.min(4, Math.round((state.x + 1.2) * 1.7)));
+      const by = Math.max(0, Math.min(4, Math.round((state.y + 1.2) * 1.7)));
+      state.bucket = bx * 5 + by;
+    }
+
+    state.lastAbs = absSwing;
+    state.lastDir = dir;
+    return { x: state.x, y: state.y, bucket: state.bucket };
+  }
+
+  heroIdleArmDrift(minionId, attackSwing) {
+    const id = Math.round(Number(minionId) || 0);
+    if (id <= 0) return { x: 0, y: 0, bucket: 0 };
+    const now = performance.now();
+    let state = this.heroIdleState.get(id);
+    if (!state) {
+      const seed = Math.random() * 1000;
+      state = {
+        lastMs: now,
+        phaseX: seed * 0.73,
+        phaseY: seed * 0.51 + 1.1,
+        freqX: 0.82 + Math.random() * 0.74,
+        freqY: 0.68 + Math.random() * 0.66,
+        driftX: Math.random() * 2 - 1,
+        driftY: Math.random() * 2 - 1,
+        targetX: Math.random() * 2 - 1,
+        targetY: Math.random() * 2 - 1,
+        retargetAt: now + 520 + Math.random() * 1280,
+      };
+      this.heroIdleState.set(id, state);
+    }
+
+    const dt = Math.max(0, Math.min(0.08, (now - state.lastMs) / 1000));
+    state.lastMs = now;
+    if (now >= state.retargetAt) {
+      state.targetX = Math.random() * 2 - 1;
+      state.targetY = Math.random() * 2 - 1;
+      state.retargetAt = now + 480 + Math.random() * 1400;
+    }
+    const driftFollow = Math.min(1, dt * 1.35);
+    state.driftX += (state.targetX - state.driftX) * driftFollow;
+    state.driftY += (state.targetY - state.driftY) * driftFollow;
+
+    const time = now * 0.001;
+    const oscX = Math.sin(time * state.freqX + state.phaseX);
+    const oscY = Math.cos(time * state.freqY + state.phaseY);
+    const wobbleX = Math.sin(time * (state.freqX * 0.54 + 0.63) + state.phaseY * 0.8);
+    const wobbleY = Math.cos(time * (state.freqY * 0.58 + 0.57) + state.phaseX * 0.7);
+    const rawX = oscX * 0.58 + wobbleX * 0.26 + state.driftX * 0.98;
+    const rawY = oscY * 0.5 + wobbleY * 0.28 + state.driftY * 0.92;
+
+    const idleAmount = Math.max(0, 1 - Math.abs(Number(attackSwing) || 0));
+    const x = Math.max(-1.65, Math.min(1.65, rawX)) * idleAmount;
+    const y = Math.max(-1.65, Math.min(1.65, rawY)) * idleAmount;
+    const bx = Math.max(0, Math.min(10, Math.round((x + 1.65) / 3.3 * 10)));
+    const by = Math.max(0, Math.min(10, Math.round((y + 1.65) / 3.3 * 10)));
+    return {
+      x: (bx / 10) * 3.3 - 1.65,
+      y: (by / 10) * 3.3 - 1.65,
+      bucket: bx * 11 + by,
+    };
   }
 
   specialLabel(type) {
@@ -5635,7 +5726,9 @@ export class GameRenderer {
 
   createGhostMinion(ghost, side, x, y) {
     if (!ghost || typeof ghost !== 'object') return null;
-    const sideName = ghost.side === 'right' ? 'right' : (side === 'right' ? 'right' : 'left');
+    const sideName = ghost.side === 'right' || ghost.side === 'left'
+      ? ghost.side
+      : (side === 'right' ? 'right' : 'left');
     return {
       side: sideName,
       x: Number.isFinite(ghost.x) ? ghost.x : (Number.isFinite(x) ? x : 0),
@@ -11422,10 +11515,20 @@ export class GameRenderer {
     const bodyR = 14 * scale;
     const swingInput = Number.isFinite(minion.heroSwing) ? Number(minion.heroSwing) : 0;
     const attackSwing = Math.max(-1, Math.min(1, swingInput * 1.35));
+    const providedIdleX = Number(minion.heroIdleJitterX);
+    const providedIdleY = Number(minion.heroIdleJitterY);
+    const idleMotion = (Number.isFinite(providedIdleX) && Number.isFinite(providedIdleY))
+      ? { x: providedIdleX, y: providedIdleY, bucket: 0 }
+      : this.heroIdleArmDrift(minion.id, attackSwing);
+    const providedPunchX = Number(minion.heroPunchJitterX);
+    const providedPunchY = Number(minion.heroPunchJitterY);
+    const punchJitter = (Number.isFinite(providedPunchX) && Number.isFinite(providedPunchY))
+      ? { x: providedPunchX, y: providedPunchY, bucket: 0 }
+      : this.heroPunchJitter(minion.id, attackSwing);
     if (!cacheRender) {
       const swingBucket = Math.max(0, Math.min(10, Math.round((attackSwing + 1) * 5)));
       const quantSwing = (swingBucket / 5) - 1;
-      const cacheKey = `heroJoint:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
+      const cacheKey = `heroJoint:${sideName}:${minion.super ? 1 : 0}:${swingBucket}:${punchJitter.bucket}:${idleMotion.bucket}`;
       const cacheWidth = Math.ceil(bodyR * 6.4 + 64);
       const cacheHeight = Math.ceil(bodyR * 6 + 64);
       const drewCached = this.drawSpriteFromCache(minion, cacheKey, cacheWidth, cacheHeight, (_cacheCtx, w, h) => {
@@ -11434,6 +11537,10 @@ export class GameRenderer {
           x: w / 2,
           y: h / 2,
           heroSwing: quantSwing,
+          heroPunchJitterX: punchJitter.x,
+          heroPunchJitterY: punchJitter.y,
+          heroIdleJitterX: idleMotion.x,
+          heroIdleJitterY: idleMotion.y,
         };
         this.drawHeroSprite(proxy, { showHud: false, cacheRender: true });
       });
@@ -11566,30 +11673,71 @@ export class GameRenderer {
       }
     };
 
+    const leadArmSign = dir;
     for (let i = 0; i < 2; i += 1) {
       const armSign = i === 0 ? -1 : 1;
-      const shoulderX = armSign * bodyR * 0.46;
+      const isLeadArm = armSign === leadArmSign;
+      const shoulderX = armSign * bodyR * 0.4;
+      const shoulderYNow = shoulderY + (isLeadArm ? bodyR * 0.01 : -bodyR * 0.01);
       const armSwing = attackSwing * (armSign === -1 ? 1 : -1);
       const punchOut = Math.max(0, armSwing);
       const retract = Math.max(0, -armSwing);
-      const guardUpperA = baseForward + armSign * 0.54;
-      const jabUpperA = baseForward + armSign * 0.15;
-      const upperA = lerp(guardUpperA, jabUpperA, punchOut) + retract * armSign * 0.12;
-      const upperLenNow = lerp(upperArmLen * 0.84, upperArmLen * 1.03, punchOut);
-      const elbowX = shoulderX + Math.cos(upperA) * upperLenNow;
-      const elbowY = shoulderY + Math.sin(upperA) * upperLenNow;
-      const guardForeA = upperA + armSign * 0.96;
-      const jabForeA = baseForward + armSign * 0.06;
-      const foreA = lerp(guardForeA, jabForeA, punchOut);
-      const foreLenNow = lerp(forearmLen * 0.62, forearmLen * 1.22, punchOut) * (1 - retract * 0.18);
-      const wristX = elbowX + Math.cos(foreA) * foreLenNow;
-      const wristY = elbowY + Math.sin(foreA) * foreLenNow;
+      const armIdleMul = Math.max(0, 1 - Math.abs(armSwing));
+
+      // Guard stance stays forward-facing so the pose reads "ready to punch", not coiled.
+      const guardX = dir * bodyR * (isLeadArm ? 0.78 : 0.62);
+      const guardY = -bodyR * (isLeadArm ? 0.35 : 0.46);
+      const punchX = dir * bodyR * (
+        isLeadArm
+          ? (1.4 + punchJitter.x * 0.16)
+          : (1.22 + punchJitter.x * 0.13)
+      );
+      const punchY = -bodyR * (
+        isLeadArm
+          ? (0.27 - punchJitter.y * 0.07)
+          : (0.31 - punchJitter.y * 0.06)
+      );
+      const targetX = lerp(guardX, punchX, punchOut)
+        + dir * bodyR * idleMotion.x * (isLeadArm ? 0.12 : 0.09) * armIdleMul;
+      const targetY = lerp(guardY, punchY, punchOut)
+        + bodyR * idleMotion.y * 0.09 * armIdleMul
+        + retract * bodyR * (isLeadArm ? 0.012 : 0.026);
+
+      const upperLenNow = lerp(upperArmLen * 0.78, upperArmLen * 1.02, punchOut);
+      const foreLenNow = lerp(
+        forearmLen * 0.7,
+        forearmLen * (isLeadArm ? 1.12 : 1.05),
+        punchOut
+      ) * (1 - retract * 0.1);
+
+      // Two-bone IK so elbows bend naturally toward a boxer stance.
+      const dx = targetX - shoulderX;
+      const dy = targetY - shoulderYNow;
+      const distRaw = Math.hypot(dx, dy);
+      const minReach = Math.max(0.2, Math.abs(upperLenNow - foreLenNow) + 0.12);
+      const maxReach = Math.max(minReach + 0.01, upperLenNow + foreLenNow - 0.8);
+      const dist = Math.max(minReach, Math.min(maxReach, distRaw || minReach));
+      const ux = distRaw > 0.0001 ? (dx / distRaw) : Math.cos(baseForward);
+      const uy = distRaw > 0.0001 ? (dy / distRaw) : Math.sin(baseForward);
+      const a = (upperLenNow * upperLenNow - foreLenNow * foreLenNow + dist * dist) / (2 * Math.max(0.0001, dist));
+      const hSq = Math.max(0, upperLenNow * upperLenNow - a * a);
+      const h = Math.sqrt(hSq);
+      const midX = shoulderX + ux * a;
+      const midY = shoulderYNow + uy * a;
+      const bend = dir > 0 ? 1 : -1;
+      const px = -uy;
+      const py = ux;
+      const bendStrength = lerp(0.88, 0.66, punchOut);
+      const elbowX = midX + px * h * bend * bendStrength;
+      const elbowY = midY + py * h * bend * bendStrength + bodyR * 0.05;
+      const wristX = shoulderX + ux * dist;
+      const wristY = shoulderYNow + uy * dist;
 
       ctx.strokeStyle = '#f2d5ba';
       ctx.lineWidth = minion.super ? 4.4 : 4;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(shoulderX, shoulderY);
+      ctx.moveTo(shoulderX, shoulderYNow);
       ctx.lineTo(elbowX, elbowY);
       ctx.lineTo(wristX, wristY);
       ctx.stroke();
