@@ -136,6 +136,11 @@ const SHOT_POWER_TWEMOJI_GLYPHS = {
 
 const BARRACKS_LOCK_TWEMOJI = '/icons/twemoji/1f512.svg';
 const TREASURE_PILE_ITEM_SCALE_MULT = 2;
+const RESOURCE_APPEAR_DURATION = 0.34;
+const RESOURCE_APPEAR_START_SCALE = 0.34;
+const RESOURCE_APPEAR_START_ALPHA = 0.42;
+const RESOURCE_APPEAR_STALE_TTL = 0.22;
+const RESOURCE_TELEGRAPH_END_HOLD = 0.08;
 
 const UPGRADE_CATEGORY_STYLE = {
   arrow: {
@@ -434,6 +439,7 @@ export class GameRenderer {
     this.upgradeGlyphImageCache = new Map();
     this.goldResourceTrails = [];
     this.resourceSpawnTelegraphs = [];
+    this.resourceAppearState = new Map();
     this.powerupTrails = [];
     this.unitHitImpacts = [];
     this.archerInstruments = { left: [], right: [] };
@@ -484,6 +490,7 @@ export class GameRenderer {
       this.cardTextFitCache.clear();
       this.goldResourceTrails.length = 0;
       this.resourceSpawnTelegraphs.length = 0;
+      this.resourceAppearState.clear();
       this.powerupTrails.length = 0;
       this.unitHitImpacts.length = 0;
       this.heroFoodVisuals.length = 0;
@@ -4792,11 +4799,54 @@ export class GameRenderer {
     for (let i = 0; i < this.resourceSpawnTelegraphs.length; i += 1) {
       const telegraph = this.resourceSpawnTelegraphs[i];
       telegraph.age += dt;
-      if (telegraph.age >= telegraph.ttl) continue;
+      if (telegraph.age >= telegraph.ttl + RESOURCE_TELEGRAPH_END_HOLD) continue;
       this.resourceSpawnTelegraphs[write] = telegraph;
       write += 1;
     }
     this.resourceSpawnTelegraphs.length = write;
+  }
+
+  resourceAppearKey(res) {
+    if (!res || typeof res !== 'object') return null;
+    if (typeof res.id === 'string' || typeof res.id === 'number') return `id:${res.id}`;
+    const x = Number(res.x);
+    const y = Number(res.y);
+    const r = Number(res.r);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return `xy:${Math.round(x * 10)}:${Math.round(y * 10)}:${Math.round((Number.isFinite(r) ? r : 0) * 10)}`;
+  }
+
+  updateResourceAppearState(resources, dt) {
+    const active = new Set();
+    const list = Array.isArray(resources) ? resources : [];
+    for (let i = 0; i < list.length; i += 1) {
+      const res = list[i];
+      const key = this.resourceAppearKey(res);
+      if (!key) continue;
+      active.add(key);
+      const state = this.resourceAppearState.get(key);
+      if (!state) {
+        this.resourceAppearState.set(key, { age: 0, stale: 0 });
+        continue;
+      }
+      state.age = Math.min(RESOURCE_APPEAR_DURATION, state.age + dt);
+      state.stale = 0;
+    }
+
+    for (const [key, state] of this.resourceAppearState) {
+      if (active.has(key)) continue;
+      state.stale += dt;
+      if (state.stale >= RESOURCE_APPEAR_STALE_TTL) this.resourceAppearState.delete(key);
+    }
+  }
+
+  resourceAppearProgress(res) {
+    const key = this.resourceAppearKey(res);
+    if (!key) return 1;
+    const state = this.resourceAppearState.get(key);
+    if (!state) return 1;
+    const raw = state.age / Math.max(0.0001, RESOURCE_APPEAR_DURATION);
+    return clamp01(raw);
   }
 
   drawResourceTelegraphs() {
@@ -4806,7 +4856,7 @@ export class GameRenderer {
       const ease = 1 - Math.pow(1 - t, 3);
       const pulse = 0.8 + Math.sin((ease * Math.PI * 2) + telegraph.seed) * 0.12;
       const radius = (4 + ease * 16) * pulse;
-      const alpha = 1 - Math.max(0, ease - 0.7) / 0.3;
+      const alpha = lerp(0.72, 1, ease);
       const x = telegraph.x;
       const y = telegraph.y;
 
@@ -5040,8 +5090,10 @@ export class GameRenderer {
 
     this.drawUpgradePlaceholders(snapshot);
 
+    const resources = Array.isArray(snapshot.resources) ? snapshot.resources : [];
+    this.updateResourceAppearState(resources, dt);
     this.drawResourceTelegraphs();
-    for (const res of snapshot.resources) this.drawResourceNode(res);
+    for (const res of resources) this.drawResourceNode(res);
     this.drawGoldResourceTrails();
     this.drawPowerupTrails();
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
@@ -10030,17 +10082,27 @@ export class GameRenderer {
 
   drawResourceNode(res) {
     const { ctx } = this;
+    const progress = this.resourceAppearProgress(res);
+    const eased = easeOutCubic(progress);
+    const scale = lerp(RESOURCE_APPEAR_START_SCALE, 1, eased);
+    const alpha = lerp(RESOURCE_APPEAR_START_ALPHA, 1, eased);
+
+    ctx.save();
+    ctx.translate(res.x, res.y);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha *= alpha;
+
     ctx.fillStyle = '#fef1b8';
     ctx.beginPath();
-    ctx.arc(res.x, res.y, res.r + 2, 0, Math.PI * 2);
+    ctx.arc(0, 0, res.r + 2, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#f4c95d';
     ctx.beginPath();
-    ctx.moveTo(res.x, res.y - res.r);
-    ctx.lineTo(res.x + res.r, res.y);
-    ctx.lineTo(res.x, res.y + res.r);
-    ctx.lineTo(res.x - res.r, res.y);
+    ctx.moveTo(0, -res.r);
+    ctx.lineTo(res.r, 0);
+    ctx.lineTo(0, res.r);
+    ctx.lineTo(-res.r, 0);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = '#9a7a20';
@@ -10050,7 +10112,8 @@ export class GameRenderer {
     ctx.fillStyle = '#3b2b12';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`+${res.value}`, res.x, res.y + 4);
+    ctx.fillText(`+${res.value}`, 0, 4);
+    ctx.restore();
   }
 
   drawCandleScorch(scorch) {
