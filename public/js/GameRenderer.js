@@ -1089,10 +1089,12 @@ export class GameRenderer {
     const presidentSetup = specialType === 'president' && Boolean(minion.presidentSetup);
     const presidentAuraEnabled = presidentSetup && !minion.presidentAuraDisabled;
     const presidentAuraRadius = Math.max(110, Number(minion.presidentAuraRadius) || 190) * PRESIDENT_AURA_RANGE_SCALE;
-    const heroSwingPhase = specialType === 'hero'
-      ? (Number.isFinite(minion.heroSwing) ? minion.heroSwing : animNow * 8.2)
+    const heroSwingInput = specialType === 'hero'
+      ? Math.max(-1, Math.min(1, Number.isFinite(minion.heroSwing) ? Number(minion.heroSwing) : 0))
       : 0;
-    const heroWave = specialType === 'hero' ? Math.sin(heroSwingPhase * 1.35) : 0;
+    const heroWave = specialType === 'hero'
+      ? Math.max(-1, Math.min(1, heroSwingInput * 1.22))
+      : 0;
     const digPhase = specialType === 'digger'
       ? (Number.isFinite(minion.digPhase) ? minion.digPhase : animNow * 6.8)
       : 0;
@@ -1206,7 +1208,7 @@ export class GameRenderer {
         } else if (specialType === 'rider') {
           proxy.riderChargeReady = riderChargeBucket > 0;
         } else if (specialType === 'hero') {
-          proxy.heroSwing = (Math.asin(heroSwingBucket / 4 - 1) || 0) / 1.35;
+          proxy.heroSwing = (heroSwingBucket / 4) - 1;
         } else if (specialType === 'digger') {
           proxy.digPhase = (digPhaseBucket / Math.max(1, digPhaseBuckets - 1)) * digPhaseCycle;
         }
@@ -11419,10 +11421,10 @@ export class GameRenderer {
     const scale = (minion.super ? 1.24 : 1.06) * 1.45;
     const bodyR = 14 * scale;
     const swingInput = Number.isFinite(minion.heroSwing) ? Number(minion.heroSwing) : 0;
-    const attackSwing = Math.sin(swingInput * 1.95);
+    const attackSwing = Math.max(-1, Math.min(1, swingInput * 1.35));
     if (!cacheRender) {
       const swingBucket = Math.max(0, Math.min(10, Math.round((attackSwing + 1) * 5)));
-      const quantSwing = (Math.asin(swingBucket / 5 - 1) || 0) / 1.95;
+      const quantSwing = (swingBucket / 5) - 1;
       const cacheKey = `heroJoint:${sideName}:${minion.super ? 1 : 0}:${swingBucket}`;
       const cacheWidth = Math.ceil(bodyR * 6.4 + 64);
       const cacheHeight = Math.ceil(bodyR * 6 + 64);
@@ -11458,6 +11460,7 @@ export class GameRenderer {
 
     ctx.save();
     ctx.translate(x, y);
+    ctx.rotate(attackSwing * 0.085);
 
     const capeColor = sideName === 'left' ? '#2f628f' : '#8a3840';
     ctx.fillStyle = capeColor;
@@ -11494,6 +11497,12 @@ export class GameRenderer {
     ctx.arc(-bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
     ctx.arc(bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#8f5d3b';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-bodyR * 0.1, -bodyR * 0.88);
+    ctx.lineTo(bodyR * 0.1, -bodyR * 0.88);
+    ctx.stroke();
 
     // Legs with knee joints.
     const hipY = bodyR * 0.34;
@@ -11523,59 +11532,58 @@ export class GameRenderer {
     }
 
     const foodIsRice = sideName === 'right';
-    const shoulderY = -bodyR * 0.24;
-    const upperArmLen = bodyR * 0.78;
-    const forearmLen = bodyR * 0.72;
-    const baseForward = dir > 0 ? 0 : Math.PI;
-    const drawWeapon = (wx, wy, armIndex) => {
-      if (foodIsRice) {
-        if (armIndex === 0) {
-          ctx.fillStyle = '#f7fbff';
-          ctx.beginPath();
-          ctx.moveTo(wx, wy - 4.5);
-          ctx.lineTo(wx - 4.2 * dir, wy + 3.8);
-          ctx.lineTo(wx + 4.2 * dir, wy + 3.8);
-          ctx.closePath();
-          ctx.fill();
-          ctx.fillStyle = '#2f4258';
-          ctx.fillRect(wx - 2.2 * dir, wy + 1.8, 4.4 * dir, 1.7);
-        } else {
-          ctx.fillStyle = '#f4f8fc';
-          ctx.beginPath();
-          ctx.arc(wx, wy, 4.3, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#33465c';
-          ctx.beginPath();
-          ctx.arc(wx, wy, 2.1, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (armIndex === 0) {
-        ctx.strokeStyle = '#cf9052';
-        ctx.lineWidth = 2.1;
+    const shoulderY = -bodyR * 0.21;
+    const upperArmLen = bodyR * 0.76;
+    const forearmLen = bodyR * 0.7;
+    const baseForward = dir > 0 ? -0.08 : (Math.PI + 0.08);
+    const drawFist = (wx, wy, punchOut) => {
+      const fistR = bodyR * (0.16 + punchOut * 0.06);
+      const skin = foodIsRice ? '#eef6ff' : '#f2d5ba';
+      const rim = foodIsRice ? '#6d869e' : '#b98256';
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.ellipse(wx, wy, fistR * 1.04, fistR * 0.92, 0.12 * dir, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+
+      if (punchOut > 0.55) {
+        const hitAlpha = Math.max(0, Math.min(1, (punchOut - 0.55) / 0.45));
+        const fxLen = fistR * (2.6 + hitAlpha * 2.4);
+        const fxDirX = Math.cos(baseForward);
+        const fxDirY = Math.sin(baseForward);
+        const fxSideX = -fxDirY;
+        const fxSideY = fxDirX;
+        ctx.strokeStyle = this.withAlpha(foodIsRice ? '#d8ebff' : '#ffd29c', 0.42 + hitAlpha * 0.5);
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(wx, wy, 4.1, 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = '#d79e61';
-        ctx.beginPath();
-        ctx.ellipse(wx, wy, 5.3, 3.6, 0.08 * dir, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#9c6638';
-        ctx.lineWidth = 1;
+        ctx.moveTo(wx + fxSideX * fistR * 0.2, wy + fxSideY * fistR * 0.2);
+        ctx.lineTo(wx + fxDirX * fxLen, wy + fxDirY * fxLen);
+        ctx.moveTo(wx - fxSideX * fistR * 0.35, wy - fxSideY * fistR * 0.35);
+        ctx.lineTo(wx + fxDirX * (fxLen * 0.84), wy + fxDirY * (fxLen * 0.84));
         ctx.stroke();
       }
     };
 
     for (let i = 0; i < 2; i += 1) {
       const armSign = i === 0 ? -1 : 1;
-      const shoulderX = armSign * bodyR * 0.5;
+      const shoulderX = armSign * bodyR * 0.46;
       const armSwing = attackSwing * (armSign === -1 ? 1 : -1);
-      const upperA = baseForward + armSign * 0.72 + armSwing * 0.72;
-      const elbowX = shoulderX + Math.cos(upperA) * upperArmLen;
-      const elbowY = shoulderY + Math.sin(upperA) * upperArmLen;
-      const foreA = upperA + armSign * 0.45 + armSwing * 0.85;
-      const wristX = elbowX + Math.cos(foreA) * forearmLen;
-      const wristY = elbowY + Math.sin(foreA) * forearmLen;
+      const punchOut = Math.max(0, armSwing);
+      const retract = Math.max(0, -armSwing);
+      const guardUpperA = baseForward + armSign * 0.54;
+      const jabUpperA = baseForward + armSign * 0.15;
+      const upperA = lerp(guardUpperA, jabUpperA, punchOut) + retract * armSign * 0.12;
+      const upperLenNow = lerp(upperArmLen * 0.84, upperArmLen * 1.03, punchOut);
+      const elbowX = shoulderX + Math.cos(upperA) * upperLenNow;
+      const elbowY = shoulderY + Math.sin(upperA) * upperLenNow;
+      const guardForeA = upperA + armSign * 0.96;
+      const jabForeA = baseForward + armSign * 0.06;
+      const foreA = lerp(guardForeA, jabForeA, punchOut);
+      const foreLenNow = lerp(forearmLen * 0.62, forearmLen * 1.22, punchOut) * (1 - retract * 0.18);
+      const wristX = elbowX + Math.cos(foreA) * foreLenNow;
+      const wristY = elbowY + Math.sin(foreA) * foreLenNow;
 
       ctx.strokeStyle = '#f2d5ba';
       ctx.lineWidth = minion.super ? 4.4 : 4;
@@ -11590,7 +11598,7 @@ export class GameRenderer {
       ctx.arc(elbowX, elbowY, 2, 0, Math.PI * 2);
       ctx.fill();
 
-      drawWeapon(wristX, wristY, i);
+      drawFist(wristX, wristY, punchOut);
     }
 
     ctx.restore();

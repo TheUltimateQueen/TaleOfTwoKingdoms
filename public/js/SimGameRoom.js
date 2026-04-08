@@ -230,9 +230,10 @@ const HERO_HP_MULT = 3;
 const HERO_HP_BOOST_MULT = 2.5;
 const HERO_SIZE_MULT = 1.5;
 const HERO_ARROW_FINISHER_HITS = 9;
-const HERO_SWING_ATTACK_WINDOW = 0.34;
-const HERO_SWING_ATTACK_SPEED = 20;
-const HERO_SWING_IDLE_RETURN_SPEED = 9;
+const HERO_SWING_ATTACK_WINDOW = 0.26;
+const HERO_SWING_IDLE_RETURN_SPEED = 11;
+const HERO_SWING_ATTACK_INTERVAL = 0.66;
+const HERO_ENABLE_FOOD_RAIN = false;
 const HERO_FOOD_RAIN_MIN_CD = 5;
 const HERO_FOOD_RAIN_MAX_CD = 30;
 const HERO_FOOD_RAIN_TARGET_DROPS = 20;
@@ -247,8 +248,8 @@ const HERO_FOOD_RAIN_BREAD_KINDS = Object.freeze(['bun', 'loaf', 'baguette', 'ba
 const HERO_FOOD_RAIN_RICE_KINDS = Object.freeze(['mochi', 'onigiri', 'riceCake', 'riceBowl', 'sushiRoll', 'senbei']);
 const HERO_FOOD_RAIN_BIG_PROJECTILES = 8;
 const HERO_FOOD_RAIN_ENEMY_BASE_SAFE_RADIUS = 170;
-const HERO_GROUND_RUMBLE_MIN_CD = 2.5;
-const HERO_GROUND_RUMBLE_MAX_CD = 7.5;
+const HERO_GROUND_RUMBLE_MIN_CD = 12;
+const HERO_GROUND_RUMBLE_MAX_CD = 28;
 const HERO_GROUND_RUMBLE_MIN_BURSTS = 2;
 const HERO_GROUND_RUMBLE_MAX_BURSTS = 6;
 const HERO_GROUND_RUMBLE_RADIUS = 76;
@@ -259,8 +260,14 @@ const HERO_COOKER_MAX_CD = 100;
 const HERO_COOKER_MAX_EAT = 10;
 const HERO_COOKER_EAT_RADIUS = 52;
 const HERO_COOKER_COOK_TIME = 10;
-const HERO_COOKER_MOVE_SPEED = 8;
+const HERO_COOKER_MOVE_SPEED = 9.4;
+const HERO_COOKER_EMPTY_LOAD_SPEED_MULT = 2;
+const HERO_COOKER_FULL_LOAD_SPEED_MULT = 1;
 const HERO_COOKER_HEALTH_COST_FRACTION = 0.1;
+const HERO_COOKER_READY_CAST_CHANCE = 0.46;
+const HERO_COOKER_RETRY_MIN_CD = 3;
+const HERO_COOKER_RETRY_MAX_CD = 7;
+const HERO_COOKER_GUARANTEE_HP_PCT = 0.5;
 const HERO_ABILITY_MIN_GAP = 0.5;
 const HERO_GROUND_RUMBLE_PATH_PULSE_GAP_MULT = 2.05;
 const HERO_ABILITY_TEST_MIN_CD = 5;
@@ -4148,10 +4155,13 @@ class GameRoom {
       if (m.heroLineCd > 0) m.heroLineCd = Math.max(0, m.heroLineCd - dt);
       if (m.hero) {
         if (!Number.isFinite(m.heroSwing)) m.heroSwing = 0;
+        if (!Number.isFinite(m.heroSwingDir) || m.heroSwingDir === 0) m.heroSwingDir = 1;
         if (!Number.isFinite(m.heroSwingAttackT)) m.heroSwingAttackT = 0;
         if (m.heroSwingAttackT > 0) {
           m.heroSwingAttackT = Math.max(0, m.heroSwingAttackT - dt);
-          m.heroSwing += dt * HERO_SWING_ATTACK_SPEED;
+          const swingT = 1 - (m.heroSwingAttackT / Math.max(0.0001, HERO_SWING_ATTACK_WINDOW));
+          const swingArc = Math.sin(Math.max(0, Math.min(1, swingT)) * Math.PI);
+          m.heroSwing = (m.heroSwingDir < 0 ? -1 : 1) * swingArc;
         } else {
           m.heroSwing += (0 - m.heroSwing) * Math.min(1, dt * HERO_SWING_IDLE_RETURN_SPEED);
           if (Math.abs(m.heroSwing) < 0.001) m.heroSwing = 0;
@@ -4698,7 +4708,7 @@ class GameRoom {
           } else if (m.rider) {
             m.atkCd = 0.72;
           } else if (m.hero) {
-            m.atkCd = 0.46;
+            m.atkCd = HERO_SWING_ATTACK_INTERVAL;
             this.triggerHeroAttackSwing(m);
           } else if (m.digger) {
             m.atkCd = 1.2;
@@ -4745,7 +4755,7 @@ class GameRoom {
             m.atkCd = 0.72;
           } else if (m.hero) {
             this.heroSlash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
-            m.atkCd = 0.46;
+            m.atkCd = HERO_SWING_ATTACK_INTERVAL;
           } else if (m.digger) {
             this.dealMinionDamage(m, target, m.dmg, 'melee');
             m.atkCd = 1.18;
@@ -4794,7 +4804,7 @@ class GameRoom {
             m.atkCd = 0.72;
           } else if (m.hero) {
             this.heroSlash(m, enemySideName, enemyX, targetBuckets, MINION_TARGET_BUCKET_W);
-            m.atkCd = 0.46;
+            m.atkCd = HERO_SWING_ATTACK_INTERVAL;
           } else if (m.digger) {
             this.applyMinionTowerDamage(m, enemySideName, m.dmg, enemyX, TOWER_Y - 10);
             m.atkCd = 1.22;
@@ -6584,7 +6594,9 @@ class GameRoom {
       if (!other || other.removed || other.side === hero.side || other.id === hero.id) continue;
       hitAny = true;
       this.dealMinionDamage(hero, other, damage, 'melee');
-      if (other.hp <= 0) this.killMinionByRef(other, hero.side, { goldScalar: 0.9 });
+      if (other.hp <= 0) {
+        this.killMinionByRef(other, hero.side, { goldScalar: 0.9 });
+      }
     }
 
     if (Math.abs(hero.x - enemyX) <= slashR + 10) {
@@ -6592,7 +6604,7 @@ class GameRoom {
       this.dealDamageToTower(enemySideName, damage * 0.72, enemyX, TOWER_Y - 16, 'unit');
     }
 
-    this.queueHitSfx('powerup', hero.x, hero.y - 8, hero.side);
+    this.queueHitSfx(hitAny ? 'explosion' : 'powerup', hero.x, hero.y - 8, hero.side);
     if (
       (hitAny || hero.atkCd === 0)
       && (hero.heroLineCd || 0) === 0
@@ -6606,9 +6618,11 @@ class GameRoom {
 
   triggerHeroAttackSwing(hero) {
     if (!hero || !hero.hero) return;
-    const prev = Number(hero.heroSwingAttackT) || 0;
+    const prevDir = Number(hero.heroSwingDir);
+    hero.heroSwingDir = Number.isFinite(prevDir) && prevDir < 0 ? 1 : -1;
     hero.heroSwingAttackT = HERO_SWING_ATTACK_WINDOW;
-    if (prev <= 0 || !Number.isFinite(hero.heroSwing)) hero.heroSwing = 0;
+    if (!Number.isFinite(hero.heroSwing)) hero.heroSwing = 0;
+    hero.heroSwing = 0;
   }
 
   heroAbilityCooldown(minSeconds, maxSeconds) {
@@ -6629,7 +6643,7 @@ class GameRoom {
     const y = (Number(hero.y) || 0) - Math.max(16, (Number(hero.r) || 16)) - 38;
     this.queueLine(String(text), x, y, hero.side, {
       style: 'ability',
-      scale: 2,
+      scale: 1.05,
     });
   }
 
@@ -6649,7 +6663,7 @@ class GameRoom {
     const hpTech = Math.max(1, Number(sideState.unitHpLevel) || 1);
 
     hero.heroSlashRadius = Math.max(84, 80 + unitLevel * 2.2 + powerLevel * 1.4);
-    hero.heroLimbSwingDamageMult = 0.84 + Math.min(0.24, (powerLevel - 1) * 0.03) + Math.min(0.18, (unitLevel - 1) * 0.018);
+    hero.heroLimbSwingDamageMult = 2.05 + Math.min(0.45, (powerLevel - 1) * 0.054) + Math.min(0.34, (unitLevel - 1) * 0.032);
 
     hero.heroRainDropCount = Math.max(
       HERO_FOOD_RAIN_MIN_DROPS,
@@ -6675,6 +6689,7 @@ class GameRoom {
     if (!Number.isFinite(hero.heroCookerCd)) {
       hero.heroCookerCd = this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD);
     }
+    if (typeof hero.heroCookerGuaranteedSpawned !== 'boolean') hero.heroCookerGuaranteedSpawned = false;
     if (!Number.isFinite(hero.heroAbilityGapCd)) hero.heroAbilityGapCd = 0;
   }
 
@@ -7048,10 +7063,15 @@ class GameRoom {
     cooker.atkCd = Math.max(0.2, Number(cooker.atkCd) || 0);
     const state = typeof cooker.heroCookerState === 'string' ? cooker.heroCookerState : 'hunting';
     cooker.heroCookerState = state;
-    const dir = cooker.side === 'left' ? 1 : -1;
-    const moveSpeed = Math.max(2, Number(cooker.heroCookerMoveSpeed) || HERO_COOKER_MOVE_SPEED);
-    cooker.x = clamp((Number(cooker.x) || 0) + dir * moveSpeed * dt, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
     const cap = Math.max(1, Math.min(HERO_COOKER_MAX_EAT, Math.round(Number(cooker.heroCookerEatCap) || HERO_COOKER_MAX_EAT)));
+    const stored = Math.max(0, Math.round(Number(cooker.heroCookerEatCount) || 0));
+    const loadPct = Math.max(0, Math.min(1, stored / cap));
+    const loadSpeedMul = HERO_COOKER_EMPTY_LOAD_SPEED_MULT
+      + (HERO_COOKER_FULL_LOAD_SPEED_MULT - HERO_COOKER_EMPTY_LOAD_SPEED_MULT) * loadPct;
+    const dir = cooker.side === 'left' ? 1 : -1;
+    const baseMoveSpeed = Math.max(2, Number(cooker.heroCookerMoveSpeed) || HERO_COOKER_MOVE_SPEED);
+    const moveSpeed = baseMoveSpeed * loadSpeedMul;
+    cooker.x = clamp((Number(cooker.x) || 0) + dir * moveSpeed * dt, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
     if (state !== 'cooking') {
       const absorbed = this.heroCookerAbsorbNearby(cooker, minionBuckets, bucketW);
       if (absorbed > 0) {
@@ -7092,15 +7112,36 @@ class GameRoom {
   tickHeroAbilities(hero, sideState, dt, minionBuckets = null, bucketW = MINION_TARGET_BUCKET_W) {
     if (!hero || !hero.hero || !sideState) return;
     this.refreshHeroCombatScaling(hero, sideState);
-    hero.heroFoodRainCd = Math.max(0, (Number(hero.heroFoodRainCd) || 0) - dt);
+    if (HERO_ENABLE_FOOD_RAIN) {
+      hero.heroFoodRainCd = Math.max(0, (Number(hero.heroFoodRainCd) || 0) - dt);
+    } else {
+      hero.heroFoodRainCd = Number.POSITIVE_INFINITY;
+    }
     hero.heroGroundRumbleCd = Math.max(0, (Number(hero.heroGroundRumbleCd) || 0) - dt);
     hero.heroCookerCd = Math.max(0, (Number(hero.heroCookerCd) || 0) - dt);
     hero.heroAbilityGapCd = Math.max(0, (Number(hero.heroAbilityGapCd) || 0) - dt);
+    if (typeof hero.heroCookerGuaranteedSpawned !== 'boolean') hero.heroCookerGuaranteedSpawned = false;
+
+    const heroMaxHp = Math.max(1, Number(hero.maxHp) || 1);
+    const heroHp = Math.max(0, Number(hero.hp) || 0);
+    const cookerGuaranteedHp = heroMaxHp * HERO_COOKER_GUARANTEE_HP_PCT;
+    if (!hero.heroRetreating
+      && !hero.heroCookerGuaranteedSpawned
+      && heroHp <= cookerGuaranteedHp
+    ) {
+      const forcedCooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
+      if (forcedCooker) {
+        hero.heroCookerGuaranteedSpawned = true;
+        hero.heroCookerCd = this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD);
+        hero.heroAbilityGapCd = HERO_ABILITY_MIN_GAP;
+      }
+      return;
+    }
 
     if (hero.heroRetreating) return;
     if ((Number(hero.heroAbilityGapCd) || 0) > 0) return;
     const ready = [];
-    if ((Number(hero.heroFoodRainCd) || 0) === 0) ready.push('rain');
+    if (HERO_ENABLE_FOOD_RAIN && (Number(hero.heroFoodRainCd) || 0) === 0) ready.push('rain');
     if ((Number(hero.heroGroundRumbleCd) || 0) === 0) ready.push('rumble');
     if ((Number(hero.heroCookerCd) || 0) === 0) ready.push('cooker');
     if (!ready.length) return;
@@ -7124,11 +7165,16 @@ class GameRoom {
         hero.heroGroundRumbleCd = this.heroAbilityCooldownForSide(sideState, HERO_GROUND_RUMBLE_MIN_CD, HERO_GROUND_RUMBLE_MAX_CD);
         triggered = true;
       } else if (ability === 'cooker') {
-        const cooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
-        hero.heroCookerCd = cooker
-          ? this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD)
-          : 1.5;
-        triggered = Boolean(cooker);
+        if (Math.random() <= HERO_COOKER_READY_CAST_CHANCE) {
+          const cooker = this.spawnHeroCooker(hero, sideState, minionBuckets, bucketW);
+          hero.heroCookerCd = cooker
+            ? this.heroAbilityCooldownForSide(sideState, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD)
+            : 1.5;
+          if (cooker) hero.heroCookerGuaranteedSpawned = true;
+          triggered = Boolean(cooker);
+        } else {
+          hero.heroCookerCd = this.heroAbilityCooldownForSide(sideState, HERO_COOKER_RETRY_MIN_CD, HERO_COOKER_RETRY_MAX_CD);
+        }
       }
       if (triggered) break;
     }
@@ -7772,7 +7818,9 @@ class GameRoom {
       revived.heroRetreating = false;
       revived.heroArrowHits = 0;
       revived.heroSwing = 0;
+      revived.heroSwingDir = 1;
       revived.heroSwingAttackT = 0;
+      revived.heroCookerGuaranteedSpawned = false;
     }
     if (revived.monk) {
       revived.monkFirstHeal = true;
@@ -7928,11 +7976,13 @@ class GameRoom {
       heroLimbSwingDamageMult: 0,
       heroLineCd: 0,
       heroSwing: 0,
+      heroSwingDir: 1,
       heroSwingAttackT: 0,
       heroAbilityGapCd: 0,
       heroFoodRainCd: 0,
       heroGroundRumbleCd: 0,
       heroCookerCd: 0,
+      heroCookerGuaranteedSpawned: false,
       heroRainDropCount: 0,
       heroRainRadius: 0,
       heroRainDamageMult: 0,
@@ -8578,11 +8628,13 @@ class GameRoom {
       heroLimbSwingDamageMult: isHero ? 0.96 : 0,
       heroLineCd: 0,
       heroSwing: 0,
+      heroSwingDir: 1,
       heroSwingAttackT: 0,
       heroAbilityGapCd: 0,
       heroFoodRainCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_FOOD_RAIN_MIN_CD, HERO_FOOD_RAIN_MAX_CD) : 0,
       heroGroundRumbleCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_GROUND_RUMBLE_MIN_CD, HERO_GROUND_RUMBLE_MAX_CD) : 0,
       heroCookerCd: isHero ? this.heroAbilityCooldownForSide(side, HERO_COOKER_MIN_CD, HERO_COOKER_MAX_CD) : 0,
+      heroCookerGuaranteedSpawned: false,
       heroRainDropCount: isHero ? HERO_FOOD_RAIN_MIN_DROPS : 0,
       heroRainRadius: isHero ? HERO_FOOD_RAIN_RADIUS : 0,
       heroRainDamageMult: isHero ? HERO_FOOD_RAIN_DAMAGE_MULT : 0,
