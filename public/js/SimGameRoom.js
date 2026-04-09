@@ -46,7 +46,9 @@ const SHOT_INTERVAL = 1;
 const CPU_RETARGET_MIN_SECONDS = 0.18;
 const CPU_RETARGET_MAX_SECONDS = 0.44;
 const CPU_PULL_FOLLOW_SPEED = 8.2;
-const CPU_MIN_SOLUTION_DX = 44;
+const CPU_MIN_SOLUTION_DX = 10;
+const CPU_CLOSE_TARGET_DX = 90;
+const CPU_CLOSE_TARGET_PULL_Y = 0.72;
 const CPU_MAX_SOLUTION_TTL = 5.6;
 const CPU_GOLD_GAP_NORMALIZE = 1000;
 
@@ -8266,7 +8268,7 @@ class GameRoom {
       const rx = Number(res.x) || 0;
       const ry = Number(res.y) || 0;
       const dxForward = (rx - sx) * dir;
-      if (dxForward < CPU_MIN_SOLUTION_DX * 0.8) continue;
+      if (dxForward < CPU_MIN_SOLUTION_DX) continue;
       const dist = Math.hypot(rx - sx, ry - sy);
       // Gold/resource is intentionally top priority for CPU behavior.
       const score = 160 + behindBias * 100 - dist * 0.22 + Math.random() * 8;
@@ -8334,11 +8336,20 @@ class GameRoom {
     const ty = Number(targetY) || 0;
     const dx = (tx - sx) * dir;
     if (dx < CPU_MIN_SOLUTION_DX) return null;
+    const closeBias = clamp(
+      1 - ((dx - CPU_MIN_SOLUTION_DX) / Math.max(1, CPU_CLOSE_TARGET_DX - CPU_MIN_SOLUTION_DX)),
+      0,
+      1
+    );
+    const minHorizontal = lerp(0.24, 0.03, closeBias);
+    const minVertical = lerp(0, 0.24, closeBias);
+    const ttlTarget = lerp(1.35, 0.62, closeBias);
+    const ttlPenaltyWeight = lerp(3.2, 0.9, closeBias);
 
     let best = null;
     let bestErr = Infinity;
-    for (let h = 0.24; h <= 1.0001; h += 0.04) {
-      for (let v = 0; v <= 0.9601; v += 0.04) {
+    for (let h = minHorizontal; h <= 1.0001; h += 0.04) {
+      for (let v = minVertical; v <= 0.9601; v += 0.04) {
         const mag = Math.hypot(h, v);
         if (mag > 1) continue;
         const angle = Math.atan2(v, h);
@@ -8350,7 +8361,10 @@ class GameRoom {
         if (!(ttl > 0.06 && ttl < CPU_MAX_SOLUTION_TTL)) continue;
         const gravity = 980 - strength * 220;
         const yPred = sy - Math.sin(angle) * speed * ttl + 0.5 * gravity * ttl * ttl;
-        const err = Math.abs(yPred - ty) + Math.abs(ttl - 1.35) * 3.2;
+        const closeLiftPenalty = closeBias > 0
+          ? Math.max(0, (CPU_CLOSE_TARGET_PULL_Y - v)) * 40 * closeBias
+          : 0;
+        const err = Math.abs(yPred - ty) + Math.abs(ttl - ttlTarget) * ttlPenaltyWeight + closeLiftPenalty;
         if (err < bestErr) {
           bestErr = err;
           best = {
@@ -8412,8 +8426,16 @@ class GameRoom {
             state.pullY = solved.pullY;
           } else {
             const fallback = this.cpuDefaultPull(sideName);
-            state.pullX = fallback.x;
-            state.pullY = fallback.y;
+            const sx = sideName === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+            const dir = sideName === 'left' ? 1 : -1;
+            const dx = (aimX - sx) * dir;
+            if (dx > CPU_MIN_SOLUTION_DX && dx < CPU_CLOSE_TARGET_DX) {
+              state.pullX = sideName === 'left' ? -0.16 : 0.16;
+              state.pullY = -0.88;
+            } else {
+              state.pullX = fallback.x;
+              state.pullY = fallback.y;
+            }
           }
           const retargetWindow = profile.retargetMax - profile.retargetMin;
           state.retargetAt = this.t + profile.retargetMin + Math.random() * Math.max(0, retargetWindow);
