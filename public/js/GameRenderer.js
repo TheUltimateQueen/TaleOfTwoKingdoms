@@ -580,16 +580,18 @@ export class GameRenderer {
         x: 0,
         y: 0,
         bucket: 0,
+        style: Math.random() * 2 - 1,
       };
       this.heroPunchState.set(id, state);
     }
 
-    // Pick a fresh, subtle endpoint variation when a new punch starts.
-    if (absSwing > 0.56 && (state.lastAbs <= 0.56 || state.lastDir !== dir)) {
-      const angle = (Math.random() * 2 - 1) * 0.32;
-      const radius = 0.46 + Math.random() * 0.62;
-      state.x = Math.cos(angle) * radius;
-      state.y = Math.sin(angle) * radius;
+    // Pick a fresh endpoint on each new punch so strikes feel less robotic.
+    if (absSwing > 0.46 && (state.lastAbs <= 0.46 || state.lastDir !== dir)) {
+      const reach = 0.56 + Math.random() * 0.82;
+      const spread = (Math.random() * 2 - 1) * (0.21 + Math.abs(state.style) * 0.18);
+      const rise = (Math.random() * 2 - 1) * 0.2;
+      state.x = Math.max(-1.2, Math.min(1.35, Math.cos(spread) * reach));
+      state.y = Math.max(-1.1, Math.min(1.1, Math.sin(spread) * (0.55 + Math.random() * 0.35) + rise));
       const bx = Math.max(0, Math.min(4, Math.round((state.x + 1.2) * 1.7)));
       const by = Math.max(0, Math.min(4, Math.round((state.y + 1.2) * 1.7)));
       state.bucket = bx * 5 + by;
@@ -613,11 +615,12 @@ export class GameRenderer {
         phaseY: seed * 0.51 + 1.1,
         freqX: 0.82 + Math.random() * 0.74,
         freqY: 0.68 + Math.random() * 0.66,
+        freqZ: 0.58 + Math.random() * 0.52,
         driftX: Math.random() * 2 - 1,
         driftY: Math.random() * 2 - 1,
         targetX: Math.random() * 2 - 1,
         targetY: Math.random() * 2 - 1,
-        retargetAt: now + 520 + Math.random() * 1280,
+        retargetAt: now + 620 + Math.random() * 1560,
       };
       this.heroIdleState.set(id, state);
     }
@@ -627,19 +630,21 @@ export class GameRenderer {
     if (now >= state.retargetAt) {
       state.targetX = Math.random() * 2 - 1;
       state.targetY = Math.random() * 2 - 1;
-      state.retargetAt = now + 480 + Math.random() * 1400;
+      state.retargetAt = now + 540 + Math.random() * 1720;
     }
-    const driftFollow = Math.min(1, dt * 1.35);
+    const driftFollow = Math.min(1, dt * 1.14);
     state.driftX += (state.targetX - state.driftX) * driftFollow;
     state.driftY += (state.targetY - state.driftY) * driftFollow;
 
     const time = now * 0.001;
     const oscX = Math.sin(time * state.freqX + state.phaseX);
     const oscY = Math.cos(time * state.freqY + state.phaseY);
-    const wobbleX = Math.sin(time * (state.freqX * 0.54 + 0.63) + state.phaseY * 0.8);
-    const wobbleY = Math.cos(time * (state.freqY * 0.58 + 0.57) + state.phaseX * 0.7);
-    const rawX = oscX * 0.58 + wobbleX * 0.26 + state.driftX * 0.98;
-    const rawY = oscY * 0.5 + wobbleY * 0.28 + state.driftY * 0.92;
+    const figureX = Math.sin(time * state.freqZ + state.phaseY * 0.62);
+    const figureY = Math.sin(time * (state.freqZ * 1.92) + state.phaseX * 0.58) * 0.72;
+    const wobbleX = Math.sin(time * (state.freqX * 0.52 + 0.68) + state.phaseY * 0.8);
+    const wobbleY = Math.cos(time * (state.freqY * 0.55 + 0.61) + state.phaseX * 0.7);
+    const rawX = oscX * 0.5 + figureX * 0.34 + wobbleX * 0.2 + state.driftX * 0.92;
+    const rawY = oscY * 0.42 + figureY * 0.31 + wobbleY * 0.2 + state.driftY * 0.84;
 
     const idleAmount = Math.max(0, 1 - Math.abs(Number(attackSwing) || 0));
     const x = Math.max(-1.65, Math.min(1.65, rawX)) * idleAmount;
@@ -11525,6 +11530,16 @@ export class GameRenderer {
     const punchJitter = (Number.isFinite(providedPunchX) && Number.isFinite(providedPunchY))
       ? { x: providedPunchX, y: providedPunchY, bucket: 0 }
       : this.heroPunchJitter(minion.id, attackSwing);
+    const smoothStep01 = (value) => {
+      const t = Math.max(0, Math.min(1, Number(value) || 0));
+      return t * t * (3 - 2 * t);
+    };
+    const swingAbs = Math.abs(attackSwing);
+    const punchPulse = smoothStep01(swingAbs);
+    const idleBlend = Math.max(0, 1 - punchPulse * 0.92);
+    const bodyShiftX = bodyR * idleMotion.x * 0.035 * idleBlend;
+    const bodyShiftY = bodyR * (idleMotion.y * 0.026 * idleBlend - punchPulse * 0.02);
+    const torsoTilt = attackSwing * (0.088 + punchPulse * 0.06) + idleMotion.x * 0.024 * idleBlend;
     if (!cacheRender) {
       const swingBucket = Math.max(0, Math.min(10, Math.round((attackSwing + 1) * 5)));
       const quantSwing = (swingBucket / 5) - 1;
@@ -11562,19 +11577,34 @@ export class GameRenderer {
 
     ctx.fillStyle = '#00000028';
     ctx.beginPath();
-    ctx.ellipse(x, y + bodyR + 6, bodyR * 1.02, 6.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + bodyShiftX * 0.52,
+      y + bodyR + 6 + Math.max(0, bodyShiftY * 0.18),
+      bodyR * (1.02 - punchPulse * 0.04),
+      6.8,
+      0,
+      0,
+      Math.PI * 2
+    );
     ctx.fill();
 
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(attackSwing * 0.085);
+    ctx.translate(x + bodyShiftX, y + bodyShiftY);
+    ctx.rotate(torsoTilt);
 
     const capeColor = sideName === 'left' ? '#2f628f' : '#8a3840';
+    const capeFlare = Math.max(0, punchPulse - 0.16);
     ctx.fillStyle = capeColor;
     ctx.beginPath();
     ctx.moveTo(-dir * 2.5, -bodyR * 0.92);
-    ctx.lineTo(-dir * (bodyR * 1.15), bodyR * 0.34);
-    ctx.lineTo(-dir * (bodyR * 0.72), bodyR * 1.04);
+    ctx.lineTo(
+      -dir * (bodyR * (1.15 + capeFlare * 0.24)),
+      bodyR * (0.34 + capeFlare * 0.09)
+    );
+    ctx.lineTo(
+      -dir * (bodyR * (0.72 + capeFlare * 0.16)),
+      bodyR * (1.04 + capeFlare * 0.07)
+    );
     ctx.lineTo(-dir * 1.8, bodyR * 0.54);
     ctx.closePath();
     ctx.fill();
@@ -11591,32 +11621,38 @@ export class GameRenderer {
     ctx.fillRect(-bodyR * 0.16, -bodyR * 0.76, bodyR * 0.32, bodyR * 1.32);
 
     // Head.
+    const headX = dir * bodyR * (idleMotion.x * 0.02 * idleBlend - attackSwing * 0.02);
+    const headY = -bodyR * 1.02 + bodyR * (idleMotion.y * 0.018 * idleBlend - punchPulse * 0.018);
     ctx.fillStyle = '#f2d5ba';
     ctx.beginPath();
-    ctx.arc(0, -bodyR * 1.02, bodyR * 0.42, 0, Math.PI * 2);
+    ctx.arc(headX, headY, bodyR * 0.42, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#2b2018';
     ctx.beginPath();
-    ctx.arc(-dir * bodyR * 0.06, -bodyR * 1.24, bodyR * 0.24, Math.PI * 1.04, Math.PI * 2.06);
+    ctx.arc(headX - dir * bodyR * 0.06, headY - bodyR * 0.22, bodyR * 0.24, Math.PI * 1.04, Math.PI * 2.06);
     ctx.fill();
+    const eyeFocusX = headX + dir * bodyR * (0.03 + attackSwing * 0.025);
+    const eyeFocusY = headY + bodyR * (-0.002 + idleMotion.y * 0.008 * idleBlend);
     ctx.fillStyle = '#1a202b';
     ctx.beginPath();
-    ctx.arc(-bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
-    ctx.arc(bodyR * 0.13, -bodyR * 1.02, 1.15, 0, Math.PI * 2);
+    ctx.arc(eyeFocusX - bodyR * 0.13, eyeFocusY, 1.15, 0, Math.PI * 2);
+    ctx.arc(eyeFocusX + bodyR * 0.13, eyeFocusY, 1.15, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#8f5d3b';
     ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(-bodyR * 0.1, -bodyR * 0.88);
-    ctx.lineTo(bodyR * 0.1, -bodyR * 0.88);
+    ctx.moveTo(headX - bodyR * 0.1, headY + bodyR * 0.14);
+    ctx.lineTo(headX + bodyR * 0.1, headY + bodyR * 0.14);
     ctx.stroke();
 
     // Legs with knee joints.
     const hipY = bodyR * 0.34;
     const upperLegLen = bodyR * 0.56;
     const lowerLegLen = bodyR * 0.54;
+    const stepPhase = swingInput * 1.08 + idleMotion.x * 0.74;
     for (const legSign of [-1, 1]) {
-      const gait = Math.sin(swingInput * 1.1 + legSign * 1.6) * 0.18;
+      const gait = Math.sin(stepPhase + legSign * 1.62) * (0.12 + punchPulse * 0.08)
+        + idleMotion.y * 0.03 * idleBlend;
       const hipX = legSign * bodyR * 0.22;
       const upperA = Math.PI / 2 + gait + legSign * 0.06;
       const kneeX = hipX + Math.cos(upperA) * upperLegLen;
@@ -11655,8 +11691,8 @@ export class GameRenderer {
       ctx.lineWidth = 1.1;
       ctx.stroke();
 
-      if (punchOut > 0.55) {
-        const hitAlpha = Math.max(0, Math.min(1, (punchOut - 0.55) / 0.45));
+      if (punchOut > 0.48) {
+        const hitAlpha = Math.max(0, Math.min(1, (punchOut - 0.48) / 0.52));
         const fxLen = fistR * (2.6 + hitAlpha * 2.4);
         const fxDirX = Math.cos(baseForward);
         const fxDirY = Math.sin(baseForward);
@@ -11670,6 +11706,25 @@ export class GameRenderer {
         ctx.moveTo(wx - fxSideX * fistR * 0.35, wy - fxSideY * fistR * 0.35);
         ctx.lineTo(wx + fxDirX * (fxLen * 0.84), wy + fxDirY * (fxLen * 0.84));
         ctx.stroke();
+
+        if (punchOut > 0.72) {
+          const ringAlpha = Math.max(0, Math.min(1, (punchOut - 0.72) / 0.28));
+          const ringCx = wx + fxDirX * fistR * (0.5 + ringAlpha * 0.4);
+          const ringCy = wy + fxDirY * fistR * (0.5 + ringAlpha * 0.4);
+          ctx.strokeStyle = this.withAlpha(foodIsRice ? '#e8f4ff' : '#ffe4bf', 0.28 + ringAlpha * 0.44);
+          ctx.lineWidth = 1 + ringAlpha * 1.2;
+          ctx.beginPath();
+          ctx.ellipse(
+            ringCx,
+            ringCy,
+            fistR * (0.8 + ringAlpha * 1.5),
+            fistR * (0.46 + ringAlpha * 0.9),
+            0.12 * dir,
+            0,
+            Math.PI * 2
+          );
+          ctx.stroke();
+        }
       }
     };
 
@@ -11680,35 +11735,41 @@ export class GameRenderer {
       const shoulderX = armSign * bodyR * 0.4;
       const shoulderYNow = shoulderY + (isLeadArm ? bodyR * 0.01 : -bodyR * 0.01);
       const armSwing = attackSwing * (armSign === -1 ? 1 : -1);
-      const punchOut = Math.max(0, armSwing);
-      const retract = Math.max(0, -armSwing);
+      const punchOutRaw = Math.max(0, armSwing);
+      const retractRaw = Math.max(0, -armSwing);
+      const punchOut = smoothStep01(punchOutRaw);
+      const retract = smoothStep01(retractRaw);
       const armIdleMul = Math.max(0, 1 - Math.abs(armSwing));
+      const windup = smoothStep01(Math.min(1, retract * 1.18));
+      const followThrough = smoothStep01(Math.max(0, (punchOut - 0.72) / 0.28));
 
       // Guard stance stays forward-facing so the pose reads "ready to punch", not coiled.
-      const guardX = dir * bodyR * (isLeadArm ? 0.78 : 0.62);
-      const guardY = -bodyR * (isLeadArm ? 0.35 : 0.46);
+      const guardX = dir * bodyR * (isLeadArm ? 0.78 : 0.62)
+        - dir * bodyR * windup * (isLeadArm ? 0.21 : 0.15);
+      const guardY = -bodyR * (isLeadArm ? 0.35 : 0.46)
+        + bodyR * windup * (isLeadArm ? 0.1 : 0.08);
       const punchX = dir * bodyR * (
         isLeadArm
           ? (1.4 + punchJitter.x * 0.16)
           : (1.22 + punchJitter.x * 0.13)
-      );
+      ) + dir * bodyR * followThrough * (isLeadArm ? 0.22 : 0.15);
       const punchY = -bodyR * (
         isLeadArm
           ? (0.27 - punchJitter.y * 0.07)
           : (0.31 - punchJitter.y * 0.06)
-      );
+      ) - bodyR * followThrough * (isLeadArm ? 0.06 : 0.04);
       const targetX = lerp(guardX, punchX, punchOut)
         + dir * bodyR * idleMotion.x * (isLeadArm ? 0.12 : 0.09) * armIdleMul;
       const targetY = lerp(guardY, punchY, punchOut)
         + bodyR * idleMotion.y * 0.09 * armIdleMul
-        + retract * bodyR * (isLeadArm ? 0.012 : 0.026);
+        + retract * bodyR * (isLeadArm ? 0.02 : 0.03);
 
-      const upperLenNow = lerp(upperArmLen * 0.78, upperArmLen * 1.02, punchOut);
+      const upperLenNow = lerp(upperArmLen * 0.76, upperArmLen * 1.03, punchOut);
       const foreLenNow = lerp(
-        forearmLen * 0.7,
-        forearmLen * (isLeadArm ? 1.12 : 1.05),
+        forearmLen * 0.68,
+        forearmLen * (isLeadArm ? 1.15 : 1.06),
         punchOut
-      ) * (1 - retract * 0.1);
+      ) * (1 - retract * 0.08);
 
       // Two-bone IK so elbows bend naturally toward a boxer stance.
       const dx = targetX - shoulderX;
@@ -11727,14 +11788,14 @@ export class GameRenderer {
       const bend = dir > 0 ? 1 : -1;
       const px = -uy;
       const py = ux;
-      const bendStrength = lerp(0.88, 0.66, punchOut);
+      const bendStrength = Math.max(0.56, Math.min(1.02, lerp(0.94, 0.58, punchOut) + retract * 0.08));
       const elbowX = midX + px * h * bend * bendStrength;
-      const elbowY = midY + py * h * bend * bendStrength + bodyR * 0.05;
+      const elbowY = midY + py * h * bend * bendStrength + bodyR * (0.046 + retract * 0.03);
       const wristX = shoulderX + ux * dist;
       const wristY = shoulderYNow + uy * dist;
 
       ctx.strokeStyle = '#f2d5ba';
-      ctx.lineWidth = minion.super ? 4.4 : 4;
+      ctx.lineWidth = (minion.super ? 4.4 : 4) + punchOut * 0.32;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(shoulderX, shoulderYNow);
@@ -11743,7 +11804,7 @@ export class GameRenderer {
       ctx.stroke();
       ctx.fillStyle = '#f7e5d0';
       ctx.beginPath();
-      ctx.arc(elbowX, elbowY, 2, 0, Math.PI * 2);
+      ctx.arc(elbowX, elbowY, 2 + punchOut * 0.4, 0, Math.PI * 2);
       ctx.fill();
 
       drawFist(wristX, wristY, punchOut);
