@@ -1812,11 +1812,13 @@ export class GameClient {
       const safeLabel = escapeHtml(label);
       const safeCode = escapeHtml(code);
       const safeEventTimeText = escapeHtml(eventTimeText);
+      const includesInlineLevel = /^L\d+\b/.test(label);
+      const safeLevelSuffix = includesInlineLevel ? '' : ` Lv ${level}`;
       const iconMarkup = this.renderPostUpgradeIconMarkup(event.type, sideColor);
       return `
         <article class="post-upgrade-item ${sideClass}" data-event-time="${eventTime}" data-event-index="${index}" title="${safeTitle}">
           <span class="post-upgrade-icon">${iconMarkup}</span>
-          <span class="post-upgrade-label"><span class="post-upgrade-side">${safeSide}</span> ${safeLabel} Lv ${level}</span>
+          <span class="post-upgrade-label"><span class="post-upgrade-side">${safeSide}</span> ${safeLabel}${safeLevelSuffix}</span>
           <span class="post-upgrade-time">${safeCode} ${safeEventTimeText}</span>
         </article>
       `;

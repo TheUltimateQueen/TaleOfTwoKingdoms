@@ -104,8 +104,16 @@ const STAGED_UPGRADE_COPY = Object.freeze(
 export function upgradeLabelForLevel(type, level = null) {
   const staged = STAGED_UPGRADE_COPY[type];
   if (!staged) return UPGRADE_LABELS[type] || 'Upgrade';
-  const value = Math.max(0, Number(level) || 0);
-  return value <= 0 ? staged.unlockLabel : staged.upgradedLabel;
+  const value = Math.max(0, Math.floor(Number(level) || 0));
+  if (value <= 0) return staged.unlockLabel;
+
+  const repeatLabel = String(staged.upgradedLabel || '').trim();
+  if (repeatLabel.startsWith('+')) {
+    const baseName = repeatLabel.slice(1).trim() || 'Upgrade';
+    const nextLevel = value + 1;
+    return `L${nextLevel} ${baseName}`;
+  }
+  return staged.upgradedLabel;
 }
 
 export function upgradeHintForLevel(type, level = null) {
