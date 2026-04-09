@@ -38,6 +38,9 @@ const POST_GAME_PANEL_HIDE_MS = 250;
 const HOST_TICK_MS = 1000 / 30;
 const HOST_STATE_EMIT_MS = 50;
 const LOCAL_KEYBOARD_AIM_SPEED = 0.51;
+const LOCAL_KEYBOARD_MODE_HVH = 'keyboard_1v1';
+const LOCAL_KEYBOARD_MODE_VS_CPU = 'keyboard_vs_cpu';
+const LOCAL_KEYBOARD_MODE_CPU_VS_CPU = 'cpu_vs_cpu';
 const DISPLAY_CURSOR_IDLE_MS = 1200;
 const LOCAL_KEYBOARD_CODES = new Set([
   'KeyW',
@@ -324,6 +327,8 @@ export class GameClient {
     this.nextHostStateEmitAt = 0;
     this.remoteDisplayCount = 0;
     this.localKeyboardTestActive = false;
+    this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+    this.localKeyboardControlSides = { left: true, right: true };
     this.localPressedKeys = new Set();
     this.displayMode = 'menu';
     this.cursorHiddenForIdle = false;
@@ -396,6 +401,8 @@ export class GameClient {
     this.lobbyThemeUnthemedBtn = document.getElementById('lobbyThemeUnthemedBtn');
     this.lobbyThemeModeHint = document.getElementById('lobbyThemeModeHint');
     this.localKeyboardTestBtn = document.getElementById('localKeyboardTestBtn');
+    this.localKeyboardVsCpuBtn = document.getElementById('localKeyboardVsCpuBtn');
+    this.localCpuVsCpuBtn = document.getElementById('localCpuVsCpuBtn');
     this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
@@ -414,6 +421,7 @@ export class GameClient {
       aimDot: slotEl.querySelector('.phone-aim-dot'),
       powerFill: slotEl.querySelector('.phone-power-fill'),
       meta: slotEl.querySelector('.phone-meta'),
+      cpuToggle: slotEl.querySelector('.phone-cpu-toggle'),
     }));
     this.testSettingsPanel = document.getElementById('testSettingsPanel');
     this.testSettingsSummary = document.getElementById('testSettingsSummary');
@@ -480,7 +488,15 @@ export class GameClient {
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
       this.postGameTitle?.addEventListener('click', () => this.speakPostGameTitle({ force: true, userInitiated: true }));
-      this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest());
+      this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_HVH));
+      this.localKeyboardVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_VS_CPU));
+      this.localCpuVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_CPU_VS_CPU));
+      for (const entry of this.lobbyPhoneSlots) {
+        entry?.cpuToggle?.addEventListener('click', (event) => {
+          event.preventDefault();
+          this.handleCpuSlotToggle(entry);
+        });
+      }
       this.initTestSettingsUi();
       this.setCreateMode(this.state.createMode);
       window.addEventListener('keydown', (event) => this.handleLocalKeyboardKey(event, true));
@@ -518,6 +534,8 @@ export class GameClient {
 
     this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative, themeMode }) => {
       this.localKeyboardTestActive = false;
+      this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+      this.localKeyboardControlSides = { left: true, right: true };
       this.localPressedKeys.clear();
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
@@ -538,11 +556,11 @@ export class GameClient {
       if (this.qrImage && qrDataUrl) this.qrImage.src = qrDataUrl;
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
       if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardMatchHintText();
-      if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Play On This Computer (Keyboard)';
+      this.setLocalKeyboardButtonsForActiveMode(LOCAL_KEYBOARD_MODE_HVH);
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
-      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
+      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} seats...`;
       this.renderLobbyPhonePreviews();
       if (!this.isController) this.setDisplayMode('lobby');
     });
@@ -574,7 +592,7 @@ export class GameClient {
         const label = this.state.mode === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
         this.lobbyModeMsg.textContent = `Room size updated: ${label}.`;
       }
-      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} controllers...`;
+      if (this.lobbyMsg) this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${requiredPlayers || (this.state.mode === '2v2' ? 4 : 2)} seats...`;
       this.renderLobbyPhonePreviews();
     });
 
@@ -582,6 +600,12 @@ export class GameClient {
       if (this.isController) return;
       if (this.lobbyModeMsg && this.state.roomId) this.lobbyModeMsg.textContent = message || 'Unable to change room size.';
       else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change room size.';
+    });
+
+    this.socket.on('room_cpu_error', ({ message }) => {
+      if (this.isController) return;
+      if (this.lobbyModeMsg && this.state.roomId) this.lobbyModeMsg.textContent = message || 'Unable to change CPU slot.';
+      else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change CPU slot.';
     });
 
     this.socket.on('room_theme_updated', ({ themeMode }) => {
@@ -676,6 +700,8 @@ export class GameClient {
       const text = message || 'Room closed.';
       this.stopHostAuthorityLoop();
       this.localKeyboardTestActive = false;
+      this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+      this.localKeyboardControlSides = { left: true, right: true };
       this.localPressedKeys.clear();
       this.hostAuthoritative = false;
       this.localRoom = null;
@@ -702,6 +728,7 @@ export class GameClient {
       }
       this.setDisplayMode('lobby');
       if (this.lobbyMsg) this.lobbyMsg.textContent = text;
+      this.setLocalKeyboardButtonsForActiveMode(LOCAL_KEYBOARD_MODE_HVH);
       this.renderLobbyPhonePreviews();
     });
 
@@ -815,6 +842,9 @@ export class GameClient {
     this.localRoom.archersPerSide = archersPerSide;
     this.localRoom.resizeSideArcherControls('left');
     this.localRoom.resizeSideArcherControls('right');
+    if (typeof this.localRoom.setCpuSlots === 'function') {
+      this.localRoom.setCpuSlots(payload.cpuSlots || null);
+    }
     this.localRoom.players = {
       left: Array.isArray(payload.players?.left) ? payload.players.left.map((p) => ({ ...p })) : [],
       right: Array.isArray(payload.players?.right) ? payload.players.right.map((p) => ({ ...p })) : [],
@@ -842,13 +872,15 @@ export class GameClient {
     this.hostTickTimer = null;
   }
 
-  startLocalKeyboardTest() {
+  startLocalKeyboardTest(mode = LOCAL_KEYBOARD_MODE_HVH) {
     if (this.isController) return;
     if (!this.hostAuthoritative) return;
     if (!this.state.roomId) {
       if (this.menuMsg) this.menuMsg.textContent = 'Waiting for host room setup...';
       return;
     }
+    const localMode = this.normalizedLocalKeyboardMode(mode);
+    this.localKeyboardMode = localMode;
 
     this.state.mode = '1v1';
     this.setCreateMode('1v1');
@@ -859,11 +891,26 @@ export class GameClient {
       themeMode: this.state.themeMode,
       debugConfig: this.readSettingsFromTestDom(),
     });
-    this.localRoom.players = {
-      left: [{ id: '__LOCAL_WEST__', name: defaultKeyboardName('left', this.state.themeMode), slot: 0 }],
-      right: [{ id: '__LOCAL_EAST__', name: defaultKeyboardName('right', this.state.themeMode), slot: 0 }],
+    const leftHuman = localMode === LOCAL_KEYBOARD_MODE_HVH || localMode === LOCAL_KEYBOARD_MODE_VS_CPU;
+    const rightHuman = localMode === LOCAL_KEYBOARD_MODE_HVH;
+    const leftCpu = localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+    const rightCpu = localMode === LOCAL_KEYBOARD_MODE_VS_CPU || localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+
+    this.localKeyboardControlSides = {
+      left: leftHuman,
+      right: rightHuman,
     };
-    this.localRoom.started = true;
+    this.localRoom.players = {
+      left: leftHuman ? [{ id: '__LOCAL_WEST__', name: defaultKeyboardName('left', this.state.themeMode), slot: 0 }] : [],
+      right: rightHuman ? [{ id: '__LOCAL_EAST__', name: defaultKeyboardName('right', this.state.themeMode), slot: 0 }] : [],
+    };
+    if (typeof this.localRoom.setCpuSlots === 'function') {
+      this.localRoom.setCpuSlots({
+        left: [leftCpu],
+        right: [rightCpu],
+      });
+    }
+    this.localRoom.started = this.localRoom.isReadyToStart();
     this.localRoom.gameOver = false;
     this.localRoom.winner = null;
 
@@ -882,11 +929,11 @@ export class GameClient {
 
     this.localPressedKeys.clear();
     this.localKeyboardTestActive = true;
-    if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardActiveHintText();
-    if (this.localKeyboardTestBtn) this.localKeyboardTestBtn.textContent = 'Restart Keyboard Match';
+    if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardActiveHintText(localMode);
+    this.setLocalKeyboardButtonsForActiveMode(localMode);
 
-    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = this.keyboardStartMessageText();
-    if (this.lobbyMsg) this.lobbyMsg.textContent = 'Keyboard mode active on this computer (1v1).';
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = this.keyboardStartMessageText(localMode);
+    if (this.lobbyMsg) this.lobbyMsg.textContent = `${this.localKeyboardModeLabel(localMode)} active on this computer (1v1).`;
 
     this.resetGameOverPresentation();
     this.setPostGamePanel(false);
@@ -906,31 +953,32 @@ export class GameClient {
 
   updateLocalKeyboardAiming(dt) {
     if (!this.localKeyboardTestActive || !this.localRoom || this.localRoom.gameOver) return;
-    if (!this.localPressedKeys.size) return;
+    const controlLeft = Boolean(this.localKeyboardControlSides?.left);
+    const controlRight = Boolean(this.localKeyboardControlSides?.right);
+    if ((!controlLeft && !controlRight) || !this.localPressedKeys.size) return;
 
     const delta = Math.max(0.01, dt) * LOCAL_KEYBOARD_AIM_SPEED;
-    const left = this.localRoom.ensureArcherControl('left', 0);
-    const right = this.localRoom.ensureArcherControl('right', 0);
-    if (!left || !right) return;
+    const left = controlLeft ? this.localRoom.ensureArcherControl('left', 0) : null;
+    const right = controlRight ? this.localRoom.ensureArcherControl('right', 0) : null;
 
     const leftDx = (this.localPressedKeys.has('KeyA') ? 1 : 0) - (this.localPressedKeys.has('KeyD') ? 1 : 0);
     const leftDy = (this.localPressedKeys.has('KeyS') ? 1 : 0) - (this.localPressedKeys.has('KeyW') ? 1 : 0);
     const rightDx = (this.localPressedKeys.has('ArrowLeft') ? 1 : 0) - (this.localPressedKeys.has('ArrowRight') ? 1 : 0);
     const rightDy = (this.localPressedKeys.has('ArrowDown') ? 1 : 0) - (this.localPressedKeys.has('ArrowUp') ? 1 : 0);
 
-    if (leftDx || leftDy) {
+    if (left && (leftDx || leftDy)) {
       const next = this.localRoom.normalizePull('left', left.pullX + leftDx * delta, left.pullY + leftDy * delta);
       left.pullX = next.x;
       left.pullY = next.y;
     }
-    if (rightDx || rightDy) {
+    if (right && (rightDx || rightDy)) {
       const next = this.localRoom.normalizePull('right', right.pullX + rightDx * delta, right.pullY + rightDy * delta);
       right.pullX = next.x;
       right.pullY = next.y;
     }
 
-    this.localRoom.syncSidePrimaryPull('left');
-    this.localRoom.syncSidePrimaryPull('right');
+    if (left) this.localRoom.syncSidePrimaryPull('left');
+    if (right) this.localRoom.syncSidePrimaryPull('right');
   }
 
   pushHostState(force = false) {
@@ -1063,6 +1111,52 @@ export class GameClient {
     });
   }
 
+  requestCpuSlotChange(side = 'left', slot = 0, enabled = false) {
+    if (this.isController || !this.state.roomId) return;
+    this.socket.emit('set_cpu_slot', {
+      roomId: this.state.roomId,
+      side: side === 'right' ? 'right' : 'left',
+      slot: Math.max(0, Math.floor(Number(slot) || 0)),
+      enabled: Boolean(enabled),
+    });
+  }
+
+  normalizedLocalKeyboardMode(mode = LOCAL_KEYBOARD_MODE_HVH) {
+    if (mode === LOCAL_KEYBOARD_MODE_VS_CPU) return LOCAL_KEYBOARD_MODE_VS_CPU;
+    if (mode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) return LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+    return LOCAL_KEYBOARD_MODE_HVH;
+  }
+
+  localKeyboardModeLabel(mode = this.localKeyboardMode) {
+    const normalized = this.normalizedLocalKeyboardMode(mode);
+    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) return 'Vs CPU';
+    if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) return 'CPU Vs CPU';
+    return 'Keyboard 1v1';
+  }
+
+  setLocalKeyboardButtonsForActiveMode(mode = this.localKeyboardMode) {
+    this.localKeyboardMode = this.normalizedLocalKeyboardMode(mode);
+    const activeMode = this.normalizedLocalKeyboardMode(this.localKeyboardMode);
+    const isHvHActive = this.localKeyboardTestActive && activeMode === LOCAL_KEYBOARD_MODE_HVH;
+    const isVsCpuActive = this.localKeyboardTestActive && activeMode === LOCAL_KEYBOARD_MODE_VS_CPU;
+    const isCpuVsCpuActive = this.localKeyboardTestActive && activeMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+    if (this.localKeyboardTestBtn) {
+      this.localKeyboardTestBtn.textContent = isHvHActive
+        ? 'Restart Keyboard Match'
+        : 'Play On This Computer (Keyboard)';
+    }
+    if (this.localKeyboardVsCpuBtn) {
+      this.localKeyboardVsCpuBtn.textContent = isVsCpuActive
+        ? 'Restart Vs CPU'
+        : 'Play Vs CPU';
+    }
+    if (this.localCpuVsCpuBtn) {
+      this.localCpuVsCpuBtn.textContent = isCpuVsCpuActive
+        ? 'Restart CPU Vs CPU'
+        : 'CPU Vs CPU';
+    }
+  }
+
   syncModeToggleButtons(twoBtn, fourBtn, normalizedMode) {
     const twoPlayers = normalizedMode === '1v1';
     if (twoBtn) {
@@ -1120,18 +1214,39 @@ export class GameClient {
   }
 
   keyboardMatchHintText() {
-    return `Keyboard mode: ${sideDisplayName('left', this.state.themeMode)} aims with W/A/S/D and ${sideDisplayName('right', this.state.themeMode)} aims with Arrow keys. Pick keyboard or phones per match.`;
+    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU, 3) CPU Vs CPU. Pick keyboard or phones per match.`;
   }
 
-  keyboardActiveHintText() {
+  keyboardActiveHintText(mode = this.localKeyboardMode) {
+    const normalized = this.normalizedLocalKeyboardMode(mode);
+    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
+      return `${sideDisplayName('left', this.state.themeMode)} keyboard vs ${sideDisplayName('right', this.state.themeMode)} CPU. Use W/A/S/D to aim.`;
+    }
+    if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
+      return 'CPU vs CPU active. Both sides use AI aiming and rubberband behavior.';
+    }
     return 'Keyboard mode active. Hold keys to smoothly move each side aim cursor. Phone controllers are disabled in this match.';
   }
 
-  keyboardStartMessageText() {
+  keyboardStartMessageText(mode = this.localKeyboardMode) {
+    const normalized = this.normalizedLocalKeyboardMode(mode);
+    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
+      return `Keyboard Vs CPU started. ${sideShortName('left', this.state.themeMode)}: W/A/S/D | ${sideShortName('right', this.state.themeMode)}: CPU AI.`;
+    }
+    if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
+      return `CPU Vs CPU started. ${sideShortName('left', this.state.themeMode)} and ${sideShortName('right', this.state.themeMode)} are both AI controlled.`;
+    }
     return `Keyboard match started. ${sideShortName('left', this.state.themeMode)}: W/A/S/D | ${sideShortName('right', this.state.themeMode)}: Arrow keys. Use phones in a separate match.`;
   }
 
-  keyboardControlsLegendText() {
+  keyboardControlsLegendText(mode = this.localKeyboardMode) {
+    const normalized = this.normalizedLocalKeyboardMode(mode);
+    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
+      return `Controls: ${sideShortName('left', this.state.themeMode)} W/A/S/D / ${sideShortName('right', this.state.themeMode)} CPU`;
+    }
+    if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
+      return 'Controls: CPU vs CPU';
+    }
     return `Controls: ${sideShortName('left', this.state.themeMode)} W/A/S/D / ${sideShortName('right', this.state.themeMode)} Arrows`;
   }
 
@@ -1194,7 +1309,11 @@ export class GameClient {
     if (this.themeModeHint) this.themeModeHint.textContent = this.themedModeHintText();
     if (this.lobbyThemeModeHint) this.lobbyThemeModeHint.textContent = this.themedModeHintText();
     if (this.postChartHelp) this.postChartHelp.textContent = this.postChartHelpText();
-    if (this.localKeyboardHint && !this.localKeyboardTestActive) this.localKeyboardHint.textContent = this.keyboardMatchHintText();
+    if (this.localKeyboardHint) {
+      this.localKeyboardHint.textContent = this.localKeyboardTestActive
+        ? this.keyboardActiveHintText(this.localKeyboardMode)
+        : this.keyboardMatchHintText();
+    }
   }
 
   applyThemeMode(themeMode, options = {}) {
@@ -1275,9 +1394,18 @@ export class GameClient {
 
   findLobbyPlayer(players, slot = 0) {
     if (!Array.isArray(players) || slot < 0) return null;
-    const bySlot = players.find((p) => Number(p?.slot) === slot);
+    const bySlot = players.find((p) => {
+      const playerSlot = Number(p?.slot);
+      return Number.isFinite(playerSlot) && Math.floor(playerSlot) === slot;
+    });
     if (bySlot) return bySlot;
-    return players[slot] || null;
+    for (let i = 0; i < players.length; i += 1) {
+      const player = players[i];
+      const playerSlot = Number(player?.slot);
+      if (Number.isFinite(playerSlot)) continue;
+      if (i === slot) return player;
+    }
+    return null;
   }
 
   getLobbyPreviewSource() {
@@ -1302,6 +1430,15 @@ export class GameClient {
         left: Array.isArray(leftSide?.archerPulls) ? leftSide.archerPulls : [],
         right: Array.isArray(rightSide?.archerPulls) ? rightSide.archerPulls : [],
       },
+      cpuSlots: {
+        left: Array.isArray(room?.cpuSlots?.left)
+          ? room.cpuSlots.left
+          : (Array.isArray(snapshot?.cpuSlots?.left) ? snapshot.cpuSlots.left : []),
+        right: Array.isArray(room?.cpuSlots?.right)
+          ? room.cpuSlots.right
+          : (Array.isArray(snapshot?.cpuSlots?.right) ? snapshot.cpuSlots.right : []),
+      },
+      started: Boolean(room?.started || snapshot?.started),
     };
   }
 
@@ -1340,6 +1477,62 @@ export class GameClient {
     entry.aimDot.style.opacity = connected ? '1' : '0.45';
   }
 
+  cpuSlotFromSource(source, side = 'left', slot = 0) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    return Boolean(source?.cpuSlots?.[sideName]?.[lane]);
+  }
+
+  canEditCpuSlots(source = null) {
+    if (this.isController) return false;
+    if (!this.hostAuthoritative || !this.state.roomId) return false;
+    if (this.localKeyboardTestActive) return false;
+    if (source?.started) return false;
+    return true;
+  }
+
+  countFilledLobbySeats(source, side = 'left', archersPerSide = 1) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    let count = 0;
+    for (let slot = 0; slot < archersPerSide; slot += 1) {
+      const hasHuman = Boolean(this.findLobbyPlayer(source?.players?.[sideName] || [], slot));
+      const hasCpu = this.cpuSlotFromSource(source, sideName, slot);
+      if (hasHuman || hasCpu) count += 1;
+    }
+    return count;
+  }
+
+  countCpuLobbySeats(source, side = 'left', archersPerSide = 1) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    let count = 0;
+    for (let slot = 0; slot < archersPerSide; slot += 1) {
+      if (this.cpuSlotFromSource(source, sideName, slot)) count += 1;
+    }
+    return count;
+  }
+
+  handleCpuSlotToggle(entry) {
+    if (!entry || !this.state.roomId) return;
+    const source = this.getLobbyPreviewSource();
+    const editable = this.canEditCpuSlots(source);
+    if (!editable) {
+      if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'CPU slots can only be changed before the match starts.';
+      return;
+    }
+    const hasHuman = Boolean(this.findLobbyPlayer(source?.players?.[entry.side] || [], entry.slot));
+    if (hasHuman) {
+      if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'A controller is already connected in that slot.';
+      return;
+    }
+    const nextEnabled = !this.cpuSlotFromSource(source, entry.side, entry.slot);
+    if (this.lobbyModeMsg) {
+      this.lobbyModeMsg.textContent = nextEnabled
+        ? `Filling ${sideShortName(entry.side, this.state.themeMode)} slot ${entry.slot + 1} with CPU...`
+        : `Removing CPU from ${sideShortName(entry.side, this.state.themeMode)} slot ${entry.slot + 1}...`;
+    }
+    this.requestCpuSlotChange(entry.side, entry.slot, nextEnabled);
+  }
+
   renderLobbyPhoneSlot(entry, source, archersPerSide) {
     if (!entry?.el) return;
     const inMode = entry.slot < archersPerSide;
@@ -1351,27 +1544,45 @@ export class GameClient {
     const sideState = source?.sideState?.[entry.side] || null;
     const player = this.findLobbyPlayer(sidePlayers, entry.slot);
     const connected = Boolean(player);
+    const cpuFilled = this.cpuSlotFromSource(source, entry.side, entry.slot) && !connected;
+    const occupied = connected || cpuFilled;
     const baseName = defaultArcherName(entry.side, entry.slot, this.state.themeMode);
-    const playerName = connected && player?.name ? String(player.name) : baseName;
-    const pull = connected ? sidePulls[entry.slot] : null;
+    const playerName = connected && player?.name
+      ? String(player.name)
+      : (cpuFilled ? `${baseName} (CPU)` : baseName);
+    const pull = occupied ? sidePulls[entry.slot] : null;
     const shot = this.computeLobbyShotPreview(entry.side, pull || this.defaultLobbyPull(entry.side));
     const pendingPower = sideState?.pendingShotPower
       ? (SHOT_POWER_LABELS[sideState.pendingShotPower] || sideState.pendingShotPower)
       : null;
 
-    entry.el.classList.toggle('waiting', !connected);
+    entry.el.classList.toggle('waiting', !occupied);
     entry.el.classList.toggle('connected', connected);
-    if (entry.chip) entry.chip.textContent = connected ? (this.localKeyboardTestActive ? 'Keyboard' : 'Connected') : 'Waiting';
+    entry.el.classList.toggle('cpu', cpuFilled);
+    if (entry.chip) {
+      if (connected) entry.chip.textContent = this.localKeyboardTestActive ? 'Keyboard' : 'Connected';
+      else if (cpuFilled) entry.chip.textContent = 'CPU';
+      else entry.chip.textContent = 'Waiting';
+    }
     if (entry.player) entry.player.textContent = playerName;
     if (entry.meta) {
-      entry.meta.textContent = connected
+      entry.meta.textContent = occupied
         ? `Power ${Math.round(shot.power * 100)}% | Arc ${shot.arcDeg}deg${pendingPower ? ` | ${pendingPower}` : ''}`
-        : 'No controller connected';
+        : 'No controller or CPU in slot';
     }
     if (entry.powerFill) {
-      entry.powerFill.style.width = `${Math.round((connected ? shot.power : 0) * 100)}%`;
+      entry.powerFill.style.width = `${Math.round((occupied ? shot.power : 0) * 100)}%`;
     }
-    this.paintLobbyShotPreview(entry, entry.side, shot, connected);
+    if (entry.cpuToggle) {
+      const editable = this.canEditCpuSlots(source) && !connected;
+      entry.cpuToggle.disabled = !editable;
+      entry.cpuToggle.classList.toggle('active', cpuFilled);
+      entry.cpuToggle.textContent = cpuFilled ? 'CPU Filled' : 'Fill With CPU';
+      entry.cpuToggle.title = connected
+        ? 'Controller connected in this slot'
+        : (editable ? 'Toggle CPU for this slot' : 'CPU slots lock after the match starts');
+    }
+    this.paintLobbyShotPreview(entry, entry.side, shot, occupied);
   }
 
   renderLobbyPhonePreviews() {
@@ -1379,11 +1590,13 @@ export class GameClient {
     const mode = this.state.mode === '2v2' ? '2v2' : '1v1';
     const archersPerSide = mode === '2v2' ? 2 : 1;
     const source = this.getLobbyPreviewSource();
-    const leftCount = Array.isArray(source?.players?.left) ? source.players.left.length : 0;
-    const rightCount = Array.isArray(source?.players?.right) ? source.players.right.length : 0;
+    const leftFilled = this.countFilledLobbySeats(source, 'left', archersPerSide);
+    const rightFilled = this.countFilledLobbySeats(source, 'right', archersPerSide);
+    const leftCpu = this.countCpuLobbySeats(source, 'left', archersPerSide);
+    const rightCpu = this.countCpuLobbySeats(source, 'right', archersPerSide);
 
-    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `${sideShortName('left', this.state.themeMode)} Controllers ${leftCount}/${archersPerSide}`;
-    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `${sideShortName('right', this.state.themeMode)} Controllers ${rightCount}/${archersPerSide}`;
+    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `${sideShortName('left', this.state.themeMode)} Seats ${leftFilled}/${archersPerSide} (CPU ${leftCpu})`;
+    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `${sideShortName('right', this.state.themeMode)} Seats ${rightFilled}/${archersPerSide} (CPU ${rightCpu})`;
 
     for (const entry of this.lobbyPhoneSlots) {
       this.renderLobbyPhoneSlot(entry, source, archersPerSide);
@@ -3023,10 +3236,17 @@ export class GameClient {
       this.setPostGamePanel(false);
       const required = Number(snapshot.requiredPlayers) || (snapshot.mode === '2v2' ? 4 : 2);
       const count = Number(snapshot.playerCount) || 0;
-      const leftCount = Array.isArray(snapshot.players?.left) ? snapshot.players.left.length : (snapshot.players?.left ? 1 : 0);
-      const rightCount = Array.isArray(snapshot.players?.right) ? snapshot.players.right.length : (snapshot.players?.right ? 1 : 0);
+      const perSide = Math.max(1, Math.floor(required / 2));
+      const leftCount = this.countFilledLobbySeats({
+        players: { left: snapshot.players?.left || [] },
+        cpuSlots: { left: snapshot.cpuSlots?.left || [] },
+      }, 'left', perSide);
+      const rightCount = this.countFilledLobbySeats({
+        players: { right: snapshot.players?.right || [] },
+        cpuSlots: { right: snapshot.cpuSlots?.right || [] },
+      }, 'right', perSide);
       if (this.lobbyMsg) {
-        this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} controllers (${count}/${required}) | ${sideShortName('left', this.state.themeMode)} ${leftCount}/${required / 2} | ${sideShortName('right', this.state.themeMode)} ${rightCount}/${required / 2}`;
+        this.lobbyMsg.textContent = `Mode ${this.state.mode.toUpperCase()} | Waiting for ${required} seats (${count}/${required}) | ${sideShortName('left', this.state.themeMode)} ${leftCount}/${perSide} | ${sideShortName('right', this.state.themeMode)} ${rightCount}/${perSide}`;
       }
       this.renderLobbyPhonePreviews();
     }

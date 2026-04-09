@@ -43,6 +43,12 @@ import {
 const ARCHER_ORIGIN_Y = TOWER_Y - 56;
 const ARCHER_VERTICAL_GAP = 78;
 const SHOT_INTERVAL = 1;
+const CPU_RETARGET_MIN_SECONDS = 0.18;
+const CPU_RETARGET_MAX_SECONDS = 0.44;
+const CPU_PULL_FOLLOW_SPEED = 8.2;
+const CPU_MIN_SOLUTION_DX = 44;
+const CPU_MAX_SOLUTION_TTL = 5.6;
+const CPU_GOLD_GAP_NORMALIZE = 1000;
 
 // Shot power drop frequency (seconds)
 const SHOT_POWER_SPAWN_MIN_INTERVAL = 10;
@@ -782,11 +788,13 @@ class GameRoom {
     this.baseUrl = baseUrl;
     this.display = null;
     this.players = { left: [], right: [] };
+    this.cpuSlots = this.createCpuSlots();
     this.started = false;
     this.gameOver = false;
     this.winner = null;
     this.nextBalancedJoinSide = 'left';
     this.t = 0;
+    this.cpuAimState = new Map();
 
     this.left = left;
     this.right = right;
@@ -843,6 +851,7 @@ class GameRoom {
       cannonBalls: this.cannonBalls,
       upgradeCards: this.upgradeCards,
       players: this.players,
+      cpuSlots: this.cpuSlots,
       primaryPlayers: this.displayPrimaryPlayers,
       postGameReport: null,
       debug: this.displayDebug,
@@ -907,6 +916,7 @@ class GameRoom {
     snapshot.cannonBalls = this.cannonBalls;
     snapshot.upgradeCards = this.upgradeCards;
     snapshot.players = this.players;
+    snapshot.cpuSlots = this.cpuSlots;
     this.displayPrimaryPlayers.left = this.players.left[0] || null;
     this.displayPrimaryPlayers.right = this.players.right[0] || null;
     snapshot.primaryPlayers = this.displayPrimaryPlayers;
@@ -938,6 +948,78 @@ class GameRoom {
     this.themeMode = nextMode;
     if (options?.renamePlayers !== false) this.renameDefaultPlayerNamesForTheme();
     return { changed: true, themeMode: this.themeMode };
+  }
+
+  createCpuSlots() {
+    return {
+      left: Array.from({ length: this.archersPerSide }, () => false),
+      right: Array.from({ length: this.archersPerSide }, () => false),
+    };
+  }
+
+  normalizeCpuSlotsShape(raw = null) {
+    const source = raw && typeof raw === 'object' ? raw : this.cpuSlots;
+    const next = {
+      left: Array.from({ length: this.archersPerSide }, (_unused, idx) => Boolean(source?.left?.[idx])),
+      right: Array.from({ length: this.archersPerSide }, (_unused, idx) => Boolean(source?.right?.[idx])),
+    };
+    this.cpuSlots = next;
+    return next;
+  }
+
+  setCpuSlots(nextSlots = null) {
+    this.normalizeCpuSlotsShape(nextSlots);
+    this.started = this.isReadyToStart();
+  }
+
+  hasHumanInSlot(sideName, slot = 0) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    return this.players[side].some((p) => Number(p?.slot) === lane);
+  }
+
+  isCpuSlotEnabled(sideName, slot = 0) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    if (lane >= this.archersPerSide) return false;
+    return Boolean(this.cpuSlots?.[side]?.[lane]);
+  }
+
+  setCpuSlot(sideName, slot = 0, enabled = false) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const lane = Math.floor(Number(slot));
+    if (!Number.isFinite(lane) || lane < 0 || lane >= this.archersPerSide) return { ok: false };
+    if (Boolean(enabled) && this.hasHumanInSlot(side, lane)) {
+      return { ok: false, message: 'Controller already connected in that slot.' };
+    }
+    this.normalizeCpuSlotsShape();
+    this.cpuSlots[side][lane] = Boolean(enabled);
+    this.started = this.isReadyToStart();
+    return { ok: true };
+  }
+
+  filledSlotsForSide(sideName) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    let count = 0;
+    for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+      if (this.hasHumanInSlot(side, slot) || this.isCpuSlotEnabled(side, slot)) count += 1;
+    }
+    return count;
+  }
+
+  cpuSlotActive(sideName, slot = 0) {
+    return this.isCpuSlotEnabled(sideName, slot) && !this.hasHumanInSlot(sideName, slot);
+  }
+
+  availableHumanJoinSlots(sideName) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const open = [];
+    for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+      if (this.isCpuSlotEnabled(side, slot)) continue;
+      if (this.hasHumanInSlot(side, slot)) continue;
+      open.push(slot);
+    }
+    return open;
   }
 
   setDebugConfig(rawConfig = null) {
@@ -1578,6 +1660,10 @@ class GameRoom {
         left: leftPlayers,
         right: rightPlayers,
       },
+      cpuSlots: {
+        left: Array.isArray(this.cpuSlots?.left) ? this.cpuSlots.left.slice(0, this.archersPerSide).map(Boolean) : [],
+        right: Array.isArray(this.cpuSlots?.right) ? this.cpuSlots.right.slice(0, this.archersPerSide).map(Boolean) : [],
+      },
       primaryPlayers: {
         left: leftPrimary,
         right: rightPrimary,
@@ -1662,14 +1748,24 @@ class GameRoom {
     if (nextMode === this.mode) return { ok: true, changed: false };
 
     const nextArchersPerSide = nextMode === '2v2' ? 2 : 1;
-    if (this.players.left.length > nextArchersPerSide || this.players.right.length > nextArchersPerSide) {
-      return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+    for (const side of ['left', 'right']) {
+      const outOfRangeHuman = this.players[side].some((p) => (Number(p?.slot) || 0) >= nextArchersPerSide);
+      if (outOfRangeHuman) {
+        return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+      }
+      const outOfRangeCpu = Array.isArray(this.cpuSlots?.[side])
+        && this.cpuSlots[side].some((flag, idx) => idx >= nextArchersPerSide && Boolean(flag));
+      if (outOfRangeCpu) {
+        return { ok: false, message: 'Disable extra CPU slots before switching to 2 players.' };
+      }
     }
 
     this.mode = nextMode;
     this.archersPerSide = nextArchersPerSide;
+    this.normalizeCpuSlotsShape();
     this.resizeSideArcherControls('left');
     this.resizeSideArcherControls('right');
+    this.cpuAimState.clear();
     this.sharedShotCd = Math.min(Math.max(0, this.sharedShotCd), SHOT_INTERVAL);
     this.left.shotCd = this.sharedShotCd;
     this.right.shotCd = this.sharedShotCd;
@@ -1692,6 +1788,7 @@ class GameRoom {
     this.gameOver = false;
     this.winner = null;
     this.t = 0;
+    this.cpuAimState.clear();
     this.sharedShotCd = SHOT_INTERVAL;
     this.left.shotCd = this.sharedShotCd;
     this.right.shotCd = this.sharedShotCd;
@@ -1757,11 +1854,12 @@ class GameRoom {
   }
 
   totalPlayers() {
-    return this.players.left.length + this.players.right.length;
+    return this.filledSlotsForSide('left') + this.filledSlotsForSide('right');
   }
 
   isReadyToStart() {
-    return this.players.left.length >= this.archersPerSide && this.players.right.length >= this.archersPerSide;
+    return this.filledSlotsForSide('left') >= this.archersPerSide
+      && this.filledSlotsForSide('right') >= this.archersPerSide;
   }
 
   syncSidePrimaryPull(sideName) {
@@ -1805,31 +1903,31 @@ class GameRoom {
   addPlayer(socketId, name) {
     const existing = this.playerBySocket(socketId);
     if (existing) return { side: existing.side, slot: existing.slot, existing: true };
-    if (this.totalPlayers() >= this.requiredPlayers()) return null;
+    const leftOpen = this.availableHumanJoinSlots('left');
+    const rightOpen = this.availableHumanJoinSlots('right');
+    if (!leftOpen.length && !rightOpen.length) return null;
 
-    const leftCount = this.players.left.length;
-    const rightCount = this.players.right.length;
     let side = 'left';
-    if (leftCount === rightCount) {
-      side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
-      this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+    if (leftOpen.length && rightOpen.length) {
+      const leftCount = this.players.left.length;
+      const rightCount = this.players.right.length;
+      if (leftCount === rightCount) {
+        side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
+        const preferredOpen = side === 'left' ? leftOpen : rightOpen;
+        if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
+        this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+      } else if (leftCount < rightCount) {
+        side = leftOpen.length ? 'left' : 'right';
+      } else {
+        side = rightOpen.length ? 'right' : 'left';
+      }
     } else {
-      side = leftCount < rightCount ? 'left' : 'right';
+      side = leftOpen.length ? 'left' : 'right';
     }
-    const slot = this.players[side].length;
-    if (slot >= this.archersPerSide) {
-      const otherSide = side === 'left' ? 'right' : 'left';
-      const otherSlot = this.players[otherSide].length;
-      if (otherSlot >= this.archersPerSide) return null;
-      const player = {
-        id: socketId,
-        name: name || this.defaultPlayerNameForSide(otherSide, otherSlot),
-        slot: otherSlot,
-      };
-      this.players[otherSide].push(player);
-      this.started = this.isReadyToStart();
-      return { side: otherSide, slot: otherSlot, existing: false };
-    }
+
+    const sideOpen = side === 'left' ? leftOpen : rightOpen;
+    const slot = sideOpen[0];
+    if (!Number.isFinite(slot)) return null;
 
     const player = {
       id: socketId,
@@ -1864,16 +1962,10 @@ class GameRoom {
     }
     const leftBefore = this.players.left.length;
     this.players.left = this.players.left.filter((p) => p.id !== socketId);
-    if (this.players.left.length !== leftBefore) {
-      this.players.left.forEach((p, idx) => { p.slot = idx; });
-      changed = true;
-    }
+    if (this.players.left.length !== leftBefore) changed = true;
     const rightBefore = this.players.right.length;
     this.players.right = this.players.right.filter((p) => p.id !== socketId);
-    if (this.players.right.length !== rightBefore) {
-      this.players.right.forEach((p, idx) => { p.slot = idx; });
-      changed = true;
-    }
+    if (this.players.right.length !== rightBefore) changed = true;
 
     if (changed) this.started = this.isReadyToStart();
 
@@ -1947,6 +2039,7 @@ class GameRoom {
     if (this.left.specialFailTtl === 0) this.left.specialFailType = null;
     if (this.right.specialFailTtl === 0) this.right.specialFailType = null;
     // Keep last special roll result visible for UI history; TTL controls recency only.
+    this.updateCpuAiming(dt);
 
     if (this.sharedShotCd === 0) {
       this.beginArrowVolley('left');
@@ -8102,6 +8195,242 @@ class GameRoom {
       ny /= mag;
     }
     return { x: nx, y: ny };
+  }
+
+  cpuDefaultPull(sideName = 'left') {
+    return {
+      x: sideName === 'right' ? 0.78 : -0.78,
+      y: -0.08,
+    };
+  }
+
+  cpuSideTotalGold(sideName = 'left') {
+    const side = sideName === 'right' ? this.right : this.left;
+    const total = Number(side?.goldEarnedTotal);
+    if (Number.isFinite(total)) return Math.max(0, total);
+    return Math.max(0, Number(side?.gold) || 0);
+  }
+
+  cpuRubberbandFactor(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const enemy = side === 'left' ? 'right' : 'left';
+    const goldGap = this.cpuSideTotalGold(enemy) - this.cpuSideTotalGold(side);
+    return clamp(goldGap / CPU_GOLD_GAP_NORMALIZE, -1, 1);
+  }
+
+  cpuAimProfile(sideName = 'left') {
+    const rubber = this.cpuRubberbandFactor(sideName);
+    const behind = Math.max(0, rubber);
+    const ahead = Math.max(0, -rubber);
+    const accuracy = clamp(0.7 + behind * 0.2 - ahead * 0.22, 0.42, 0.96);
+    const hitNoisePx = 3 + (1 - accuracy) * 26;
+    const missNoisePx = 24 + ahead * 92;
+    const retargetMin = CPU_RETARGET_MIN_SECONDS * (1 + ahead * 0.8 - behind * 0.34);
+    const retargetMax = CPU_RETARGET_MAX_SECONDS * (1 + ahead * 0.9 - behind * 0.28);
+    return {
+      accuracy,
+      hitNoisePx,
+      missNoisePx,
+      retargetMin: clamp(retargetMin, 0.08, 0.6),
+      retargetMax: clamp(Math.max(retargetMin + 0.01, retargetMax), 0.14, 0.9),
+      behind,
+      ahead,
+    };
+  }
+
+  cpuUpgradeTarget(sideName = 'left') {
+    const side = sideName === 'right' ? this.right : this.left;
+    if ((Number(side?.upgradeCharge) || 0) < (Number(side?.upgradeChargeMax) || 0)) return null;
+    for (const card of this.upgradeCards) {
+      if (!card || card.side !== sideName) continue;
+      return {
+        type: 'upgrade',
+        x: Number(card.x) || 0,
+        y: Number(card.y) || 0,
+      };
+    }
+    return null;
+  }
+
+  cpuResourceTarget(sideName = 'left', slot = 0, profile = null) {
+    if (!Array.isArray(this.resources) || this.resources.length === 0) return null;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const sx = side === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+    const sy = ARCHER_ORIGIN_Y - Math.max(0, Math.floor(Number(slot) || 0)) * ARCHER_VERTICAL_GAP;
+    const dir = side === 'left' ? 1 : -1;
+    const behindBias = Math.max(0, Number(profile?.behind) || 0);
+    let best = null;
+    let bestScore = -Infinity;
+    for (const res of this.resources) {
+      if (!res) continue;
+      const rx = Number(res.x) || 0;
+      const ry = Number(res.y) || 0;
+      const dxForward = (rx - sx) * dir;
+      if (dxForward < CPU_MIN_SOLUTION_DX * 0.8) continue;
+      const dist = Math.hypot(rx - sx, ry - sy);
+      // Gold/resource is intentionally top priority for CPU behavior.
+      const score = 160 + behindBias * 100 - dist * 0.22 + Math.random() * 8;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { type: 'resource', x: rx, y: ry };
+      }
+    }
+    return best;
+  }
+
+  cpuMinionTarget(sideName = 'left', slot = 0, profile = null) {
+    if (!Array.isArray(this.minions) || this.minions.length === 0) return null;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const enemy = side === 'left' ? 'right' : 'left';
+    const sx = side === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+    const sy = ARCHER_ORIGIN_Y - Math.max(0, Math.floor(Number(slot) || 0)) * ARCHER_VERTICAL_GAP;
+    const ourTowerX = side === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT;
+    const dir = side === 'left' ? 1 : -1;
+    const behindBias = Math.max(0, Number(profile?.behind) || 0);
+    let best = null;
+    let bestScore = -Infinity;
+    for (const m of this.minions) {
+      if (!m || m.removed || m.side !== enemy) continue;
+      if ((Number(m.hp) || 0) <= 0) continue;
+      const mx = Number(m.x) || 0;
+      const my = Number(m.y) || 0;
+      const dxForward = (mx - sx) * dir;
+      if (dxForward < CPU_MIN_SOLUTION_DX) continue;
+      const dist = Math.hypot(mx - sx, my - sy);
+      const distToOurTower = Math.abs(mx - ourTowerX);
+      let threat = 0;
+      if (m.hero) threat += 90;
+      if (m.stoneGolem) threat += 88;
+      if (m.dragon) threat += 70;
+      if (m.balloon) threat += 66;
+      if (m.super) threat += 42;
+      if (m.president || m.monk || m.necrominion) threat += 24;
+      const score = threat + behindBias * 22 + (420 - distToOurTower * 0.32) - dist * 0.16 + Math.random() * 7;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { type: 'minion', id: m.id, x: mx, y: my };
+      }
+    }
+    return best;
+  }
+
+  cpuTargetForSlot(sideName = 'left', slot = 0, profile = null) {
+    const resourceTarget = this.cpuResourceTarget(sideName, slot, profile);
+    if (resourceTarget) return resourceTarget;
+    const minionTarget = this.cpuMinionTarget(sideName, slot, profile);
+    if (minionTarget) return minionTarget;
+    const upgradeTarget = this.cpuUpgradeTarget(sideName);
+    if (upgradeTarget) return upgradeTarget;
+    const enemyTowerX = sideName === 'left' ? TOWER_X_RIGHT - 48 : TOWER_X_LEFT + 48;
+    return { type: 'tower', x: enemyTowerX, y: TOWER_Y - 24 };
+  }
+
+  solveCpuPullForTarget(sideName = 'left', slot = 0, targetX = 0, targetY = 0) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const dir = side === 'left' ? 1 : -1;
+    const sx = side === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+    const sy = ARCHER_ORIGIN_Y - Math.max(0, Math.floor(Number(slot) || 0)) * ARCHER_VERTICAL_GAP;
+    const tx = Number(targetX) || 0;
+    const ty = Number(targetY) || 0;
+    const dx = (tx - sx) * dir;
+    if (dx < CPU_MIN_SOLUTION_DX) return null;
+
+    let best = null;
+    let bestErr = Infinity;
+    for (let h = 0.24; h <= 1.0001; h += 0.04) {
+      for (let v = 0; v <= 0.9601; v += 0.04) {
+        const mag = Math.hypot(h, v);
+        if (mag > 1) continue;
+        const angle = Math.atan2(v, h);
+        const strength = Math.max(0.05, Math.min(1, mag));
+        const speed = (230 + strength * 380) * 1.5;
+        const cos = Math.cos(angle);
+        if (cos <= 0.001) continue;
+        const ttl = dx / (cos * speed);
+        if (!(ttl > 0.06 && ttl < CPU_MAX_SOLUTION_TTL)) continue;
+        const gravity = 980 - strength * 220;
+        const yPred = sy - Math.sin(angle) * speed * ttl + 0.5 * gravity * ttl * ttl;
+        const err = Math.abs(yPred - ty) + Math.abs(ttl - 1.35) * 3.2;
+        if (err < bestErr) {
+          bestErr = err;
+          best = {
+            pullX: side === 'left' ? -h : h,
+            pullY: -v,
+            ttl,
+            error: err,
+          };
+        }
+      }
+    }
+    return best;
+  }
+
+  updateCpuAiming(dt) {
+    if (this.gameOver || !this.started) return;
+    const staleKeys = [];
+    for (const [key, entry] of this.cpuAimState.entries()) {
+      const [sideName, slotText] = String(key).split(':');
+      const slot = Math.max(0, Math.floor(Number(slotText) || 0));
+      if (!this.cpuSlotActive(sideName, slot)) staleKeys.push(key);
+      else if (!entry || typeof entry !== 'object') staleKeys.push(key);
+    }
+    for (const key of staleKeys) this.cpuAimState.delete(key);
+
+    for (const sideName of ['left', 'right']) {
+      for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+        if (!this.cpuSlotActive(sideName, slot)) continue;
+        const key = `${sideName}:${slot}`;
+        let state = this.cpuAimState.get(key);
+        if (!state) {
+          const base = this.cpuDefaultPull(sideName);
+          state = {
+            pullX: base.x,
+            pullY: base.y,
+            retargetAt: 0,
+          };
+          this.cpuAimState.set(key, state);
+        }
+
+        const profile = this.cpuAimProfile(sideName);
+        if (this.t >= (Number(state.retargetAt) || 0)) {
+          const target = this.cpuTargetForSlot(sideName, slot, profile);
+          let aimX = Number(target?.x) || 0;
+          let aimY = Number(target?.y) || 0;
+          const miss = Math.random() > profile.accuracy;
+          if (miss) {
+            const dir = sideName === 'left' ? 1 : -1;
+            aimX += dir * (12 + Math.random() * 56);
+            aimY += (Math.random() * 2 - 1) * profile.missNoisePx;
+          } else {
+            aimY += (Math.random() * 2 - 1) * profile.hitNoisePx;
+            aimX += (Math.random() * 2 - 1) * profile.hitNoisePx * 0.32;
+          }
+
+          const solved = this.solveCpuPullForTarget(sideName, slot, aimX, aimY);
+          if (solved) {
+            state.pullX = solved.pullX;
+            state.pullY = solved.pullY;
+          } else {
+            const fallback = this.cpuDefaultPull(sideName);
+            state.pullX = fallback.x;
+            state.pullY = fallback.y;
+          }
+          const retargetWindow = profile.retargetMax - profile.retargetMin;
+          state.retargetAt = this.t + profile.retargetMin + Math.random() * Math.max(0, retargetWindow);
+        }
+
+        const control = this.ensureArcherControl(sideName, slot);
+        if (!control) continue;
+        const follow = Math.min(1, Math.max(0.05, dt) * CPU_PULL_FOLLOW_SPEED);
+        const nextX = Number(control.pullX) + (Number(state.pullX) - Number(control.pullX)) * follow;
+        const nextY = Number(control.pullY) + (Number(state.pullY) - Number(control.pullY)) * follow;
+        const pull = this.normalizePull(sideName, nextX, nextY);
+        control.pullX = pull.x;
+        control.pullY = pull.y;
+        control.archerAimY = ARCHER_ORIGIN_Y - slot * ARCHER_VERTICAL_GAP;
+      }
+      this.syncSidePrimaryPull(sideName);
+    }
   }
 
   addArrowFromPull(sideName, archerSlot = 0) {

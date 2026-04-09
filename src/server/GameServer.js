@@ -97,6 +97,8 @@ class ServerRoom {
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.display = null;
     this.players = { left: [], right: [] };
+    this.cpuSlots = this.createCpuSlots();
+    this.nextBalancedJoinSide = 'left';
     this.started = false;
     this.gameOver = false;
     this.winner = null;
@@ -105,6 +107,65 @@ class ServerRoom {
     this.nextControllerStateEmitAtMs = null;
     this.hostAuthoritative = true;
     this.rematchVotes = new Set();
+  }
+
+  createCpuSlots() {
+    return {
+      left: Array.from({ length: this.archersPerSide }, () => false),
+      right: Array.from({ length: this.archersPerSide }, () => false),
+    };
+  }
+
+  normalizeCpuSlotsShape() {
+    if (!this.cpuSlots || typeof this.cpuSlots !== 'object') this.cpuSlots = {};
+    for (const side of ['left', 'right']) {
+      const current = Array.isArray(this.cpuSlots[side]) ? this.cpuSlots[side] : [];
+      this.cpuSlots[side] = Array.from(
+        { length: this.archersPerSide },
+        (_unused, idx) => Boolean(current[idx])
+      );
+    }
+  }
+
+  playerInSlot(side, slot) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    return this.players[sideName].find((p) => Number(p?.slot) === lane) || null;
+  }
+
+  isCpuSlot(side, slot) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    if (lane >= this.archersPerSide) return false;
+    return Boolean(this.cpuSlots?.[sideName]?.[lane]);
+  }
+
+  slotFilled(side, slot) {
+    return Boolean(this.playerInSlot(side, slot) || this.isCpuSlot(side, slot));
+  }
+
+  filledSlotsForSide(side) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    let count = 0;
+    for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+      if (this.slotFilled(sideName, slot)) count += 1;
+    }
+    return count;
+  }
+
+  totalFilledSlots() {
+    return this.filledSlotsForSide('left') + this.filledSlotsForSide('right');
+  }
+
+  availableHumanJoinSlots(side) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const open = [];
+    for (let slot = 0; slot < this.archersPerSide; slot += 1) {
+      if (this.isCpuSlot(sideName, slot)) continue;
+      if (this.playerInSlot(sideName, slot)) continue;
+      open.push(slot);
+    }
+    return open;
   }
 
   defaultPlayerNameForSide(side, slot = 0) {
@@ -131,7 +192,8 @@ class ServerRoom {
   }
 
   isReadyToStart() {
-    return this.players.left.length >= this.archersPerSide && this.players.right.length >= this.archersPerSide;
+    return this.filledSlotsForSide('left') >= this.archersPerSide
+      && this.filledSlotsForSide('right') >= this.archersPerSide;
   }
 
   clearRematchVotes() {
@@ -194,25 +256,31 @@ class ServerRoom {
   addPlayer(socketId, name) {
     const existing = this.playerBySocket(socketId);
     if (existing) return { side: existing.side, slot: existing.slot, existing: true };
-    if (this.totalPlayers() >= this.requiredPlayers()) return null;
+    const leftOpen = this.availableHumanJoinSlots('left');
+    const rightOpen = this.availableHumanJoinSlots('right');
+    if (!leftOpen.length && !rightOpen.length) return null;
 
-    const leftCount = this.players.left.length;
-    const rightCount = this.players.right.length;
-    const side = leftCount <= rightCount ? 'left' : 'right';
-    const slot = this.players[side].length;
-    if (slot >= this.archersPerSide) {
-      const otherSide = side === 'left' ? 'right' : 'left';
-      const otherSlot = this.players[otherSide].length;
-      if (otherSlot >= this.archersPerSide) return null;
-      const player = {
-        id: socketId,
-        name: name || this.defaultPlayerNameForSide(otherSide, otherSlot),
-        slot: otherSlot,
-      };
-      this.players[otherSide].push(player);
-      this.started = this.isReadyToStart();
-      return { side: otherSide, slot: otherSlot, existing: false };
+    let side = 'left';
+    if (leftOpen.length && rightOpen.length) {
+      const leftCount = this.players.left.length;
+      const rightCount = this.players.right.length;
+      if (leftCount === rightCount) {
+        side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
+        const preferredOpen = side === 'left' ? leftOpen : rightOpen;
+        if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
+        this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+      } else if (leftCount < rightCount) {
+        side = leftOpen.length ? 'left' : 'right';
+      } else {
+        side = rightOpen.length ? 'right' : 'left';
+      }
+    } else {
+      side = leftOpen.length ? 'left' : 'right';
     }
+
+    const sideOpen = side === 'left' ? leftOpen : rightOpen;
+    const slot = sideOpen[0];
+    if (!Number.isFinite(slot)) return null;
 
     const player = {
       id: socketId,
@@ -232,15 +300,42 @@ class ServerRoom {
     if (nextMode === this.mode) return { ok: true, changed: false };
 
     const nextArchersPerSide = nextMode === '2v2' ? 2 : 1;
-    if (this.players.left.length > nextArchersPerSide || this.players.right.length > nextArchersPerSide) {
-      return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+    for (const side of ['left', 'right']) {
+      const outOfRangeHuman = this.players[side].some((p) => (Number(p?.slot) || 0) >= nextArchersPerSide);
+      if (outOfRangeHuman) return { ok: false, message: 'Too many controllers are connected to switch to 2 players.' };
+      const outOfRangeCpu = Array.isArray(this.cpuSlots?.[side])
+        && this.cpuSlots[side].some((flag, idx) => idx >= nextArchersPerSide && Boolean(flag));
+      if (outOfRangeCpu) {
+        return { ok: false, message: 'Disable extra CPU slots before switching to 2 players.' };
+      }
     }
 
     this.mode = nextMode;
     this.archersPerSide = nextArchersPerSide;
+    this.normalizeCpuSlotsShape();
     this.started = this.isReadyToStart();
     this.clearRematchVotes();
     return { ok: true, changed: true };
+  }
+
+  setCpuSlot(side, slot, enabled) {
+    const sideName = side === 'right' ? 'right' : 'left';
+    const lane = Math.floor(Number(slot));
+    if (!Number.isFinite(lane) || lane < 0 || lane >= this.archersPerSide) {
+      return { ok: false, message: 'Invalid CPU slot.' };
+    }
+    if (this.started) {
+      return { ok: false, message: 'Cannot change CPU slots after the match has started.' };
+    }
+    if (Boolean(enabled) && this.playerInSlot(sideName, lane)) {
+      return { ok: false, message: 'A controller is already connected in that slot.' };
+    }
+    this.normalizeCpuSlotsShape();
+    const next = Boolean(enabled);
+    const previous = Boolean(this.cpuSlots[sideName][lane]);
+    this.cpuSlots[sideName][lane] = next;
+    this.started = this.isReadyToStart();
+    return { ok: true, changed: previous !== next };
   }
 
   setThemeMode(themeMode) {
@@ -265,16 +360,10 @@ class ServerRoom {
     this.rematchVotes.delete(socketId);
     const leftBefore = this.players.left.length;
     this.players.left = this.players.left.filter((p) => p.id !== socketId);
-    if (this.players.left.length !== leftBefore) {
-      this.players.left.forEach((p, idx) => { p.slot = idx; });
-      changed = true;
-    }
+    if (this.players.left.length !== leftBefore) changed = true;
     const rightBefore = this.players.right.length;
     this.players.right = this.players.right.filter((p) => p.id !== socketId);
-    if (this.players.right.length !== rightBefore) {
-      this.players.right.forEach((p, idx) => { p.slot = idx; });
-      changed = true;
-    }
+    if (this.players.right.length !== rightBefore) changed = true;
 
     if (changed) this.started = this.isReadyToStart();
 
@@ -481,6 +570,25 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
+      socket.on('set_cpu_slot', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
+        if (!room) {
+          socket.emit('room_cpu_error', { message: 'Room not found.' });
+          return;
+        }
+        if (!room.display || room.display.id !== socket.id) {
+          socket.emit('room_cpu_error', { message: 'Only the host display can change CPU slots.' });
+          return;
+        }
+        const result = room.setCpuSlot(payload.side, payload.slot, payload.enabled !== false);
+        if (!result?.ok) {
+          socket.emit('room_cpu_error', { message: result?.message || 'Unable to change CPU slot.' });
+          return;
+        }
+        this.broadcastRoom(room, { forceController: true });
+      });
+
       socket.on('restart_room', (rawPayload = {}) => {
         const payload = safePayload(rawPayload);
         const room = this.rooms.get(normalizeRoomId(payload.roomId));
@@ -681,7 +789,7 @@ class GameServer {
       left: defaultSide,
       right: defaultSide,
       requiredPlayers: room.requiredPlayers(),
-      playerCount: room.totalPlayers(),
+      playerCount: room.totalFilledSlots(),
     };
     const sideName = side === 'right' ? 'right' : 'left';
     const enemySide = sideName === 'left' ? 'right' : 'left';
@@ -695,7 +803,7 @@ class GameServer {
       gameOver: Boolean(source.gameOver),
       winner: source.winner || null,
       requiredPlayers: Number(source.requiredPlayers) || room.requiredPlayers(),
-      playerCount: Number(source.playerCount) || room.totalPlayers(),
+      playerCount: Number(source.playerCount) || room.totalFilledSlots(),
       me: this.compactControllerSide(source[sideName] || defaultSide),
       enemy: this.compactControllerSide(source[enemySide] || defaultSide),
       rematch: room.rematchStatus(socketId),
@@ -740,10 +848,14 @@ class GameServer {
       themeMode: room.themeMode,
       archersPerSide: room.archersPerSide,
       requiredPlayers: room.requiredPlayers(),
-      playerCount: room.totalPlayers(),
+      playerCount: room.totalFilledSlots(),
       started: room.started,
       rematch: room.rematchStatus(),
       spectatorDisplays: this.roomSpectatorDisplayCount(room),
+      cpuSlots: {
+        left: Array.isArray(room.cpuSlots?.left) ? room.cpuSlots.left.slice(0, room.archersPerSide).map(Boolean) : [],
+        right: Array.isArray(room.cpuSlots?.right) ? room.cpuSlots.right.slice(0, room.archersPerSide).map(Boolean) : [],
+      },
       players: {
         left: room.players.left.map((p) => ({ id: p.id, name: p.name, slot: p.slot })),
         right: room.players.right.map((p) => ({ id: p.id, name: p.name, slot: p.slot })),
