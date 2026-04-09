@@ -135,6 +135,7 @@ const SHOT_POWER_TWEMOJI_GLYPHS = {
 };
 
 const BARRACKS_LOCK_TWEMOJI = '/icons/twemoji/1f512.svg';
+const CPU_ARCHER_TWEMOJI = '/icons/twemoji/1f5a5.svg';
 const TREASURE_PILE_ITEM_SCALE_MULT = 2;
 const RESOURCE_APPEAR_DURATION = 0.34;
 const RESOURCE_APPEAR_START_SCALE = 0.34;
@@ -5140,6 +5141,10 @@ export class GameRenderer {
 
     const leftPulls = this.sideArcherPulls('left', snapshot.left);
     const rightPulls = this.sideArcherPulls('right', snapshot.right);
+    const leftPlayers = Array.isArray(snapshot?.players?.left) ? snapshot.players.left : [];
+    const rightPlayers = Array.isArray(snapshot?.players?.right) ? snapshot.players.right : [];
+    const leftCpuSlots = Array.isArray(snapshot?.cpuSlots?.left) ? snapshot.cpuSlots.left : [];
+    const rightCpuSlots = Array.isArray(snapshot?.cpuSlots?.right) ? snapshot.cpuSlots.right : [];
     const leftShake = this.towerShakeOffset('left');
     const rightShake = this.towerShakeOffset('right');
     this.drawCastle(
@@ -5148,7 +5153,9 @@ export class GameRenderer {
       world.towerY + leftShake.y,
       snapshot.left.towerHp,
       snapshot.left,
-      leftPulls
+      leftPulls,
+      leftPlayers,
+      leftCpuSlots
     );
     this.drawCastle(
       'right',
@@ -5156,7 +5163,9 @@ export class GameRenderer {
       world.towerY + rightShake.y,
       snapshot.right.towerHp,
       snapshot.right,
-      rightPulls
+      rightPulls,
+      rightPlayers,
+      rightCpuSlots
     );
     this.drawBarracksBuilding('left', world, barracksUi.left);
     this.drawBarracksBuilding('right', world, barracksUi.right);
@@ -8735,7 +8744,61 @@ export class GameRenderer {
     this.drawFailedSpecialMini(type, x, y + 1, 8.2, side);
   }
 
-  drawCastle(side, x, y, hp, sideState = null, archerPulls = null) {
+  findPlayerInSlot(players = [], slot = 0) {
+    if (!Array.isArray(players) || slot < 0) return null;
+    return players.find((player) => {
+      const playerSlot = Number(player?.slot);
+      return Number.isFinite(playerSlot) && Math.floor(playerSlot) === slot;
+    }) || null;
+  }
+
+  isCpuArcherSlot(players = [], cpuSlots = [], slot = 0) {
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    if (!Array.isArray(cpuSlots) || !cpuSlots[lane]) return false;
+    return !this.findPlayerInSlot(players, lane);
+  }
+
+  drawCpuArcherBadge(side = 'left', archerX = 0, archerY = 0) {
+    const { ctx } = this;
+    const sideName = side === 'right' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const badgeX = archerX + dir * 17;
+    const badgeY = archerY - 32;
+    const radius = 9;
+    const ring = sideName === 'left' ? '#96d0ff' : '#ffafb8';
+    const fill = sideName === 'left' ? '#18344f' : '#4a2230';
+    const iconImage = this.getUpgradeGlyphImage(CPU_ARCHER_TWEMOJI);
+
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = ring;
+    ctx.lineWidth = 1.35;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const iconSize = 11;
+    if (iconImage?.complete && iconImage.naturalWidth > 0 && iconImage.naturalHeight > 0) {
+      ctx.drawImage(iconImage, badgeX - iconSize / 2, badgeY - iconSize / 2 - 0.5, iconSize, iconSize);
+    } else {
+      ctx.fillStyle = '#f2f7ff';
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('CPU', badgeX, badgeY + 0.5);
+    }
+
+    ctx.fillStyle = this.withAlpha('#07111f', 0.55);
+    ctx.beginPath();
+    ctx.ellipse(badgeX, badgeY + 9.5, 5.5, 1.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawCastle(side, x, y, hp, sideState = null, archerPulls = null, sidePlayers = null, sideCpuSlots = null) {
     const { ctx } = this;
     const palette = TEAM_COLORS[side];
     const dir = side === 'left' ? 1 : -1;
@@ -8840,6 +8903,8 @@ export class GameRenderer {
     const pulls = Array.isArray(archerPulls) && archerPulls.length
       ? archerPulls
       : this.sideArcherPulls(side, sideState);
+    const players = Array.isArray(sidePlayers) ? sidePlayers : [];
+    const cpuSlots = Array.isArray(sideCpuSlots) ? sideCpuSlots : [];
     const archerX = side === 'left' ? x + 35 : x - 35;
     for (let idx = 0; idx < pulls.length; idx += 1) {
       const pull = pulls[idx];
@@ -8960,6 +9025,10 @@ export class GameRenderer {
         ctx.moveTo(bx1 - Math.sin(aim) * 6, by1 + Math.cos(aim) * 6);
         ctx.lineTo(bx1 + Math.sin(aim) * 6, by1 - Math.cos(aim) * 6);
         ctx.stroke();
+      }
+
+      if (this.isCpuArcherSlot(players, cpuSlots, idx)) {
+        this.drawCpuArcherBadge(side, archerX, archerY);
       }
 
     }
