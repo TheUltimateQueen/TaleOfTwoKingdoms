@@ -260,7 +260,7 @@ const HERO_COOKER_MAX_CD = 100;
 const HERO_COOKER_MAX_EAT = 10;
 const HERO_COOKER_EAT_RADIUS = 52;
 const HERO_COOKER_COOK_TIME = 10;
-const HERO_COOKER_MOVE_SPEED = 9.4;
+const HERO_COOKER_MOVE_SPEED = 10.6;
 const HERO_COOKER_EMPTY_LOAD_SPEED_MULT = 2;
 const HERO_COOKER_FULL_LOAD_SPEED_MULT = 1;
 const HERO_COOKER_FLYOVER_CAPTURE_HALF_WIDTH = 34;
@@ -1442,6 +1442,7 @@ class GameRoom {
       heroCooker: Boolean(m.heroCooker),
       heroCookerFoodType: typeof m.heroCookerFoodType === 'string' ? m.heroCookerFoodType : null,
       heroCookerState: typeof m.heroCookerState === 'string' ? m.heroCookerState : null,
+      heroCookerEatCap: Math.max(1, Math.round(Number(m.heroCookerEatCap) || HERO_COOKER_MAX_EAT)),
       heroCookerEatCount: Math.max(0, Math.round(Number(m.heroCookerEatCount) || 0)),
       heroCookerCookTtl: roundTo(m.heroCookerCookTtl, 2),
       heroCookerCookMaxTtl: roundTo(m.heroCookerCookMaxTtl, 2),

@@ -11403,6 +11403,41 @@ export class GameRenderer {
     }
   }
 
+  drawHeroCookerHud(minion, x, y, r, scale, sideName, foodType) {
+    const { ctx } = this;
+    const label = foodType === 'rice' ? 'RICE COOKER' : 'BREAD OVEN';
+    const eatCap = Math.max(1, Math.round(Number(minion.heroCookerEatCap) || 10));
+    const eatCountRaw = Math.round(Number(minion.heroCookerEatCount) || 0);
+    const eatCount = Math.max(0, Math.min(eatCap, eatCountRaw));
+    const loadPct = Math.max(0, Math.min(1, eatCount / eatCap));
+
+    ctx.fillStyle = '#fff1da';
+    ctx.font = `bold ${sideName === 'right' ? 11 : 10}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x, y - r - 20);
+
+    const counterW = Math.max(28, r * 1.9);
+    const counterH = Math.max(10, r * 0.56);
+    const counterX = x - counterW / 2;
+    const counterY = y + r * 0.74;
+    ctx.fillStyle = sideName === 'right' ? '#211009cf' : '#0f1720cf';
+    ctx.fillRect(counterX, counterY, counterW, counterH);
+    ctx.fillStyle = foodType === 'rice'
+      ? this.withAlpha('#ff9a4a', 0.48)
+      : this.withAlpha('#ffac58', 0.48);
+    ctx.fillRect(counterX + 1, counterY + 1, Math.max(0, (counterW - 2) * loadPct), Math.max(1, counterH - 2));
+    ctx.strokeStyle = foodType === 'rice' ? '#ffe3b9' : '#ffd39d';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(counterX + 0.5, counterY + 0.5, counterW - 1, counterH - 1);
+
+    ctx.fillStyle = '#fff9ec';
+    ctx.font = `bold ${Math.max(8, Math.round(scale * 8.2))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${eatCount}/${eatCap}`, x, counterY + counterH * 0.74);
+
+    this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.96));
+  }
+
   drawHeroCookerSprite(minion, options = {}) {
     const showHud = options.showHud !== false;
     const cacheRender = options.cacheRender === true;
@@ -11435,14 +11470,7 @@ export class GameRenderer {
         this.drawHeroCookerSprite(proxy, { showHud: false, cacheRender: true });
       });
       if (drewCached) {
-        if (showHud) {
-          const label = foodType === 'rice' ? 'RICE COOKER' : 'BREAD OVEN';
-          ctx.fillStyle = '#fff1da';
-          ctx.font = `bold ${sideName === 'right' ? 11 : 10}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText(label, x, y - r - 20);
-          this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.96));
-        }
+        if (showHud) this.drawHeroCookerHud(minion, x, y, r, scale, sideName, foodType);
         return;
       }
     }
@@ -11498,14 +11526,7 @@ export class GameRenderer {
     }
     ctx.restore();
 
-    if (showHud) {
-      const label = foodType === 'rice' ? 'RICE COOKER' : 'BREAD OVEN';
-      ctx.fillStyle = '#fff1da';
-      ctx.font = `bold ${sideName === 'right' ? 11 : 10}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(label, x, y - r - 20);
-      this.drawMinionHpBar(minion, x, y, Math.max(1, scale * 0.96));
-    }
+    if (showHud) this.drawHeroCookerHud(minion, x, y, r, scale, sideName, foodType);
   }
 
   drawHeroSprite(minion, options = {}) {
