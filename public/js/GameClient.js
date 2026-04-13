@@ -156,6 +156,27 @@ const POST_UPGRADE_TWEMOJI = {
   presidentExecutiveOrderLevel: { src: '/icons/twemoji/1f4dc.svg', scale: 1.86, yOffset: 0.02 },
   superMinionLevel: { src: '/icons/twemoji/2b50.svg', scale: 1.9, yOffset: 0.01 },
 };
+const UPGRADE_CATEGORY_BY_TYPE = Object.freeze({
+  volleyLevel: 'arrow',
+  unitLevel: 'unit',
+  unitHpLevel: 'unit',
+  spawnLevel: 'unit',
+  resourceLevel: 'economy',
+  powerLevel: 'power',
+  balloonLevel: 'special',
+  dragonLevel: 'special',
+  dragonSuperBreathLevel: 'special',
+  stoneGolemAncientCoreLevel: 'special',
+  heroDestinedChampionLevel: 'special',
+  shieldDarkMetalLevel: 'special',
+  monkHealCircleLevel: 'special',
+  necroExpertSummonerLevel: 'special',
+  riderSuperHorseLevel: 'special',
+  diggerGoldFinderLevel: 'special',
+  gunnerSkyCannonLevel: 'special',
+  presidentExecutiveOrderLevel: 'special',
+  superMinionLevel: 'special',
+});
 const POST_UPGRADE_FEED_MAX_EVENTS = 40;
 const POST_GAME_BREAD_PUNS = [
   'Bread won. Rice is now in loaf spirits.',
@@ -258,6 +279,18 @@ function powerStatus(power, shots) {
 function arrowHitRate(sideState) {
   const stats = arrowAccuracy(sideState);
   return stats.rate;
+}
+
+function voteCategoryForUpgradeType(type) {
+  return UPGRADE_CATEGORY_BY_TYPE[type] || 'misc';
+}
+
+function voteCategoryClassName(type) {
+  return `vote-category-${voteCategoryForUpgradeType(type)}`;
+}
+
+function voteUpgradeIcon(type) {
+  return POST_UPGRADE_ICONS[type] || '⬆️';
 }
 
 function arrowAccuracy(sideState) {
@@ -3201,6 +3234,8 @@ export class GameClient {
     }
     this.controllerCommitteeVote = {
       active: Boolean(vote.active),
+      startedAt: Number(vote.startedAt) || 0,
+      resolveAt: Number(vote.resolveAt) || 0,
       remaining: Math.max(0, Number(vote.remaining) || 0),
       committeeCount: Math.max(0, Number(vote.committeeCount) || 0),
       votersReady: Math.max(0, Number(vote.votersReady) || 0),
@@ -3305,6 +3340,7 @@ export class GameClient {
     const vote = this.controllerCommitteeVote;
     const fx = this.controllerCommitteeVoteFx;
     const showingFx = Boolean(fx && (Number(fx.ttl) || 0) > 0 && Array.isArray(fx.options) && fx.options.length);
+    const voteTimerArmed = Boolean((Number(vote?.resolveAt) || 0) > 0);
     if (this.controllerCommitteePanel) {
       this.controllerCommitteePanel.classList.toggle('vote-active', !showingFx && Boolean(vote?.active));
       this.controllerCommitteePanel.classList.toggle('vote-results', showingFx);
@@ -3316,7 +3352,9 @@ export class GameClient {
     const remainingText = showingFx
       ? 'Vote locked. Applying chosen upgrade...'
       : (vote?.active
-          ? `${Math.max(0, Number(vote.remaining) || 0).toFixed(1)}s left to vote`
+          ? (voteTimerArmed
+              ? `${Math.max(0, Number(vote.remaining) || 0).toFixed(1)}s left to vote`
+              : 'Waiting for first council vote... timer starts after first vote.')
           : 'Waiting for your side to charge an upgrade vote.');
     if (this.committeeVoteTimer) this.committeeVoteTimer.textContent = remainingText;
 
@@ -3335,11 +3373,13 @@ export class GameClient {
             ? (isWinner ? 'Winner' : 'Out')
             : (selected ? 'Your Vote' : (votePct > 0 ? `${votePct}%` : ''));
           const winnerClass = showingFx ? (isWinner ? 'vote-result-winner' : 'vote-result-loser') : '';
+          const categoryClass = voteCategoryClassName(option.type);
+          const icon = voteUpgradeIcon(option.type);
           const dataAttr = showingFx ? '' : ` data-vote-option-id="${escapeHtml(option.id || '')}"`;
           return `
-            <button type="button" class="committee-vote-option ${selected ? 'selected' : ''} ${winnerClass}"${dataAttr}>
+            <button type="button" class="committee-vote-option ${categoryClass} ${selected ? 'selected' : ''} ${winnerClass}"${dataAttr}>
               <span class="committee-vote-option-head">
-                <span class="committee-vote-option-title">${title}</span>
+                <span class="committee-vote-option-title"><span class="committee-vote-option-icon" aria-hidden="true">${escapeHtml(icon)}</span>${title}</span>
                 ${voteBadge ? `<span class="committee-vote-option-badge">${escapeHtml(voteBadge)}</span>` : ''}
               </span>
               <span class="committee-vote-option-meta">${escapeHtml(votesText)} | ${escapeHtml(voters)}</span>
@@ -3363,6 +3403,8 @@ export class GameClient {
         this.committeeVoteStatus.textContent = `${readyText} Locked in: ${winnerLabel}.`;
       } else if (!vote?.active) {
         this.committeeVoteStatus.textContent = `${readyText} Vote options appear when your side's upgrade bar is full. Shooter ready decides match start.`;
+      } else if (!voteTimerArmed) {
+        this.committeeVoteStatus.textContent = `${readyText} First vote starts a 5s countdown.`;
       } else if (vote?.selectedOptionId) {
         this.committeeVoteStatus.textContent = `${readyText} Your vote is locked in for this round (you can still change it before timer ends).`;
       } else {
@@ -3856,8 +3898,14 @@ export class GameClient {
     const leftVote = s?.committeeVotes?.left;
     const rightVote = s?.committeeVotes?.right;
     const voteBits = [];
-    if (leftVote?.active) voteBits.push(`${sideShortName('left', this.state.themeMode)} vote ${Math.max(0, Number(leftVote.remaining) || 0).toFixed(1)}s`);
-    if (rightVote?.active) voteBits.push(`${sideShortName('right', this.state.themeMode)} vote ${Math.max(0, Number(rightVote.remaining) || 0).toFixed(1)}s`);
+    if (leftVote?.active) {
+      const armed = (Number(leftVote.resolveAt) || 0) > 0;
+      voteBits.push(`${sideShortName('left', this.state.themeMode)} vote ${armed ? `${Math.max(0, Number(leftVote.remaining) || 0).toFixed(1)}s` : 'waiting'}`);
+    }
+    if (rightVote?.active) {
+      const armed = (Number(rightVote.resolveAt) || 0) > 0;
+      voteBits.push(`${sideShortName('right', this.state.themeMode)} vote ${armed ? `${Math.max(0, Number(rightVote.remaining) || 0).toFixed(1)}s` : 'waiting'}`);
+    }
     const voteHint = voteBits.length ? ` | ${voteBits.join(' / ')}` : '';
     const leftBreakdown = this.formatCommitteeVoteBreakdown(leftVote);
     const rightBreakdown = this.formatCommitteeVoteBreakdown(rightVote);

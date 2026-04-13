@@ -420,7 +420,7 @@ const MATCH_MAX_UPGRADE_EVENTS = 600;
 const MATCH_MAX_LUCK_EVENTS = 900;
 const MAX_COMMITTEE_PLAYERS_PER_SIDE = 12;
 const COMMITTEE_VOTE_OPTION_COUNT = 4;
-const COMMITTEE_VOTE_DURATION_SECONDS = 3;
+const COMMITTEE_VOTE_DURATION_SECONDS = 5;
 const UPGRADE_SELECTION_FX_DURATION = 2.2;
 
 function clamp(n, min, max) {
@@ -10049,8 +10049,8 @@ class GameRoom {
       return;
     }
     voteState.active = true;
-    voteState.startedAt = this.t;
-    voteState.resolveAt = this.t + COMMITTEE_VOTE_DURATION_SECONDS;
+    voteState.startedAt = 0;
+    voteState.resolveAt = 0;
     voteState.options = options;
     voteState.votesByPlayerId = {};
   }
@@ -10068,6 +10068,10 @@ class GameRoom {
     const option = voteState.options.find((entry) => String(entry?.id) === targetId);
     if (!option) return { ok: false, message: 'That vote option is no longer available.' };
     voteState.votesByPlayerId[socketId] = targetId;
+    if ((Number(voteState.resolveAt) || 0) <= 0) {
+      voteState.startedAt = this.t;
+      voteState.resolveAt = this.t + COMMITTEE_VOTE_DURATION_SECONDS;
+    }
     return { ok: true, side, optionId: targetId };
   }
 
@@ -10099,7 +10103,9 @@ class GameRoom {
     const side = sideName === 'right' ? 'right' : 'left';
     const voteState = this.committeeVotes[side];
     if (!voteState?.active) return;
-    if (this.t < (Number(voteState.resolveAt) || 0)) return;
+    const resolveAt = Number(voteState.resolveAt) || 0;
+    if (resolveAt <= 0) return;
+    if (this.t < resolveAt) return;
     const winner = this.committeeVoteWinner(side);
     if (!winner?.type) {
       this.resetCommitteeVoteState(side);
@@ -10131,7 +10137,17 @@ class GameRoom {
     const matchingShown = this.upgradeCards.find((card) => card?.side === side && card?.type === winner.type)
       || this.upgradeCards.find((card) => card?.side === side)
       || fallbackCard;
-    this.selectUpgradeCard(side, matchingShown);
+    const fxOptions = options.map((entry, index) => ({
+      id: entry?.id ?? `${side}-fx-${index}`,
+      slot: index,
+      type: entry?.type || null,
+      level: Math.max(0, Number(entry?.level) || 0),
+      selected: String(entry?.id || '') === String(winner.id || ''),
+    })).filter((entry) => Boolean(entry.type));
+    this.selectUpgradeCard(side, matchingShown, {
+      selectedOptionId: winner.id || null,
+      fxOptions,
+    });
     this.resetCommitteeVoteState(side);
   }
 
@@ -10139,8 +10155,9 @@ class GameRoom {
     const side = sideName === 'right' ? 'right' : 'left';
     const state = this.committeeVotes?.[side] || this.createCommitteeVoteState(side);
     const now = this.t;
-    const remaining = state.active
-      ? Math.max(0, (Number(state.resolveAt) || 0) - now)
+    const resolveAt = Number(state.resolveAt) || 0;
+    const remaining = state.active && resolveAt > 0
+      ? Math.max(0, resolveAt - now)
       : 0;
     const members = this.sideCommitteePlayers(side);
     const options = this.buildCommitteeVoteTallies(side, state);
@@ -10203,7 +10220,9 @@ class GameRoom {
       id: entry?.id ?? `opt-${index}`,
       slot: Number.isFinite(entry?.slot) ? entry.slot : index,
       type: entry?.type || null,
-      level: Math.max(0, Number(sideState?.[entry?.type]) || 0),
+      level: Number.isFinite(Number(entry?.level))
+        ? Math.max(0, Number(entry?.level) || 0)
+        : Math.max(0, Number(sideState?.[entry?.type]) || 0),
       selected: String(entry?.id) === String(selectedId),
     })).filter((entry) => Boolean(entry.type)) : [];
     this.upgradeSelectionFx[side] = {
@@ -10275,11 +10294,30 @@ class GameRoom {
     this.upgradeCards = this.upgradeCards.filter((c) => c.side !== sideName);
   }
 
-  selectUpgradeCard(sideName, card) {
+  selectUpgradeCard(sideName, card, options = null) {
     const side = this[sideName];
     if (!side || !card || card.side !== sideName) return false;
     if (side.upgradeCharge < side.upgradeChargeMax) return false;
     const sideCardsBeforeSelect = this.upgradeCards.filter((entry) => entry?.side === sideName);
+    const selectedOptionId = options?.selectedOptionId ?? card?.id ?? null;
+    const fxOptionSeed = Array.isArray(options?.fxOptions) && options.fxOptions.length
+      ? options.fxOptions
+      : sideCardsBeforeSelect;
+    const levelBeforeByType = new Map();
+    for (const entry of fxOptionSeed) {
+      const type = entry?.type;
+      if (!type || levelBeforeByType.has(type)) continue;
+      levelBeforeByType.set(type, Math.max(0, Number(side?.[type]) || 0));
+    }
+    const fxOptions = fxOptionSeed.map((entry, index) => ({
+      id: entry?.id ?? `opt-${index}`,
+      slot: Number.isFinite(entry?.slot) ? entry.slot : index,
+      type: entry?.type || null,
+      level: Number.isFinite(Number(entry?.level))
+        ? Math.max(0, Number(entry?.level) || 0)
+        : Math.max(0, Number(levelBeforeByType.get(entry?.type)) || 0),
+      selected: String(entry?.id ?? '') === String(selectedOptionId ?? ''),
+    })).filter((entry) => Boolean(entry?.type));
 
     const spentDebt = Math.max(1, side.upgradeChargeMax);
     const overflow = Math.max(0, side.upgradeCharge - spentDebt);
@@ -10287,7 +10325,7 @@ class GameRoom {
 
     this.awardUpgrade(side, card.type, card.value);
     this.triggerUpgradeActivation(sideName, card.type, card.value, card.x, card.y);
-    this.setUpgradeSelectionFx(sideName, card, sideCardsBeforeSelect);
+    this.setUpgradeSelectionFx(sideName, { ...card, id: selectedOptionId }, fxOptions);
     this.clearCardsForSide(sideName);
 
     side.upgradeCharge = overflow;
@@ -10309,6 +10347,14 @@ class GameRoom {
   syncUpgradeCards(sideName) {
     const side = this[sideName];
     if (side.upgradeCharge < side.upgradeChargeMax) {
+      this.clearCardsForSide(sideName);
+      side.upgradeAutoPickAt = null;
+      this.resetCommitteeVoteState(sideName);
+      return;
+    }
+
+    const upgradeFxActive = (Number(this.upgradeSelectionFx?.[sideName]?.ttl) || 0) > 0;
+    if (upgradeFxActive) {
       this.clearCardsForSide(sideName);
       side.upgradeAutoPickAt = null;
       this.resetCommitteeVoteState(sideName);

@@ -103,8 +103,15 @@ const STAGED_UPGRADE_COPY = Object.freeze(
 
 export function upgradeLabelForLevel(type, level = null) {
   const staged = STAGED_UPGRADE_COPY[type];
-  if (!staged) return UPGRADE_LABELS[type] || 'Upgrade';
   const value = Math.max(0, Math.floor(Number(level) || 0));
+  if (!staged) {
+    const fallbackLabel = String(UPGRADE_LABELS[type] || 'Upgrade').trim();
+    if (fallbackLabel.endsWith('+')) {
+      const baseName = fallbackLabel.slice(0, -1).trim() || 'Upgrade';
+      return `L${value + 1} ${baseName}`;
+    }
+    return fallbackLabel;
+  }
   if (value <= 0) return staged.unlockLabel;
 
   const repeatLabel = String(staged.upgradedLabel || '').trim();

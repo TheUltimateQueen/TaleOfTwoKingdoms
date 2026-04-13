@@ -27,6 +27,16 @@ function sideCardSlotX(sideName, slot) {
   return 1600 - leftRegular[slot];
 }
 
+function sideCommitteeVoteSlotPosition(sideName, slot = 0) {
+  const lane = Math.max(0, Math.min(3, Math.floor(Number(slot) || 0)));
+  const spread = 96;
+  const leftStart = 124;
+  const rightStart = 1600 - (leftStart + spread * 3);
+  const x = (sideName === 'right' ? rightStart : leftStart) + lane * spread;
+  const y = 72;
+  return { x, y };
+}
+
 function launchAngleFromPull(sideName, pullX, pullY) {
   const horizontal = Math.max(0, Math.abs(pullX));
   const vertical = Math.max(0, -pullY);
@@ -5211,10 +5221,15 @@ export class GameRenderer {
     if (Array.isArray(snapshot.cannonBalls)) {
       for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
     }
+    const committeeVoteLeftActive = Boolean(snapshot?.committeeVotes?.left?.active && Array.isArray(snapshot?.committeeVotes?.left?.options) && snapshot.committeeVotes.left.options.length);
+    const committeeVoteRightActive = Boolean(snapshot?.committeeVotes?.right?.active && Array.isArray(snapshot?.committeeVotes?.right?.options) && snapshot.committeeVotes.right.options.length);
     for (const card of snapshot.upgradeCards) {
-      const sideState = card?.side === 'right' ? snapshot?.right : snapshot?.left;
+      const sideName = card?.side === 'right' ? 'right' : 'left';
+      if ((sideName === 'left' && committeeVoteLeftActive) || (sideName === 'right' && committeeVoteRightActive)) continue;
+      const sideState = sideName === 'right' ? snapshot?.right : snapshot?.left;
       this.drawUpgradeCard(card, sideState);
     }
+    this.drawCommitteeVoteCards(snapshot);
     this.drawUpgradeSelectionFx(snapshot);
     if (Array.isArray(snapshot.candleScorches)) {
       for (let i = 0; i < snapshot.candleScorches.length; i += 1) {
@@ -9959,6 +9974,118 @@ export class GameRenderer {
     );
   }
 
+  upgradeOptionSlotPosition(sideName, slot = 0, optionCount = 2) {
+    const count = Math.max(0, Math.floor(Number(optionCount) || 0));
+    if (count > 2) return sideCommitteeVoteSlotPosition(sideName, slot);
+    const lane = Math.max(0, Math.min(1, Math.floor(Number(slot) || 0)));
+    return { x: sideCardSlotX(sideName, lane), y: 90 };
+  }
+
+  drawCommitteeVoteCards(snapshot) {
+    const votes = snapshot?.committeeVotes;
+    if (!votes || typeof votes !== 'object') return;
+    this.drawCommitteeVoteCardsForSide('left', votes.left);
+    this.drawCommitteeVoteCardsForSide('right', votes.right);
+  }
+
+  drawCommitteeVoteCardsForSide(sideName, voteState) {
+    if (!voteState?.active) return;
+    const options = Array.isArray(voteState.options) ? voteState.options : [];
+    if (!options.length) return;
+    const totalVotes = options.reduce((sum, option) => sum + Math.max(0, Number(option?.votes) || 0), 0);
+    const timerArmed = (Number(voteState?.resolveAt) || 0) > 0;
+    const timerText = timerArmed
+      ? `${Math.max(0, Number(voteState?.remaining) || 0).toFixed(1)}s`
+      : 'await first vote';
+    for (let i = 0; i < options.length; i += 1) {
+      const option = options[i];
+      const type = option?.type;
+      if (!type) continue;
+      const votesForOption = Math.max(0, Number(option?.votes) || 0);
+      const votePct = totalVotes > 0 ? Math.round((votesForOption / totalVotes) * 100) : 0;
+      const pos = this.upgradeOptionSlotPosition(sideName, i, options.length);
+      this.drawCommitteeVoteCard(type, Number(option?.level) || 0, pos.x, pos.y, {
+        votes: votesForOption,
+        pct: votePct,
+        timerText,
+      });
+    }
+  }
+
+  drawCommitteeVoteCard(type, level, centerX, centerY, info = {}) {
+    if (!type) return;
+    const { ctx } = this;
+    const category = upgradeCategory(type);
+    const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+    const cardW = UPGRADE_SELECTION_CARD_W;
+    const cardH = UPGRADE_SELECTION_CARD_H;
+    const cardLevel = Math.max(0, Number(level) || 0);
+    const votes = Math.max(0, Number(info?.votes) || 0);
+    const pct = Math.max(0, Math.min(100, Math.round(Number(info?.pct) || 0)));
+    const timerText = String(info?.timerText || 'vote');
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.fillStyle = this.mixColor(style.panel, '#000000', 0.08);
+    ctx.fillRect(-cardW / 2, -cardH / 2, cardW, cardH);
+    ctx.fillStyle = style.glow;
+    ctx.fillRect(-cardW / 2 + 1, -cardH / 2 + 1, cardW - 2, cardH - 2);
+    ctx.strokeStyle = '#f2a75c';
+    ctx.lineWidth = 1.9;
+    ctx.strokeRect(-cardW / 2, -cardH / 2, cardW, cardH);
+
+    const iconX = -cardW / 2 + 11;
+    const iconY = -cardH / 2 + 10.5;
+    ctx.fillStyle = '#0c1526d4';
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 10.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = this.mixColor(style.badge, '#ffffff', 0.82);
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 9.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = this.withAlpha(style.border, 0.92);
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    this.drawUpgradeGlyph(type, iconX, iconY, 8, '#1f2230');
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd5a7';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.fillText('COMMITTEE', 10, -15);
+    ctx.fillStyle = style.title;
+    ctx.font = '10px sans-serif';
+    const title = this.fitUpgradeCardText(
+      upgradeLabelForLevel(type, cardLevel),
+      Math.max(20, cardW - 22),
+      '10px sans-serif'
+    );
+    ctx.fillText(title, 10, -5);
+
+    ctx.fillStyle = style.hint;
+    ctx.font = '8px sans-serif';
+    ctx.fillText(`${votes} vote${votes === 1 ? '' : 's'} | ${timerText}`, 10, 4);
+
+    const meterW = cardW - 18;
+    const meterH = 5;
+    const meterX = -meterW / 2;
+    const meterY = 11;
+    ctx.fillStyle = '#0f1b2f';
+    ctx.fillRect(meterX, meterY, meterW, meterH);
+    ctx.strokeStyle = '#2d4568';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(meterX, meterY, meterW, meterH);
+    if (pct > 0) {
+      const fillW = Math.max(1, Math.round((meterW - 2) * (pct / 100)));
+      const grad = ctx.createLinearGradient(meterX, 0, meterX + meterW, 0);
+      grad.addColorStop(0, this.mixColor(style.badge, '#ffffff', 0.12));
+      grad.addColorStop(1, this.mixColor(style.badge, '#ffe0a3', 0.3));
+      ctx.fillStyle = grad;
+      ctx.fillRect(meterX + 1, meterY + 1, fillW, Math.max(1, meterH - 2));
+    }
+    ctx.restore();
+  }
+
   drawUpgradeSelectionFx(snapshot) {
     const fxBySide = snapshot?.upgradeSelectionFx;
     if (!fxBySide || typeof fxBySide !== 'object') return;
@@ -9987,9 +10114,10 @@ export class GameRenderer {
       const selected = Boolean(option?.selected)
         || (selectedId !== null && optionId !== null && optionId === selectedId)
         || (selectedId === null && selectedType && type === selectedType);
-      const slot = Math.max(0, Math.min(1, Math.floor(Number(option?.slot) || i)));
-      const baseX = sideCardSlotX(sideName, slot);
-      const baseY = 90;
+      const slot = Math.max(0, Math.floor(Number(option?.slot) || i));
+      const basePos = this.upgradeOptionSlotPosition(sideName, slot, options.length);
+      const baseX = Number(basePos?.x) || sideCardSlotX(sideName, 0);
+      const baseY = Number(basePos?.y) || 90;
       const driftDir = sideName === 'right' ? 1 : -1;
       const driftX = selected ? 0 : driftDir * 26 * loserProgress;
       const driftY = selected ? (-2 * Math.sin(Math.min(1, progress / 0.23) * Math.PI)) : (-9 * loserProgress);
