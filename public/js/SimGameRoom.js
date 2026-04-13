@@ -10135,7 +10135,6 @@ class GameRoom {
       committeeVoteActive: true,
     };
     const matchingShown = this.upgradeCards.find((card) => card?.side === side && card?.type === winner.type)
-      || this.upgradeCards.find((card) => card?.side === side)
       || fallbackCard;
     const fxOptions = options.map((entry, index) => ({
       id: entry?.id ?? `${side}-fx-${index}`,
