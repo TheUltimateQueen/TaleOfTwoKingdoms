@@ -52,6 +52,16 @@ const LOCAL_KEYBOARD_CODES = new Set([
   'ArrowLeft',
   'ArrowRight',
 ]);
+const UPGRADE_HOTKEY_BINDINGS = Object.freeze([
+  { code: 'Digit1', side: 'left', slot: 0, requiresNoKeyboardPlayers: false },
+  { code: 'Digit2', side: 'left', slot: 1, requiresNoKeyboardPlayers: false },
+  { code: 'Digit9', side: 'right', slot: 1, requiresNoKeyboardPlayers: false },
+  { code: 'Digit0', side: 'right', slot: 0, requiresNoKeyboardPlayers: false },
+  { code: 'KeyA', side: 'left', slot: 0, requiresNoKeyboardPlayers: true },
+  { code: 'KeyD', side: 'left', slot: 1, requiresNoKeyboardPlayers: true },
+  { code: 'ArrowLeft', side: 'right', slot: 1, requiresNoKeyboardPlayers: true },
+  { code: 'ArrowRight', side: 'right', slot: 0, requiresNoKeyboardPlayers: true },
+]);
 const THEME_STORAGE_KEY = 'enf_theme_mode_v1';
 const TEST_SETTINGS_STORAGE_KEY = 'totk_test_settings_v4';
 const BASE_TEAM_COLORS = {
@@ -354,6 +364,20 @@ export class GameClient {
       missingPlayers: 0,
       immediateRematchReady: false,
     };
+    this.controllerRole = 'archer';
+    this.controllerReady = false;
+    this.controllerReadyState = {
+      connected: 0,
+      ready: 0,
+      waiting: 0,
+      allReady: false,
+      selfReady: false,
+    };
+    this.controllerCommitteeVote = null;
+    this.controllerCommitteeVoteFx = null;
+    this.controllerUpgradeSelectionFx = null;
+    this.controllerCommitteeVoteMarkup = '';
+    this.controllerMatchStarted = false;
     this.audioRoundStarted = false;
 
     this.bindDom();
@@ -375,6 +399,14 @@ export class GameClient {
     this.controllerSideBadge = document.getElementById('controllerSideBadge');
     this.controllerSidePill = document.getElementById('controllerSidePill');
     this.controllerSideFlavor = document.getElementById('controllerSideFlavor');
+    this.controllerReadyPanel = document.getElementById('controllerReadyPanel');
+    this.controllerReadyBtn = document.getElementById('controllerReadyBtn');
+    this.controllerReadyStatus = document.getElementById('controllerReadyStatus');
+    this.controllerArcherPanel = document.getElementById('controllerArcherPanel');
+    this.controllerCommitteePanel = document.getElementById('controllerCommitteePanel');
+    this.committeeVoteTimer = document.getElementById('committeeVoteTimer');
+    this.committeeVoteOptions = document.getElementById('committeeVoteOptions');
+    this.committeeVoteStatus = document.getElementById('committeeVoteStatus');
     this.controllerRematchPanel = document.getElementById('controllerRematchPanel');
     this.controllerRematchBtn = document.getElementById('controllerRematchBtn');
     this.controllerRematchStatus = document.getElementById('controllerRematchStatus');
@@ -403,6 +435,7 @@ export class GameClient {
     this.localKeyboardTestBtn = document.getElementById('localKeyboardTestBtn');
     this.localKeyboardVsCpuBtn = document.getElementById('localKeyboardVsCpuBtn');
     this.localCpuVsCpuBtn = document.getElementById('localCpuVsCpuBtn');
+    this.hostStartBtn = document.getElementById('hostStartBtn');
     this.localKeyboardHint = document.getElementById('localKeyboardHint');
     this.lobbyModeMsg = document.getElementById('lobbyModeMsg');
     this.lobbyMsg = document.getElementById('lobbyMsg');
@@ -458,7 +491,7 @@ export class GameClient {
 
     this.controls = document.getElementById('controls');
     this.pullPad = new ControllerPad(document.getElementById('pullPad'), (pull) => {
-      if (!this.state.roomId || !this.state.side) return;
+      if (!this.state.roomId || !this.state.side || this.controllerRole !== 'archer') return;
       this.socket.emit('control_pull', { roomId: this.state.roomId, x: pull.x, y: pull.y });
     });
   }
@@ -468,6 +501,25 @@ export class GameClient {
       if (!this.isController || !this.state.roomId) return;
       const wantsRematch = !Boolean(this.controllerRematch?.requested);
       this.requestControllerRematch(wantsRematch);
+    });
+    this.controllerReadyBtn?.addEventListener('click', () => {
+      if (!this.isController || !this.state.roomId) return;
+      const nextReady = !Boolean(this.controllerReady);
+      this.socket.emit('set_ready', {
+        roomId: this.state.roomId,
+        ready: nextReady,
+      });
+    });
+    this.committeeVoteOptions?.addEventListener('click', (event) => {
+      if (!this.isController || this.controllerRole !== 'committee' || !this.state.roomId) return;
+      const button = event.target?.closest?.('[data-vote-option-id]');
+      if (!button) return;
+      const optionId = String(button.dataset.voteOptionId || '').trim();
+      if (!optionId) return;
+      this.socket.emit('committee_vote', {
+        roomId: this.state.roomId,
+        optionId,
+      });
     });
 
     if (!this.isController) {
@@ -491,6 +543,7 @@ export class GameClient {
       this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_HVH));
       this.localKeyboardVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_VS_CPU));
       this.localCpuVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_CPU_VS_CPU));
+      this.hostStartBtn?.addEventListener('click', () => this.requestHostStartMatch());
       for (const entry of this.lobbyPhoneSlots) {
         entry?.cpuToggle?.addEventListener('click', (event) => {
           event.preventDefault();
@@ -557,6 +610,7 @@ export class GameClient {
       if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = '';
       if (this.localKeyboardHint) this.localKeyboardHint.textContent = this.keyboardMatchHintText();
       this.setLocalKeyboardButtonsForActiveMode(LOCAL_KEYBOARD_MODE_HVH);
+      this.updateHostStartButton(null);
       if (this.restartMsg) this.restartMsg.textContent = '';
       this.resetGameOverPresentation();
       this.setPostGamePanel(false);
@@ -608,6 +662,12 @@ export class GameClient {
       else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change CPU slot.';
     });
 
+    this.socket.on('room_start_error', ({ message }) => {
+      if (this.isController) return;
+      if (this.lobbyModeMsg && this.state.roomId) this.lobbyModeMsg.textContent = message || 'Unable to start match.';
+      else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to start match.';
+    });
+
     this.socket.on('room_theme_updated', ({ themeMode }) => {
       this.applyThemeMode(themeMode, {
         persist: true,
@@ -633,12 +693,20 @@ export class GameClient {
         });
       }
       if (this.isController) {
+        this.controllerReady = false;
+        this.controllerCommitteeVote = null;
+        this.controllerCommitteeVoteFx = null;
+        this.controllerUpgradeSelectionFx = null;
+        this.controllerCommitteeVoteMarkup = '';
+        this.controllerMatchStarted = false;
         const immediate = Boolean(payload?.immediateRematch);
         const waitingForPlayers = Boolean(payload?.waitingForPlayers);
         if (immediate) this.controllerMsg.textContent = 'Rematch started. Get ready.';
         else if (waitingForPlayers) this.controllerMsg.textContent = 'Rematch accepted. Waiting for missing players to rejoin.';
         else this.controllerMsg.textContent = 'Match restarted.';
         this.resetControllerRematchState();
+        this.renderControllerReadyUi();
+        this.renderControllerCommitteeVoteUi();
         this.renderControllerRematchUi();
         return;
       }
@@ -660,11 +728,28 @@ export class GameClient {
       if (this.restartMsg) this.restartMsg.textContent = message || 'Unable to restart match.';
     });
 
-    this.socket.on('joined_room', ({ roomId, side, slot, mode, requiredPlayers, themeMode }) => {
+    this.socket.on('joined_room', (payload = {}) => {
+      const {
+        roomId,
+        side,
+        slot,
+        mode,
+        requiredPlayers,
+        themeMode,
+        role,
+        ready,
+      } = payload;
       this.state.roomId = roomId;
       this.state.side = side;
       this.state.slot = Number.isFinite(slot) ? slot : 0;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
+      this.controllerRole = role === 'committee' ? 'committee' : 'archer';
+      this.controllerReady = Boolean(ready);
+      this.controllerCommitteeVote = null;
+      this.controllerCommitteeVoteFx = null;
+      this.controllerUpgradeSelectionFx = null;
+      this.controllerCommitteeVoteMarkup = '';
+      this.controllerMatchStarted = false;
       this.applyThemeMode(themeMode || this.state.themeMode, {
         persist: true,
         requestServer: false,
@@ -672,12 +757,17 @@ export class GameClient {
         rerenderHud: false,
       });
       this.resetControllerRematchState();
-      const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
-      this.controllerMsg.textContent = `Connected as ${sideLabel(side, this.state.themeMode)}${laneText}. Room needs ${requiredPlayers || 2} controllers.`;
+      const isCommittee = this.controllerRole === 'committee';
+      const laneText = (!isCommittee && this.state.mode === '2v2') ? ` | Archer ${this.state.slot + 1}` : '';
+      this.controllerMsg.textContent = isCommittee
+        ? `Connected as ${sideLabel(side, this.state.themeMode)} Committee. Room needs ${requiredPlayers || 2} archer seats plus ready phones.`
+        : `Connected as ${sideLabel(side, this.state.themeMode)}${laneText}. Room needs ${requiredPlayers || 2} archer seats plus ready phones.`;
       this.pullPad.setSide(side);
       this.setControllerMode(true);
+      this.renderControllerReadyUi();
+      this.renderControllerCommitteeVoteUi();
       this.renderControllerRematchUi();
-      this.socket.emit('control_pull', { roomId, x: this.pullPad.pull.x, y: this.pullPad.pull.y });
+      if (!isCommittee) this.socket.emit('control_pull', { roomId, x: this.pullPad.pull.x, y: this.pullPad.pull.y });
     });
 
     this.socket.on('join_error', ({ message }) => {
@@ -688,6 +778,16 @@ export class GameClient {
     this.socket.on('controller_rematch_error', ({ message }) => {
       if (!this.isController) return;
       this.controllerMsg.textContent = message || 'Unable to update rematch request.';
+    });
+
+    this.socket.on('controller_ready_error', ({ message }) => {
+      if (!this.isController) return;
+      this.controllerMsg.textContent = message || 'Unable to update ready status.';
+    });
+
+    this.socket.on('committee_vote_error', ({ message }) => {
+      if (!this.isController) return;
+      this.controllerMsg.textContent = message || 'Unable to submit committee vote.';
     });
 
     this.socket.on('player_left', () => {
@@ -715,6 +815,13 @@ export class GameClient {
       if (this.isController) {
         this.state.side = null;
         this.state.slot = 0;
+        this.controllerRole = 'archer';
+        this.controllerReady = false;
+        this.controllerCommitteeVote = null;
+        this.controllerCommitteeVoteFx = null;
+        this.controllerUpgradeSelectionFx = null;
+        this.controllerCommitteeVoteMarkup = '';
+        this.controllerMatchStarted = false;
         this.controllerMsg.textContent = text;
         this.setControllerMode(false);
         return;
@@ -729,6 +836,7 @@ export class GameClient {
       this.setDisplayMode('lobby');
       if (this.lobbyMsg) this.lobbyMsg.textContent = text;
       this.setLocalKeyboardButtonsForActiveMode(LOCAL_KEYBOARD_MODE_HVH);
+      this.updateHostStartButton(null);
       this.renderLobbyPhonePreviews();
     });
 
@@ -755,6 +863,14 @@ export class GameClient {
       control.archerAimY = (this.localRoom.left.archerAimY || (900 / 2 - 56)) - lane * 78;
       this.localRoom.syncSidePrimaryPull(sideName);
       this.renderLobbyPhonePreviews();
+    });
+
+    this.socket.on('host_committee_vote', ({ socketId, optionId }) => {
+      if (!this.hostAuthoritative || this.isController || !this.localRoom) return;
+      if (!socketId || !optionId) return;
+      const result = this.localRoom.castCommitteeVote(socketId, optionId);
+      if (!result?.ok) return;
+      this.pushHostState(true);
     });
 
     this.socket.on('state', (snapshot) => {
@@ -849,9 +965,27 @@ export class GameClient {
       left: Array.isArray(payload.players?.left) ? payload.players.left.map((p) => ({ ...p })) : [],
       right: Array.isArray(payload.players?.right) ? payload.players.right.map((p) => ({ ...p })) : [],
     };
+    this.localRoom.committeePlayers = {
+      left: Array.isArray(payload.committeePlayers?.left) ? payload.committeePlayers.left.map((p) => ({ ...p })) : [],
+      right: Array.isArray(payload.committeePlayers?.right) ? payload.committeePlayers.right.map((p) => ({ ...p })) : [],
+    };
     this.remoteDisplayCount = Math.max(0, Number(payload.spectatorDisplays) || 0);
     this.localRoom.started = Boolean(payload.started);
     this.localRoom.gameOver = this.localRoom.gameOver && this.localRoom.started;
+    this.updateHostStartButton(payload);
+    if (this.lobbyMsg) {
+      const readyCount = Math.max(0, Number(payload?.ready?.ready) || 0);
+      const connectedPhones = Math.max(0, Number(payload?.ready?.connected) || 0);
+      const seatCount = Math.max(0, Number(payload?.playerCount) || 0);
+      const seatNeed = Math.max(2, Number(payload?.requiredPlayers) || (mode === '2v2' ? 4 : 2));
+      if (payload?.cpuOnlyStartNeeded) {
+        this.lobbyMsg.textContent = `All shooter slots are CPU. Press Start Game to begin. Committee phones can still join and vote.`;
+      } else if (payload.started) {
+        this.lobbyMsg.textContent = `Match live. Archer seats ${seatCount}/${seatNeed} | Ready phones ${readyCount}/${connectedPhones}`;
+      } else {
+        this.lobbyMsg.textContent = `Waiting for ready phones. Archer seats ${seatCount}/${seatNeed} | Ready phones ${readyCount}/${connectedPhones}`;
+      }
+    }
     this.pushHostState(true);
     this.renderLobbyPhonePreviews();
   }
@@ -944,11 +1078,40 @@ export class GameClient {
   }
 
   handleLocalKeyboardKey(event, pressed) {
-    if (this.isController || !this.localKeyboardTestActive) return;
+    if (this.isController) return;
+    if (pressed && this.tryUpgradeHotkey(event)) return;
+    if (!this.localKeyboardTestActive) return;
     if (!LOCAL_KEYBOARD_CODES.has(event.code)) return;
     event.preventDefault();
     if (pressed) this.localPressedKeys.add(event.code);
     else this.localPressedKeys.delete(event.code);
+  }
+
+  tryUpgradeHotkey(event) {
+    if (this.isController) return false;
+    if (!this.hostAuthoritative || !this.localRoom || !this.state.roomId) return false;
+    if (!event || typeof event.code !== 'string') return false;
+    if (event.repeat) return false;
+    const binding = UPGRADE_HOTKEY_BINDINGS.find((entry) => entry.code === event.code);
+    if (!binding) return false;
+    const activeTag = String(document?.activeElement?.tagName || '').toLowerCase();
+    if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') return false;
+    const keyboardMode = this.normalizedLocalKeyboardMode(this.localKeyboardMode);
+    const cpuVsCpuMode = keyboardMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+    if (binding.requiresNoKeyboardPlayers && this.localKeyboardTestActive && !cpuVsCpuMode) return false;
+    const side = binding.side === 'right' ? 'right' : 'left';
+    const slot = Math.max(0, Math.floor(Number(binding.slot) || 0));
+    const selected = this.localRoom.selectUpgradeCardBySlot(side, slot);
+    event.preventDefault();
+    if (!selected) return true;
+    const sideLabelText = sideShortName(side, this.state.themeMode);
+    if (this.centerHud && this.displayMode === 'game') {
+      this.centerHud.textContent = `${sideLabelText} selected upgrade slot ${slot + 1} by hotkey.`;
+    } else if (this.lobbyModeMsg) {
+      this.lobbyModeMsg.textContent = `${sideLabelText} selected upgrade slot ${slot + 1} by hotkey.`;
+    }
+    this.pushHostState(true);
+    return true;
   }
 
   updateLocalKeyboardAiming(dt) {
@@ -1051,6 +1214,9 @@ export class GameClient {
         arrowHits: Math.max(0, Number(snapshot.right?.arrowHits) || 0),
         comboHitStreak: Math.max(0, Number(snapshot.right?.comboHitStreak) || 0),
       },
+      committeeVotes: snapshot.committeeVotes || null,
+      committeeVoteFx: snapshot.committeeVoteFx || null,
+      upgradeSelectionFx: snapshot.upgradeSelectionFx || null,
     };
 
     const needsDisplaySnapshot = this.remoteDisplayCount > 0;
@@ -1101,6 +1267,12 @@ export class GameClient {
     if (!this.state.roomId) return;
     if (this.restartMsg) this.restartMsg.textContent = 'Restarting match...';
     this.socket.emit('restart_room', { roomId: this.state.roomId });
+  }
+
+  requestHostStartMatch() {
+    if (this.isController || !this.state.roomId) return;
+    if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = 'Starting CPU shooter match...';
+    this.socket.emit('host_start_match', { roomId: this.state.roomId });
   }
 
   requestControllerRematch(wantsRematch = true) {
@@ -1214,7 +1386,7 @@ export class GameClient {
   }
 
   keyboardMatchHintText() {
-    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU, 3) CPU Vs CPU. Pick keyboard or phones per match.`;
+    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU, 3) CPU Vs CPU. Upgrade hotkeys: ${sideShortName('left', this.state.themeMode)} 1=left card, 2=right card | ${sideShortName('right', this.state.themeMode)} 9=left card, 0=right card (plus A/D and Left/Right in CPU vs CPU).`;
   }
 
   keyboardActiveHintText(mode = this.localKeyboardMode) {
@@ -1422,6 +1594,14 @@ export class GameClient {
           ? room.players.right
           : (Array.isArray(snapshot?.players?.right) ? snapshot.players.right : []),
       },
+      committeePlayers: {
+        left: Array.isArray(room?.committeePlayers?.left)
+          ? room.committeePlayers.left
+          : (Array.isArray(snapshot?.committeePlayers?.left) ? snapshot.committeePlayers.left : []),
+        right: Array.isArray(room?.committeePlayers?.right)
+          ? room.committeePlayers.right
+          : (Array.isArray(snapshot?.committeePlayers?.right) ? snapshot.committeePlayers.right : []),
+      },
       sideState: {
         left: leftSide,
         right: rightSide,
@@ -1438,6 +1618,7 @@ export class GameClient {
           ? room.cpuSlots.right
           : (Array.isArray(snapshot?.cpuSlots?.right) ? snapshot.cpuSlots.right : []),
       },
+      ready: room?.readySummary?.() || snapshot?.ready || null,
       started: Boolean(room?.started || snapshot?.started),
     };
   }
@@ -1546,6 +1727,7 @@ export class GameClient {
     const connected = Boolean(player);
     const cpuFilled = this.cpuSlotFromSource(source, entry.side, entry.slot) && !connected;
     const occupied = connected || cpuFilled;
+    const ready = Boolean(player?.ready);
     const baseName = defaultArcherName(entry.side, entry.slot, this.state.themeMode);
     const playerName = connected && player?.name
       ? String(player.name)
@@ -1559,15 +1741,19 @@ export class GameClient {
     entry.el.classList.toggle('waiting', !occupied);
     entry.el.classList.toggle('connected', connected);
     entry.el.classList.toggle('cpu', cpuFilled);
+    entry.el.classList.toggle('ready', ready);
     if (entry.chip) {
-      if (connected) entry.chip.textContent = this.localKeyboardTestActive ? 'Keyboard' : 'Connected';
+      if (connected) {
+        if (this.localKeyboardTestActive) entry.chip.textContent = 'Keyboard';
+        else entry.chip.textContent = ready ? 'Ready' : 'Connected';
+      }
       else if (cpuFilled) entry.chip.textContent = 'CPU';
       else entry.chip.textContent = 'Waiting';
     }
     if (entry.player) entry.player.textContent = playerName;
     if (entry.meta) {
       entry.meta.textContent = occupied
-        ? `Power ${Math.round(shot.power * 100)}% | Arc ${shot.arcDeg}deg${pendingPower ? ` | ${pendingPower}` : ''}`
+        ? `Power ${Math.round(shot.power * 100)}% | Arc ${shot.arcDeg}deg${pendingPower ? ` | ${pendingPower}` : ''}${connected ? (ready ? ' | Ready' : ' | Not Ready') : ''}`
         : 'No controller or CPU in slot';
     }
     if (entry.powerFill) {
@@ -1594,13 +1780,32 @@ export class GameClient {
     const rightFilled = this.countFilledLobbySeats(source, 'right', archersPerSide);
     const leftCpu = this.countCpuLobbySeats(source, 'left', archersPerSide);
     const rightCpu = this.countCpuLobbySeats(source, 'right', archersPerSide);
+    const leftCommittee = Array.isArray(source?.committeePlayers?.left) ? source.committeePlayers.left : [];
+    const rightCommittee = Array.isArray(source?.committeePlayers?.right) ? source.committeePlayers.right : [];
+    const leftCommitteeReady = leftCommittee.filter((member) => Boolean(member?.ready)).length;
+    const rightCommitteeReady = rightCommittee.filter((member) => Boolean(member?.ready)).length;
 
-    if (this.lobbyLeftPhonesTitle) this.lobbyLeftPhonesTitle.textContent = `${sideShortName('left', this.state.themeMode)} Seats ${leftFilled}/${archersPerSide} (CPU ${leftCpu})`;
-    if (this.lobbyRightPhonesTitle) this.lobbyRightPhonesTitle.textContent = `${sideShortName('right', this.state.themeMode)} Seats ${rightFilled}/${archersPerSide} (CPU ${rightCpu})`;
+    if (this.lobbyLeftPhonesTitle) {
+      this.lobbyLeftPhonesTitle.textContent = `${sideShortName('left', this.state.themeMode)} Seats ${leftFilled}/${archersPerSide} (CPU ${leftCpu}) | Committee ${leftCommitteeReady}/${leftCommittee.length}`;
+    }
+    if (this.lobbyRightPhonesTitle) {
+      this.lobbyRightPhonesTitle.textContent = `${sideShortName('right', this.state.themeMode)} Seats ${rightFilled}/${archersPerSide} (CPU ${rightCpu}) | Committee ${rightCommitteeReady}/${rightCommittee.length}`;
+    }
 
     for (const entry of this.lobbyPhoneSlots) {
       this.renderLobbyPhoneSlot(entry, source, archersPerSide);
     }
+  }
+
+  updateHostStartButton(payload = null) {
+    if (this.isController || !this.hostStartBtn) return;
+    const needed = Boolean(payload?.cpuOnlyStartNeeded);
+    this.hostStartBtn.classList.toggle('hidden', !needed);
+    this.hostStartBtn.disabled = !needed;
+    this.hostStartBtn.textContent = needed ? 'Start CPU Match Now' : 'Start Game (CPU Shooters)';
+    this.hostStartBtn.title = needed
+      ? 'All shooter slots are CPU. Press to start the match.'
+      : 'Shown when all shooter slots are CPU.';
   }
 
   formatPostTime(sec = 0) {
@@ -1623,6 +1828,42 @@ export class GameClient {
     const n = Number(value) || 0;
     if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
     return n.toFixed(digits);
+  }
+
+  shortenVoteLabel(text = '', max = 18) {
+    const value = String(text || '').trim();
+    if (!value) return 'Upgrade';
+    if (value.length <= max) return value;
+    return `${value.slice(0, Math.max(4, max - 1)).trim()}~`;
+  }
+
+  formatVoteVoters(voters = [], maxNames = 3) {
+    const list = Array.isArray(voters) ? voters.map((name) => String(name || '').trim()).filter(Boolean) : [];
+    if (!list.length) return '';
+    const shown = list.slice(0, Math.max(1, maxNames));
+    const more = Math.max(0, list.length - shown.length);
+    const tail = more > 0 ? `+${more}` : '';
+    return `${shown.join(',')}${tail ? `,${tail}` : ''}`;
+  }
+
+  formatCommitteeVoteBreakdown(vote = null) {
+    if (!vote || typeof vote !== 'object' || !vote.active) return '';
+    const options = Array.isArray(vote.options) ? vote.options : [];
+    if (!options.length) return '';
+    const sorted = options.slice().sort((a, b) => {
+      const diff = (Number(b?.votes) || 0) - (Number(a?.votes) || 0);
+      if (diff !== 0) return diff;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    });
+    const parts = [];
+    for (let i = 0; i < sorted.length; i += 1) {
+      const option = sorted[i];
+      const label = this.shortenVoteLabel(upgradeLabelForLevel(option?.type, Math.max(0, Number(option?.level) || 0)), 15);
+      const votes = Math.max(0, Number(option?.votes) || 0);
+      const voters = this.formatVoteVoters(option?.voters, 2);
+      parts.push(`${label}:${votes}${voters ? `(${voters})` : ''}`);
+    }
+    return parts.join(' | ');
   }
 
   postCanvasContext(canvas) {
@@ -2937,6 +3178,199 @@ export class GameClient {
     };
   }
 
+  updateControllerReadyFromPayload(payload = {}) {
+    const ready = payload?.ready || {};
+    const connected = Math.max(0, Number(ready.connected) || 0);
+    const readyCount = Math.max(0, Number(ready.ready) || 0);
+    this.controllerReady = Boolean(ready.selfReady ?? this.controllerReady);
+    this.controllerMatchStarted = Boolean(payload?.started && !payload?.gameOver);
+    this.controllerReadyState = {
+      connected,
+      ready: readyCount,
+      waiting: Math.max(0, Number(ready.waiting) || (connected - readyCount)),
+      allReady: Boolean(ready.allReady),
+      selfReady: Boolean(ready.selfReady ?? this.controllerReady),
+    };
+  }
+
+  updateControllerCommitteeVoteFromPayload(payload = {}) {
+    const vote = payload?.committeeVote;
+    if (!vote || typeof vote !== 'object') {
+      this.controllerCommitteeVote = null;
+      return;
+    }
+    this.controllerCommitteeVote = {
+      active: Boolean(vote.active),
+      remaining: Math.max(0, Number(vote.remaining) || 0),
+      committeeCount: Math.max(0, Number(vote.committeeCount) || 0),
+      votersReady: Math.max(0, Number(vote.votersReady) || 0),
+      selectedOptionId: vote.selectedOptionId || null,
+      options: Array.isArray(vote.options) ? vote.options.map((option) => ({
+        id: option?.id || null,
+        type: option?.type || null,
+        level: Math.max(0, Number(option?.level) || 0),
+        votes: Math.max(0, Number(option?.votes) || 0),
+        voters: Array.isArray(option?.voters) ? option.voters.map((name) => String(name || '')).filter(Boolean) : [],
+      })) : [],
+    };
+  }
+
+  updateControllerCommitteeVoteFxFromPayload(payload = {}) {
+    const fx = payload?.committeeVoteFx;
+    if (!fx || typeof fx !== 'object' || (Number(fx.ttl) || 0) <= 0) {
+      this.controllerCommitteeVoteFx = null;
+      return;
+    }
+    this.controllerCommitteeVoteFx = {
+      ttl: Math.max(0, Number(fx.ttl) || 0),
+      maxTtl: Math.max(0.001, Number(fx.maxTtl) || 1),
+      winningOptionId: fx.winningOptionId || null,
+      winningType: fx.winningType || null,
+      options: Array.isArray(fx.options) ? fx.options.map((option) => ({
+        id: option?.id || null,
+        type: option?.type || null,
+        level: Math.max(0, Number(option?.level) || 0),
+        votes: Math.max(0, Number(option?.votes) || 0),
+        voters: Array.isArray(option?.voters) ? option.voters.map((name) => String(name || '')).filter(Boolean) : [],
+      })) : [],
+    };
+  }
+
+  updateControllerUpgradeSelectionFxFromPayload(payload = {}) {
+    const fx = payload?.upgradeSelectionFx;
+    if (!fx || typeof fx !== 'object' || (Number(fx.ttl) || 0) <= 0) {
+      this.controllerUpgradeSelectionFx = null;
+      return;
+    }
+    this.controllerUpgradeSelectionFx = {
+      ttl: Math.max(0, Number(fx.ttl) || 0),
+      maxTtl: Math.max(0.001, Number(fx.maxTtl) || 1),
+      selectedType: fx.selectedType || null,
+      selectedOptionId: fx.selectedOptionId || null,
+      options: Array.isArray(fx.options) ? fx.options.map((option) => ({
+        id: option?.id ?? null,
+        slot: Number.isFinite(option?.slot) ? option.slot : 0,
+        type: option?.type || null,
+        level: Math.max(0, Number(option?.level) || 0),
+        selected: Boolean(option?.selected),
+      })) : [],
+    };
+  }
+
+  renderControllerReadyUi() {
+    if (!this.isController) return;
+    const joined = Boolean(this.state.roomId && this.state.side);
+    const isCommittee = this.controllerRole === 'committee';
+    const inProgress = Boolean(this.controllerMatchStarted);
+    const needsAction = joined && !isCommittee && !inProgress && !Boolean(this.controllerReady);
+    const summary = this.controllerReadyState || {
+      connected: 0,
+      ready: 0,
+      waiting: 0,
+      allReady: false,
+      selfReady: false,
+    };
+    if (this.controllerReadyPanel) this.controllerReadyPanel.classList.toggle('hidden', !joined || isCommittee);
+    if (this.controllerReadyPanel) this.controllerReadyPanel.classList.toggle('needs-action', needsAction);
+    if (isCommittee) return;
+    if (this.controllerReadyBtn) {
+      this.controllerReadyBtn.disabled = !joined || inProgress;
+      this.controllerReadyBtn.classList.toggle('active', Boolean(this.controllerReady));
+      this.controllerReadyBtn.classList.toggle('needs-action', needsAction);
+      if (!joined) this.controllerReadyBtn.textContent = 'Set Ready';
+      else if (inProgress) this.controllerReadyBtn.textContent = 'Match Live';
+      else if (this.controllerReady) this.controllerReadyBtn.textContent = 'Ready (Tap To Unready)';
+      else this.controllerReadyBtn.textContent = 'Tap Ready To Start';
+    }
+    if (this.controllerReadyStatus) {
+      if (!joined) {
+        this.controllerReadyStatus.textContent = 'Join a room to set ready.';
+      } else if (inProgress) {
+        this.controllerReadyStatus.textContent = 'Match started. Ready lock is active.';
+      } else {
+        this.controllerReadyStatus.textContent = needsAction
+          ? `Press Ready now. Ready shooters ${summary.ready}/${summary.connected}.`
+          : `Ready shooters ${summary.ready}/${summary.connected}. Only shooter phones gate kickoff.`;
+      }
+    }
+  }
+
+  renderControllerCommitteeVoteUi() {
+    if (!this.isController) return;
+    const isCommittee = this.controllerRole === 'committee';
+    if (this.controllerArcherPanel) this.controllerArcherPanel.classList.toggle('hidden', isCommittee);
+    if (this.controllerCommitteePanel) this.controllerCommitteePanel.classList.toggle('hidden', !isCommittee);
+    if (!isCommittee) return;
+
+    const vote = this.controllerCommitteeVote;
+    const fx = this.controllerCommitteeVoteFx;
+    const showingFx = Boolean(fx && (Number(fx.ttl) || 0) > 0 && Array.isArray(fx.options) && fx.options.length);
+    if (this.controllerCommitteePanel) {
+      this.controllerCommitteePanel.classList.toggle('vote-active', !showingFx && Boolean(vote?.active));
+      this.controllerCommitteePanel.classList.toggle('vote-results', showingFx);
+    }
+    const options = showingFx
+      ? fx.options
+      : (Array.isArray(vote?.options) ? vote.options : []);
+    const totalVotes = options.reduce((sum, option) => sum + Math.max(0, Number(option?.votes) || 0), 0);
+    const remainingText = showingFx
+      ? 'Vote locked. Applying chosen upgrade...'
+      : (vote?.active
+          ? `${Math.max(0, Number(vote.remaining) || 0).toFixed(1)}s left to vote`
+          : 'Waiting for your side to charge an upgrade vote.');
+    if (this.committeeVoteTimer) this.committeeVoteTimer.textContent = remainingText;
+
+    if (this.committeeVoteOptions) {
+      const markup = options.length
+        ? options.map((option) => {
+          const selected = !showingFx && vote?.selectedOptionId && String(option.id) === String(vote.selectedOptionId);
+          const isWinner = showingFx && fx?.winningOptionId && String(option.id) === String(fx.winningOptionId);
+          const title = escapeHtml(upgradeLabelForLevel(option.type, Math.max(0, Number(option.level) || 0)));
+          const voters = option.voters.length ? option.voters.join(', ') : 'No votes yet';
+          const votesText = `${option.votes} vote${option.votes === 1 ? '' : 's'}`;
+          const votePct = totalVotes > 0
+            ? Math.max(0, Math.min(100, Math.round((Math.max(0, Number(option.votes) || 0) / totalVotes) * 100)))
+            : 0;
+          const voteBadge = showingFx
+            ? (isWinner ? 'Winner' : 'Out')
+            : (selected ? 'Your Vote' : (votePct > 0 ? `${votePct}%` : ''));
+          const winnerClass = showingFx ? (isWinner ? 'vote-result-winner' : 'vote-result-loser') : '';
+          const dataAttr = showingFx ? '' : ` data-vote-option-id="${escapeHtml(option.id || '')}"`;
+          return `
+            <button type="button" class="committee-vote-option ${selected ? 'selected' : ''} ${winnerClass}"${dataAttr}>
+              <span class="committee-vote-option-head">
+                <span class="committee-vote-option-title">${title}</span>
+                ${voteBadge ? `<span class="committee-vote-option-badge">${escapeHtml(voteBadge)}</span>` : ''}
+              </span>
+              <span class="committee-vote-option-meta">${escapeHtml(votesText)} | ${escapeHtml(voters)}</span>
+              <span class="committee-vote-option-meter"><span class="committee-vote-option-meter-fill" style="width:${votePct}%"></span></span>
+            </button>
+          `;
+        }).join('')
+        : '<p class="sub">No vote options yet.</p>';
+      if (markup !== this.controllerCommitteeVoteMarkup) {
+        this.committeeVoteOptions.innerHTML = markup;
+        this.controllerCommitteeVoteMarkup = markup;
+      }
+    }
+
+    if (this.committeeVoteStatus) {
+      const readyText = `Committee ready ${Math.max(0, Number(vote?.votersReady) || 0)}/${Math.max(0, Number(vote?.committeeCount) || 0)}.`;
+      if (showingFx) {
+        const winnerLabel = fx?.winningType
+          ? upgradeLabelForLevel(fx.winningType, Math.max(0, Number(options.find((option) => String(option.id) === String(fx.winningOptionId))?.level) || 0))
+          : 'Upgrade selected';
+        this.committeeVoteStatus.textContent = `${readyText} Locked in: ${winnerLabel}.`;
+      } else if (!vote?.active) {
+        this.committeeVoteStatus.textContent = `${readyText} Vote options appear when your side's upgrade bar is full. Shooter ready decides match start.`;
+      } else if (vote?.selectedOptionId) {
+        this.committeeVoteStatus.textContent = `${readyText} Your vote is locked in for this round (you can still change it before timer ends).`;
+      } else {
+        this.committeeVoteStatus.textContent = `${readyText} Tap one option to cast your vote.`;
+      }
+    }
+  }
+
   updateControllerRematchFromPayload(payload = {}) {
     const rematch = payload?.rematch || {};
     const requiredPlayers = Math.max(
@@ -2998,11 +3432,21 @@ export class GameClient {
         rerenderHud: false,
       });
     }
+    if (snapshot?.role === 'committee' || snapshot?.role === 'archer') this.controllerRole = snapshot.role;
+    this.updateControllerReadyFromPayload(snapshot);
+    this.updateControllerCommitteeVoteFromPayload(snapshot);
+    this.updateControllerCommitteeVoteFxFromPayload(snapshot);
+    this.updateControllerUpgradeSelectionFxFromPayload(snapshot);
     this.updateControllerRematchFromPayload(snapshot);
 
     const me = snapshot[this.state.side];
-    const laneText = snapshot.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
-    this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    const isCommittee = this.controllerRole === 'committee';
+    const laneText = (!isCommittee && snapshot.mode === '2v2') ? ` | Archer ${this.state.slot + 1}` : '';
+    if (isCommittee) {
+      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)} Committee${laneText} | Vote on upgrades for your side.`;
+    } else {
+      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(me.towerHp)} | Next ${me.shotCd.toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    }
 
     if (snapshot.gameOver) {
       const myAcc = arrowAccuracy(snapshot[this.state.side]);
@@ -3012,8 +3456,10 @@ export class GameClient {
       this.controllerMsg.textContent = `${outcome} | Your Arrow Accuracy ${myAcc.rate}% (${myAcc.hits} hits / ${myAcc.fired} fired) | Enemy Arrow Accuracy ${enemyAcc.rate}% (${enemyAcc.hits} hits / ${enemyAcc.fired} fired) | Vote for rematch below`;
     }
     this.setControllerMode(true);
+    this.renderControllerReadyUi();
+    this.renderControllerCommitteeVoteUi();
     this.renderControllerRematchUi();
-    this.pullPad.draw();
+    if (!isCommittee) this.pullPad.draw();
   }
 
   handleControllerCompactState(payload) {
@@ -3027,6 +3473,7 @@ export class GameClient {
       }
     }
     if (Number.isFinite(payload.slot)) this.state.slot = Math.max(0, Number(payload.slot) || 0);
+    if (payload.role === 'committee' || payload.role === 'archer') this.controllerRole = payload.role;
     this.refreshControllerSideBadge();
 
     if (payload.themeMode) {
@@ -3042,21 +3489,36 @@ export class GameClient {
       this.state.mode = payload.mode;
     }
     const laneText = this.state.mode === '2v2' ? ` | Archer ${this.state.slot + 1}` : '';
+    const isCommittee = this.controllerRole === 'committee';
     const me = payload.me || {};
     const enemy = payload.enemy || {};
     const requiredPlayers = Number(payload.requiredPlayers) || (this.state.mode === '2v2' ? 4 : 2);
     const playerCount = Number(payload.playerCount) || 0;
+    this.updateControllerReadyFromPayload(payload);
+    this.updateControllerCommitteeVoteFromPayload(payload);
+    this.updateControllerCommitteeVoteFxFromPayload(payload);
+    this.updateControllerUpgradeSelectionFxFromPayload(payload);
     this.updateControllerRematchFromPayload(payload);
 
     if (!payload.started && !payload.gameOver) {
-      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
+      if (isCommittee) {
+        this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)} Committee | Waiting for ready phones and archer seats ${playerCount}/${requiredPlayers}.`;
+      } else {
+        this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | Waiting for players ${playerCount}/${requiredPlayers}`;
+      }
       this.setControllerMode(true);
+      this.renderControllerReadyUi();
+      this.renderControllerCommitteeVoteUi();
       this.renderControllerRematchUi();
-      this.pullPad.draw();
+      if (!isCommittee) this.pullPad.draw();
       return;
     }
 
-    this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(Number(me.towerHp) || 0)} | Next ${(Number(me.shotCd) || 0).toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    if (isCommittee) {
+      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)} Committee | Upgrade voting live.`;
+    } else {
+      this.controllerMsg.textContent = `${sideLabel(this.state.side, this.state.themeMode)}${laneText} | HP ${Math.floor(Number(me.towerHp) || 0)} | Next ${(Number(me.shotCd) || 0).toFixed(2)}s | Power ${powerStatus(me.pendingShotPower, me.pendingShotPowerShots)} | Hit ${arrowHitRate(me)}% (${me.arrowHits || 0}) | Combo ${comboStatus(me)}`;
+    }
 
     if (payload.gameOver) {
       const myAcc = arrowAccuracy(me);
@@ -3066,8 +3528,10 @@ export class GameClient {
     }
 
     this.setControllerMode(true);
+    this.renderControllerReadyUi();
+    this.renderControllerCommitteeVoteUi();
     this.renderControllerRematchUi();
-    this.pullPad.draw();
+    if (!isCommittee) this.pullPad.draw();
   }
 
   setPostGamePanel(visible, snapshot = null) {
@@ -3362,6 +3826,8 @@ export class GameClient {
     this.controls.classList.toggle('hidden', !joined);
     if (!joined) this.resetControllerRematchState();
     this.refreshControllerSideBadge();
+    this.renderControllerReadyUi();
+    this.renderControllerCommitteeVoteUi();
     this.renderControllerRematchUi();
     if (this.isController) this.setKeepAwake(joined);
   }
@@ -3387,7 +3853,18 @@ export class GameClient {
       return;
     }
     const localHint = this.localKeyboardTestActive ? ` | ${this.keyboardControlsLegendText()}` : '';
-    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: ${sideShortName('left', this.state.themeMode)} ${s.left.shotCd.toFixed(2)}s | ${sideShortName('right', this.state.themeMode)} ${s.right.shotCd.toFixed(2)}s`;
+    const leftVote = s?.committeeVotes?.left;
+    const rightVote = s?.committeeVotes?.right;
+    const voteBits = [];
+    if (leftVote?.active) voteBits.push(`${sideShortName('left', this.state.themeMode)} vote ${Math.max(0, Number(leftVote.remaining) || 0).toFixed(1)}s`);
+    if (rightVote?.active) voteBits.push(`${sideShortName('right', this.state.themeMode)} vote ${Math.max(0, Number(rightVote.remaining) || 0).toFixed(1)}s`);
+    const voteHint = voteBits.length ? ` | ${voteBits.join(' / ')}` : '';
+    const leftBreakdown = this.formatCommitteeVoteBreakdown(leftVote);
+    const rightBreakdown = this.formatCommitteeVoteBreakdown(rightVote);
+    const liveVoteDetails = (leftBreakdown || rightBreakdown)
+      ? ` | Votes: ${leftBreakdown ? `${sideShortName('left', this.state.themeMode)} [${leftBreakdown}]` : ''}${leftBreakdown && rightBreakdown ? ' || ' : ''}${rightBreakdown ? `${sideShortName('right', this.state.themeMode)} [${rightBreakdown}]` : ''}`
+      : '';
+    this.centerHud.textContent = `Mode ${String(s.mode || '1v1').toUpperCase()}${localHint} | Next Shot: ${sideShortName('left', this.state.themeMode)} ${s.left.shotCd.toFixed(2)}s | ${sideShortName('right', this.state.themeMode)} ${s.right.shotCd.toFixed(2)}s${voteHint}${liveVoteDetails}`;
   }
 
   initFromUrl() {

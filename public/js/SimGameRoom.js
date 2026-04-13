@@ -418,6 +418,10 @@ const MATCH_SAMPLE_INTERVAL_SEC = 1;
 const MATCH_MAX_TIMELINE_POINTS = 2400;
 const MATCH_MAX_UPGRADE_EVENTS = 600;
 const MATCH_MAX_LUCK_EVENTS = 900;
+const MAX_COMMITTEE_PLAYERS_PER_SIDE = 12;
+const COMMITTEE_VOTE_OPTION_COUNT = 4;
+const COMMITTEE_VOTE_DURATION_SECONDS = 3;
+const UPGRADE_SELECTION_FX_DURATION = 2.2;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -467,6 +471,26 @@ function weightedRandomFrom(entries = []) {
     if (roll <= 0) return entry;
   }
   return entries[entries.length - 1] || null;
+}
+
+function defaultCommitteeName(sideName = 'left', ordinal = 1, themeMode = DEFAULT_THEME_MODE) {
+  const side = sideName === 'right' ? 'right' : 'left';
+  const index = Math.max(1, Math.floor(Number(ordinal) || 1));
+  if (normalizeThemeMode(themeMode) === 'themed') {
+    return `${side === 'left' ? 'Bread Council' : 'Rice Council'} ${index}`;
+  }
+  return `${side === 'left' ? 'West Council' : 'East Council'} ${index}`;
+}
+
+function isDefaultCommitteeName(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  return (
+    /^Bread Council \d+$/i.test(value)
+    || /^Rice Council \d+$/i.test(value)
+    || /^West Council \d+$/i.test(value)
+    || /^East Council \d+$/i.test(value)
+  );
 }
 
 function presidentExecutiveOrderCooldown() {
@@ -790,13 +814,28 @@ class GameRoom {
     this.baseUrl = baseUrl;
     this.display = null;
     this.players = { left: [], right: [] };
+    this.committeePlayers = { left: [], right: [] };
     this.cpuSlots = this.createCpuSlots();
     this.started = false;
     this.gameOver = false;
     this.winner = null;
     this.nextBalancedJoinSide = 'left';
+    this.nextCommitteeJoinSide = 'left';
     this.t = 0;
     this.cpuAimState = new Map();
+    this.committeeVoteSeq = 1;
+    this.committeeVotes = {
+      left: this.createCommitteeVoteState('left'),
+      right: this.createCommitteeVoteState('right'),
+    };
+    this.committeeVoteFx = {
+      left: null,
+      right: null,
+    };
+    this.upgradeSelectionFx = {
+      left: null,
+      right: null,
+    };
 
     this.left = left;
     this.right = right;
@@ -853,7 +892,12 @@ class GameRoom {
       cannonBalls: this.cannonBalls,
       upgradeCards: this.upgradeCards,
       players: this.players,
+      committeePlayers: this.committeePlayers,
       cpuSlots: this.cpuSlots,
+      committeeVotes: this.committeeVotes,
+      committeeVoteFx: this.committeeVoteFx,
+      upgradeSelectionFx: this.upgradeSelectionFx,
+      ready: null,
       primaryPlayers: this.displayPrimaryPlayers,
       postGameReport: null,
       debug: this.displayDebug,
@@ -918,7 +962,12 @@ class GameRoom {
     snapshot.cannonBalls = this.cannonBalls;
     snapshot.upgradeCards = this.upgradeCards;
     snapshot.players = this.players;
+    snapshot.committeePlayers = this.committeePlayers;
     snapshot.cpuSlots = this.cpuSlots;
+    snapshot.committeeVotes = this.buildCommitteeVoteSnapshot();
+    snapshot.committeeVoteFx = this.buildCommitteeVoteFxSnapshot();
+    snapshot.upgradeSelectionFx = this.buildUpgradeSelectionFxSnapshot();
+    snapshot.ready = this.readySummary();
     this.displayPrimaryPlayers.left = this.players.left[0] || null;
     this.displayPrimaryPlayers.right = this.players.right[0] || null;
     snapshot.primaryPlayers = this.displayPrimaryPlayers;
@@ -949,7 +998,133 @@ class GameRoom {
     if (this.themeMode === nextMode) return { changed: false, themeMode: this.themeMode };
     this.themeMode = nextMode;
     if (options?.renamePlayers !== false) this.renameDefaultPlayerNamesForTheme();
+    if (options?.renamePlayers !== false) this.renameDefaultCommitteeNamesForTheme();
     return { changed: true, themeMode: this.themeMode };
+  }
+
+  renameDefaultCommitteeNamesForTheme() {
+    for (const sideName of ['left', 'right']) {
+      const committee = Array.isArray(this.committeePlayers?.[sideName]) ? this.committeePlayers[sideName] : [];
+      for (let i = 0; i < committee.length; i += 1) {
+        const member = committee[i];
+        if (!member || !isDefaultCommitteeName(member.name)) continue;
+        const ordinal = Number.isFinite(member.ordinal) ? member.ordinal : (i + 1);
+        const nextName = defaultCommitteeName(sideName, ordinal, this.themeMode);
+        member.name = nextName;
+        member.voterName = nextName;
+      }
+    }
+  }
+
+  createCommitteeVoteState(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    return {
+      side,
+      active: false,
+      startedAt: 0,
+      resolveAt: 0,
+      options: [],
+      votesByPlayerId: {},
+    };
+  }
+
+  resetCommitteeVoteState(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    this.committeeVotes[side] = this.createCommitteeVoteState(side);
+  }
+
+  buildCommitteeVoteTallies(sideName = 'left', voteState = null) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const state = voteState || this.committeeVotes?.[side];
+    if (!state?.active || !Array.isArray(state.options) || !state.options.length) return [];
+    const members = this.sideCommitteePlayers(side);
+    const memberById = new Map(members.map((member) => [member.id, member]));
+    return state.options.map((option) => {
+      const voters = [];
+      let voteCount = 0;
+      for (const [playerId, optionId] of Object.entries(state.votesByPlayerId || {})) {
+        if (String(optionId) !== String(option.id)) continue;
+        const member = memberById.get(playerId);
+        if (!member) continue;
+        voteCount += 1;
+        voters.push(member.voterName || member.name || 'Voter');
+      }
+      return {
+        id: option.id,
+        type: option.type,
+        level: Math.max(0, Number(option.level) || 0),
+        votes: voteCount,
+        voters,
+      };
+    });
+  }
+
+  sideCommitteePlayers(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    return Array.isArray(this.committeePlayers?.[side]) ? this.committeePlayers[side] : [];
+  }
+
+  committeeCountForSide(sideName = 'left') {
+    return this.sideCommitteePlayers(sideName).length;
+  }
+
+  hasCommitteePlayers(sideName = 'left') {
+    return this.committeeCountForSide(sideName) > 0;
+  }
+
+  allHumanPlayers() {
+    return [
+      ...(Array.isArray(this.players?.left) ? this.players.left : []),
+      ...(Array.isArray(this.players?.right) ? this.players.right : []),
+      ...(Array.isArray(this.committeePlayers?.left) ? this.committeePlayers.left : []),
+      ...(Array.isArray(this.committeePlayers?.right) ? this.committeePlayers.right : []),
+    ];
+  }
+
+  readySummary(socketId = null) {
+    const archers = [...this.players.left, ...this.players.right];
+    let readyCount = 0;
+    for (const p of archers) {
+      if (p?.ready !== false) readyCount += 1;
+    }
+    const connected = archers.length;
+    const allReady = connected <= 0 ? true : readyCount >= connected;
+    const committee = [...this.sideCommitteePlayers('left'), ...this.sideCommitteePlayers('right')];
+    const committeeConnected = committee.length;
+    const committeeReady = committee.filter((p) => p?.ready !== false).length;
+    const people = this.allHumanPlayers();
+    const self = socketId ? people.find((p) => p?.id === socketId) : null;
+    const selfReady = self
+      ? ((self.role === 'committee') ? true : (self.ready !== false))
+      : false;
+    return {
+      connected,
+      ready: readyCount,
+      waiting: Math.max(0, connected - readyCount),
+      allReady,
+      selfReady,
+      committeeConnected,
+      committeeReady,
+    };
+  }
+
+  allHumansReady() {
+    const summary = this.readySummary();
+    return summary.connected <= 0 ? true : summary.allReady;
+  }
+
+  committeePlayerBySocket(socketId) {
+    const leftPlayer = this.sideCommitteePlayers('left').find((p) => p.id === socketId);
+    if (leftPlayer) return { side: 'left', slot: null, role: 'committee', player: leftPlayer };
+    const rightPlayer = this.sideCommitteePlayers('right').find((p) => p.id === socketId);
+    if (rightPlayer) return { side: 'right', slot: null, role: 'committee', player: rightPlayer };
+    return null;
+  }
+
+  controllerBySocket(socketId) {
+    const archer = this.playerBySocket(socketId);
+    if (archer) return { ...archer, role: 'archer' };
+    return this.committeePlayerBySocket(socketId);
   }
 
   createCpuSlots() {
@@ -1425,8 +1600,40 @@ class GameRoom {
   }
 
   serialize() {
-    const leftPlayers = this.players.left.map((p) => ({ id: p.id, name: p.name, slot: p.slot }));
-    const rightPlayers = this.players.right.map((p) => ({ id: p.id, name: p.name, slot: p.slot }));
+    const leftPlayers = this.players.left.map((p) => ({
+      id: p.id,
+      role: p.role || 'archer',
+      name: p.name,
+      slot: p.slot,
+      ready: Boolean(p.ready),
+    }));
+    const rightPlayers = this.players.right.map((p) => ({
+      id: p.id,
+      role: p.role || 'archer',
+      name: p.name,
+      slot: p.slot,
+      ready: Boolean(p.ready),
+    }));
+    const leftCommittee = this.sideCommitteePlayers('left').map((member) => ({
+      id: member.id,
+      role: 'committee',
+      side: 'left',
+      slot: null,
+      ordinal: Number.isFinite(member.ordinal) ? member.ordinal : null,
+      name: member.name || member.voterName || null,
+      voterName: member.voterName || member.name || null,
+      ready: Boolean(member.ready),
+    }));
+    const rightCommittee = this.sideCommitteePlayers('right').map((member) => ({
+      id: member.id,
+      role: 'committee',
+      side: 'right',
+      slot: null,
+      ordinal: Number.isFinite(member.ordinal) ? member.ordinal : null,
+      name: member.name || member.voterName || null,
+      voterName: member.voterName || member.name || null,
+      ready: Boolean(member.ready),
+    }));
     const leftPrimary = leftPlayers[0] || null;
     const rightPrimary = rightPlayers[0] || null;
     const arrows = this.arrows.map((a) => ({
@@ -1621,12 +1828,15 @@ class GameRoom {
     const upgradeCards = this.upgradeCards.map((card) => ({
       id: card.id,
       side: card.side,
+      slot: Number.isFinite(card.slot) ? card.slot : 0,
       type: card.type,
       x: roundTo(card.x, 1),
       y: roundTo(card.y, 1),
       w: roundTo(card.w, 1),
       h: roundTo(card.h, 1),
       cost: Math.max(1, Math.round(Number(card.cost) || 1)),
+      committeeLocked: Boolean(card.committeeLocked),
+      committeeVoteActive: Boolean(card.committeeVoteActive),
     }));
 
     return {
@@ -1662,10 +1872,18 @@ class GameRoom {
         left: leftPlayers,
         right: rightPlayers,
       },
+      committeePlayers: {
+        left: leftCommittee,
+        right: rightCommittee,
+      },
       cpuSlots: {
         left: Array.isArray(this.cpuSlots?.left) ? this.cpuSlots.left.slice(0, this.archersPerSide).map(Boolean) : [],
         right: Array.isArray(this.cpuSlots?.right) ? this.cpuSlots.right.slice(0, this.archersPerSide).map(Boolean) : [],
       },
+      committeeVotes: this.buildCommitteeVoteSnapshot(),
+      committeeVoteFx: this.buildCommitteeVoteFxSnapshot(),
+      upgradeSelectionFx: this.buildUpgradeSelectionFxSnapshot(),
+      ready: this.readySummary(),
       primaryPlayers: {
         left: leftPrimary,
         right: rightPrimary,
@@ -1835,6 +2053,12 @@ class GameRoom {
     this.pendingResourceSpawns = null;
     this.nextShotPowerAt = 0;
     this.seq = 1;
+    this.committeeVotes.left = this.createCommitteeVoteState('left');
+    this.committeeVotes.right = this.createCommitteeVoteState('right');
+    this.committeeVoteFx.left = null;
+    this.committeeVoteFx.right = null;
+    this.upgradeSelectionFx.left = null;
+    this.upgradeSelectionFx.right = null;
     this.left.candleSpawnInSpawns = this.statCandleEvery(this.left);
     this.right.candleSpawnInSpawns = this.statCandleEvery(this.right);
     this.left.candleCd = this.candleSpawnEtaSeconds('left');
@@ -1860,8 +2084,10 @@ class GameRoom {
   }
 
   isReadyToStart() {
-    return this.filledSlotsForSide('left') >= this.archersPerSide
+    const archersFilled = this.filledSlotsForSide('left') >= this.archersPerSide
       && this.filledSlotsForSide('right') >= this.archersPerSide;
+    if (!archersFilled) return false;
+    return this.allHumansReady();
   }
 
   syncSidePrimaryPull(sideName) {
@@ -1891,54 +2117,123 @@ class GameRoom {
 
   playerBySocket(socketId) {
     const leftPlayer = this.players.left.find((p) => p.id === socketId);
-    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, player: leftPlayer };
+    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, role: 'archer', player: leftPlayer };
     const rightPlayer = this.players.right.find((p) => p.id === socketId);
-    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, player: rightPlayer };
+    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, role: 'archer', player: rightPlayer };
     return null;
   }
 
   sideBySocket(socketId) {
-    const found = this.playerBySocket(socketId);
+    const found = this.controllerBySocket(socketId);
     return found ? found.side : null;
   }
 
   addPlayer(socketId, name) {
-    const existing = this.playerBySocket(socketId);
-    if (existing) return { side: existing.side, slot: existing.slot, existing: true };
+    const existing = this.controllerBySocket(socketId);
+    if (existing) {
+      return {
+        side: existing.side,
+        slot: existing.slot,
+        role: existing.role || 'archer',
+        voterName: existing.player?.voterName || existing.player?.name || null,
+        existing: true,
+      };
+    }
     const leftOpen = this.availableHumanJoinSlots('left');
     const rightOpen = this.availableHumanJoinSlots('right');
-    if (!leftOpen.length && !rightOpen.length) return null;
+    const canJoinArcher = leftOpen.length || rightOpen.length;
+    const canJoinCommittee = this.committeeCountForSide('left') < MAX_COMMITTEE_PLAYERS_PER_SIDE
+      || this.committeeCountForSide('right') < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    if (!canJoinArcher && !canJoinCommittee) return null;
 
-    let side = 'left';
-    if (leftOpen.length && rightOpen.length) {
-      const leftCount = this.players.left.length;
-      const rightCount = this.players.right.length;
-      if (leftCount === rightCount) {
-        side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
-        const preferredOpen = side === 'left' ? leftOpen : rightOpen;
-        if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
-        this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
-      } else if (leftCount < rightCount) {
-        side = leftOpen.length ? 'left' : 'right';
+    if (canJoinArcher) {
+      let side = 'left';
+      if (leftOpen.length && rightOpen.length) {
+        const leftCount = this.players.left.length;
+        const rightCount = this.players.right.length;
+        if (leftCount === rightCount) {
+          side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
+          const preferredOpen = side === 'left' ? leftOpen : rightOpen;
+          if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
+          this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+        } else if (leftCount < rightCount) {
+          side = leftOpen.length ? 'left' : 'right';
+        } else {
+          side = rightOpen.length ? 'right' : 'left';
+        }
       } else {
-        side = rightOpen.length ? 'right' : 'left';
+        side = leftOpen.length ? 'left' : 'right';
       }
-    } else {
-      side = leftOpen.length ? 'left' : 'right';
+
+      const sideOpen = side === 'left' ? leftOpen : rightOpen;
+      const slot = sideOpen[0];
+      if (!Number.isFinite(slot)) return null;
+
+      const player = {
+        id: socketId,
+        role: 'archer',
+        name: name || this.defaultPlayerNameForSide(side, slot),
+        slot,
+        ready: false,
+      };
+      this.players[side].push(player);
+      this.started = this.isReadyToStart();
+      return { side, slot, role: 'archer', voterName: null, existing: false };
     }
 
-    const sideOpen = side === 'left' ? leftOpen : rightOpen;
-    const slot = sideOpen[0];
-    if (!Number.isFinite(slot)) return null;
+    let side = 'left';
+    const leftCount = this.committeeCountForSide('left');
+    const rightCount = this.committeeCountForSide('right');
+    const leftOpenCommittee = leftCount < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    const rightOpenCommittee = rightCount < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    if (leftOpenCommittee && rightOpenCommittee) {
+      if (leftCount === rightCount) {
+        side = this.nextCommitteeJoinSide === 'right' ? 'right' : 'left';
+        this.nextCommitteeJoinSide = side === 'left' ? 'right' : 'left';
+      } else {
+        side = leftCount <= rightCount ? 'left' : 'right';
+      }
+    } else if (leftOpenCommittee) {
+      side = 'left';
+    } else if (rightOpenCommittee) {
+      side = 'right';
+    } else {
+      return null;
+    }
 
-    const player = {
+    const committeeList = this.sideCommitteePlayers(side);
+    const ordinal = committeeList.length + 1;
+    const voterName = name || defaultCommitteeName(side, ordinal, this.themeMode);
+    const committeeMember = {
       id: socketId,
-      name: name || this.defaultPlayerNameForSide(side, slot),
-      slot,
+      role: 'committee',
+      side,
+      slot: null,
+      ordinal,
+      name: voterName,
+      voterName,
+      ready: false,
     };
-    this.players[side].push(player);
+    this.committeePlayers[side].push(committeeMember);
     this.started = this.isReadyToStart();
-    return { side, slot, existing: false };
+    return { side, slot: null, role: 'committee', voterName, existing: false };
+  }
+
+  setPlayerReady(socketId, ready = true) {
+    const entry = this.controllerBySocket(socketId);
+    if (!entry || !entry.player) return { ok: false, message: 'Controller not found.' };
+    if (this.started && !this.gameOver) {
+      return { ok: false, message: 'Match already started.' };
+    }
+    entry.player.ready = Boolean(ready);
+    this.started = this.isReadyToStart();
+    return {
+      ok: true,
+      side: entry.side,
+      role: entry.role || 'archer',
+      ready: Boolean(entry.player.ready),
+      summary: this.readySummary(socketId),
+    };
   }
 
   setControlPull(socketId, x, y) {
@@ -1968,12 +2263,24 @@ class GameRoom {
     const rightBefore = this.players.right.length;
     this.players.right = this.players.right.filter((p) => p.id !== socketId);
     if (this.players.right.length !== rightBefore) changed = true;
+    const leftCommitteeBefore = this.sideCommitteePlayers('left').length;
+    this.committeePlayers.left = this.sideCommitteePlayers('left').filter((p) => p.id !== socketId);
+    if (this.committeePlayers.left.length !== leftCommitteeBefore) changed = true;
+    const rightCommitteeBefore = this.sideCommitteePlayers('right').length;
+    this.committeePlayers.right = this.sideCommitteePlayers('right').filter((p) => p.id !== socketId);
+    if (this.committeePlayers.right.length !== rightCommitteeBefore) changed = true;
+    if (this.committeeVotes?.left?.votesByPlayerId) delete this.committeeVotes.left.votesByPlayerId[socketId];
+    if (this.committeeVotes?.right?.votesByPlayerId) delete this.committeeVotes.right.votesByPlayerId[socketId];
 
     if (changed) this.started = this.isReadyToStart();
 
     return {
       changed,
-      empty: this.players.left.length === 0 && this.players.right.length === 0 && !this.display,
+      empty: this.players.left.length === 0
+        && this.players.right.length === 0
+        && this.sideCommitteePlayers('left').length === 0
+        && this.sideCommitteePlayers('right').length === 0
+        && !this.display,
     };
   }
 
@@ -2036,6 +2343,18 @@ class GameRoom {
     this.right.specialFailTtl = Math.max(0, (Number(this.right.specialFailTtl) || 0) - dt);
     this.left.specialRollTtl = Math.max(0, (Number(this.left.specialRollTtl) || 0) - dt);
     this.right.specialRollTtl = Math.max(0, (Number(this.right.specialRollTtl) || 0) - dt);
+    for (const sideName of ROOM_SIDES) {
+      const fx = this.committeeVoteFx?.[sideName];
+      if (!fx) continue;
+      fx.ttl = Math.max(0, (Number(fx.ttl) || 0) - dt);
+      if (fx.ttl <= 0) this.committeeVoteFx[sideName] = null;
+    }
+    for (const sideName of ROOM_SIDES) {
+      const fx = this.upgradeSelectionFx?.[sideName];
+      if (!fx) continue;
+      fx.ttl = Math.max(0, (Number(fx.ttl) || 0) - dt);
+      if (fx.ttl <= 0) this.upgradeSelectionFx[sideName] = null;
+    }
     this.left.heroLineCd = Math.max(0, (Number(this.left.heroLineCd) || 0) - dt);
     this.right.heroLineCd = Math.max(0, (Number(this.right.heroLineCd) || 0) - dt);
     if (this.left.specialFailTtl === 0) this.left.specialFailType = null;
@@ -3680,6 +3999,7 @@ class GameRoom {
           a.y <= card.y + card.h / 2 + a.r;
         if (hit) {
           const mySide = a.side === 'left' ? this.left : this.right;
+          if (this.committeeVotingRequiredForSide(a.side)) continue;
           if (mySide.upgradeCharge < mySide.upgradeChargeMax) continue;
           this.markArrowHit(a);
           consumed = this.selectUpgradeCard(a.side, card);
@@ -8241,6 +8561,7 @@ class GameRoom {
   }
 
   cpuUpgradeTarget(sideName = 'left') {
+    if (this.committeeVotingRequiredForSide(sideName)) return null;
     const side = sideName === 'right' ? this.right : this.left;
     if ((Number(side?.upgradeCharge) || 0) < (Number(side?.upgradeChargeMax) || 0)) return null;
     for (const card of this.upgradeCards) {
@@ -9643,7 +9964,281 @@ class GameRoom {
       y: CARD_Y,
       w: CARD_W,
       h: CARD_H,
+      committeeLocked: false,
     });
+  }
+
+  committeeVotingRequiredForSide(sideName = 'left') {
+    return this.hasCommitteePlayers(sideName);
+  }
+
+  setUpgradeCardCommitteeLock(sideName = 'left', locked = false, voteActive = false) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    for (const card of this.upgradeCards) {
+      if (!card || card.side !== side) continue;
+      card.committeeLocked = Boolean(locked);
+      card.committeeVoteActive = Boolean(voteActive);
+    }
+  }
+
+  buildCommitteeVoteOptions(sideName = 'left', optionCount = COMMITTEE_VOTE_OPTION_COUNT) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const sideState = this[side];
+    const targetCount = Math.max(2, Math.floor(Number(optionCount) || COMMITTEE_VOTE_OPTION_COUNT));
+    const options = [];
+    const usedTypes = new Set();
+
+    for (let i = 0; i < targetCount; i += 1) {
+      const candidates = this.buildUpgradeCardCandidates(sideState, usedTypes);
+      if (!candidates.length) break;
+      const choice = weightedRandomFrom(candidates);
+      const type = choice?.type;
+      if (!type || usedTypes.has(type)) continue;
+      usedTypes.add(type);
+      options.push({
+        id: `${side}-${this.committeeVoteSeq++}`,
+        type,
+        level: Math.max(0, Number(sideState?.[type]) || 0),
+      });
+    }
+
+    if (options.length < targetCount) {
+      const fallback = this.buildUpgradeCardCandidates(sideState, new Set());
+      let guard = 0;
+      while (options.length < targetCount && fallback.length && guard < targetCount * 12) {
+        guard += 1;
+        const choice = weightedRandomFrom(fallback);
+        const type = choice?.type;
+        if (!type) continue;
+        options.push({
+          id: `${side}-${this.committeeVoteSeq++}`,
+          type,
+          level: Math.max(0, Number(sideState?.[type]) || 0),
+        });
+      }
+    }
+    return options;
+  }
+
+  ensureCommitteeVoteSession(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const sideState = this[side];
+    const voteState = this.committeeVotes[side] || this.createCommitteeVoteState(side);
+    this.committeeVotes[side] = voteState;
+    if (!this.committeeVotingRequiredForSide(side)) {
+      this.resetCommitteeVoteState(side);
+      return;
+    }
+    if ((Number(sideState?.upgradeCharge) || 0) < (Number(sideState?.upgradeChargeMax) || 0)) {
+      this.resetCommitteeVoteState(side);
+      return;
+    }
+    if (voteState.active && Array.isArray(voteState.options) && voteState.options.length) return;
+
+    let options = this.buildCommitteeVoteOptions(side, COMMITTEE_VOTE_OPTION_COUNT);
+    if (!options.length) {
+      const cards = this.upgradeCards.filter((card) => card?.side === side);
+      options = cards.slice(0, COMMITTEE_VOTE_OPTION_COUNT).map((card) => ({
+        id: `${side}-${this.committeeVoteSeq++}`,
+        type: card.type,
+        level: Math.max(0, Number(sideState?.[card.type]) || 0),
+      }));
+    }
+    if (!options.length) {
+      this.resetCommitteeVoteState(side);
+      return;
+    }
+    voteState.active = true;
+    voteState.startedAt = this.t;
+    voteState.resolveAt = this.t + COMMITTEE_VOTE_DURATION_SECONDS;
+    voteState.options = options;
+    voteState.votesByPlayerId = {};
+  }
+
+  castCommitteeVote(socketId, optionId) {
+    const member = this.committeePlayerBySocket(socketId);
+    if (!member?.player) return { ok: false, message: 'Only committee members can vote.' };
+    const side = member.side === 'right' ? 'right' : 'left';
+    const voteState = this.committeeVotes[side];
+    if (!voteState?.active || !Array.isArray(voteState.options) || !voteState.options.length) {
+      return { ok: false, message: 'No active vote for your committee right now.' };
+    }
+    const targetId = String(optionId || '').trim();
+    if (!targetId) return { ok: false, message: 'Choose an option to vote.' };
+    const option = voteState.options.find((entry) => String(entry?.id) === targetId);
+    if (!option) return { ok: false, message: 'That vote option is no longer available.' };
+    voteState.votesByPlayerId[socketId] = targetId;
+    return { ok: true, side, optionId: targetId };
+  }
+
+  committeeVoteWinner(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const voteState = this.committeeVotes[side];
+    if (!voteState?.active || !Array.isArray(voteState.options) || !voteState.options.length) return null;
+    const tally = new Map(voteState.options.map((option) => [option.id, 0]));
+    for (const [playerId, optionId] of Object.entries(voteState.votesByPlayerId || {})) {
+      const member = this.committeePlayerBySocket(playerId);
+      if (!member || member.side !== side) continue;
+      if (!tally.has(optionId)) continue;
+      tally.set(optionId, (tally.get(optionId) || 0) + 1);
+    }
+    let maxVotes = -1;
+    let winner = null;
+    for (const option of voteState.options) {
+      const votes = tally.get(option.id) || 0;
+      if (votes > maxVotes) {
+        maxVotes = votes;
+        winner = option;
+      }
+    }
+    if (winner) return winner;
+    return randomFrom(voteState.options);
+  }
+
+  resolveCommitteeVoteIfDue(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const voteState = this.committeeVotes[side];
+    if (!voteState?.active) return;
+    if (this.t < (Number(voteState.resolveAt) || 0)) return;
+    const winner = this.committeeVoteWinner(side);
+    if (!winner?.type) {
+      this.resetCommitteeVoteState(side);
+      return;
+    }
+    const options = this.buildCommitteeVoteTallies(side, voteState);
+    this.committeeVoteFx[side] = {
+      ttl: 2.2,
+      maxTtl: 2.2,
+      winningOptionId: winner.id || null,
+      winningType: winner.type || null,
+      options,
+    };
+    const fallbackCard = {
+      id: this.seq++,
+      side,
+      slot: 0,
+      source: 'committee',
+      type: winner.type,
+      value: 1,
+      cost: this.upgradeCost(this[side], winner.type),
+      x: this.sideCardSlotX(side, 0),
+      y: CARD_Y,
+      w: CARD_W,
+      h: CARD_H,
+      committeeLocked: true,
+      committeeVoteActive: true,
+    };
+    const matchingShown = this.upgradeCards.find((card) => card?.side === side && card?.type === winner.type)
+      || this.upgradeCards.find((card) => card?.side === side)
+      || fallbackCard;
+    this.selectUpgradeCard(side, matchingShown);
+    this.resetCommitteeVoteState(side);
+  }
+
+  buildCommitteeVoteSnapshotForSide(sideName = 'left') {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const state = this.committeeVotes?.[side] || this.createCommitteeVoteState(side);
+    const now = this.t;
+    const remaining = state.active
+      ? Math.max(0, (Number(state.resolveAt) || 0) - now)
+      : 0;
+    const members = this.sideCommitteePlayers(side);
+    const options = this.buildCommitteeVoteTallies(side, state);
+    return {
+      side,
+      active: Boolean(state.active),
+      startedAt: Number(state.startedAt) || 0,
+      resolveAt: Number(state.resolveAt) || 0,
+      remaining,
+      optionCount: options.length,
+      options,
+      votesByPlayerId: { ...(state.votesByPlayerId || {}) },
+      committeeCount: members.length,
+      votersReady: members.filter((member) => Boolean(member?.ready)).length,
+    };
+  }
+
+  buildCommitteeVoteSnapshot() {
+    return {
+      left: this.buildCommitteeVoteSnapshotForSide('left'),
+      right: this.buildCommitteeVoteSnapshotForSide('right'),
+    };
+  }
+
+  buildCommitteeVoteFxSnapshot() {
+    const mapSide = (sideName = 'left') => {
+      const entry = this.committeeVoteFx?.[sideName];
+      if (!entry) return null;
+      return {
+        side: sideName,
+        ttl: Math.max(0, Number(entry.ttl) || 0),
+        maxTtl: Math.max(0.001, Number(entry.maxTtl) || 1),
+        winningOptionId: entry.winningOptionId || null,
+        winningType: entry.winningType || null,
+        options: Array.isArray(entry.options) ? entry.options.map((option) => ({
+          id: option?.id || null,
+          type: option?.type || null,
+          level: Math.max(0, Number(option?.level) || 0),
+          votes: Math.max(0, Number(option?.votes) || 0),
+          voters: Array.isArray(option?.voters) ? option.voters.map((name) => String(name || '')).filter(Boolean) : [],
+        })) : [],
+      };
+    };
+    return {
+      left: mapSide('left'),
+      right: mapSide('right'),
+    };
+  }
+
+  setUpgradeSelectionFx(sideName = 'left', selectedCard = null, options = []) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const sideState = this[side];
+    const selectedType = selectedCard?.type || null;
+    const selectedId = selectedCard?.id || null;
+    if (!selectedType) {
+      this.upgradeSelectionFx[side] = null;
+      return;
+    }
+    const normalizedOptions = Array.isArray(options) ? options.map((entry, index) => ({
+      id: entry?.id ?? `opt-${index}`,
+      slot: Number.isFinite(entry?.slot) ? entry.slot : index,
+      type: entry?.type || null,
+      level: Math.max(0, Number(sideState?.[entry?.type]) || 0),
+      selected: String(entry?.id) === String(selectedId),
+    })).filter((entry) => Boolean(entry.type)) : [];
+    this.upgradeSelectionFx[side] = {
+      side,
+      ttl: UPGRADE_SELECTION_FX_DURATION,
+      maxTtl: UPGRADE_SELECTION_FX_DURATION,
+      selectedType,
+      selectedOptionId: selectedId,
+      options: normalizedOptions,
+    };
+  }
+
+  buildUpgradeSelectionFxSnapshot() {
+    const mapSide = (sideName = 'left') => {
+      const entry = this.upgradeSelectionFx?.[sideName];
+      if (!entry) return null;
+      return {
+        side: sideName,
+        ttl: Math.max(0, Number(entry.ttl) || 0),
+        maxTtl: Math.max(0.001, Number(entry.maxTtl) || 1),
+        selectedType: entry.selectedType || null,
+        selectedOptionId: entry.selectedOptionId || null,
+        options: Array.isArray(entry.options) ? entry.options.map((option) => ({
+          id: option?.id ?? null,
+          slot: Number.isFinite(option?.slot) ? option.slot : 0,
+          type: option?.type || null,
+          level: Math.max(0, Number(option?.level) || 0),
+          selected: Boolean(option?.selected),
+        })) : [],
+      };
+    };
+    return {
+      left: mapSide('left'),
+      right: mapSide('right'),
+    };
   }
 
   upgradePathForType(type) {
@@ -9684,6 +10279,7 @@ class GameRoom {
     const side = this[sideName];
     if (!side || !card || card.side !== sideName) return false;
     if (side.upgradeCharge < side.upgradeChargeMax) return false;
+    const sideCardsBeforeSelect = this.upgradeCards.filter((entry) => entry?.side === sideName);
 
     const spentDebt = Math.max(1, side.upgradeChargeMax);
     const overflow = Math.max(0, side.upgradeCharge - spentDebt);
@@ -9691,12 +10287,23 @@ class GameRoom {
 
     this.awardUpgrade(side, card.type, card.value);
     this.triggerUpgradeActivation(sideName, card.type, card.value, card.x, card.y);
+    this.setUpgradeSelectionFx(sideName, card, sideCardsBeforeSelect);
     this.clearCardsForSide(sideName);
 
     side.upgradeCharge = overflow;
     side.upgradeChargeMax = nextDebt;
     side.upgradeAutoPickAt = null;
+    this.resetCommitteeVoteState(sideName);
     return true;
+  }
+
+  selectUpgradeCardBySlot(sideName = 'left', slot = 0, options = null) {
+    const side = sideName === 'right' ? 'right' : 'left';
+    const lane = Math.max(0, Math.floor(Number(slot) || 0));
+    if (this.committeeVotingRequiredForSide(side) && !Boolean(options?.ignoreCommittee)) return false;
+    const card = this.upgradeCards.find((entry) => entry?.side === side && Number(entry?.slot) === lane);
+    if (!card) return false;
+    return this.selectUpgradeCard(side, card);
   }
 
   syncUpgradeCards(sideName) {
@@ -9704,11 +10311,23 @@ class GameRoom {
     if (side.upgradeCharge < side.upgradeChargeMax) {
       this.clearCardsForSide(sideName);
       side.upgradeAutoPickAt = null;
+      this.resetCommitteeVoteState(sideName);
       return;
     }
 
     const hadCards = this.upgradeCards.some((c) => c.side === sideName);
     this.refillRegularCards(sideName);
+    const committeeRequired = this.committeeVotingRequiredForSide(sideName);
+    if (committeeRequired) {
+      side.upgradeAutoPickAt = null;
+      this.ensureCommitteeVoteSession(sideName);
+      this.resolveCommitteeVoteIfDue(sideName);
+      const voteActive = Boolean(this.committeeVotes?.[sideName]?.active);
+      this.setUpgradeCardCommitteeLock(sideName, true, voteActive);
+      return;
+    }
+    this.resetCommitteeVoteState(sideName);
+    this.setUpgradeCardCommitteeLock(sideName, false, false);
     if (!hadCards || !Number.isFinite(side.upgradeAutoPickAt)) side.upgradeAutoPickAt = this.t + 20;
 
     if (Number.isFinite(side.upgradeAutoPickAt) && this.t >= side.upgradeAutoPickAt) {
@@ -9720,6 +10339,10 @@ class GameRoom {
   seedUpgradeCards() {
     this.clearCardsForSide('left');
     this.clearCardsForSide('right');
+    this.resetCommitteeVoteState('left');
+    this.resetCommitteeVoteState('right');
+    this.upgradeSelectionFx.left = null;
+    this.upgradeSelectionFx.right = null;
   }
 
   awardUpgrade(side, type, value) {

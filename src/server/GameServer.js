@@ -12,6 +12,7 @@ const ROOM_CREATE_COOLDOWN_MS = 800;
 const MAX_ACTIVE_ROOMS = 120;
 const THEME_MODE_THEMED = 'themed';
 const THEME_MODE_UNTHEMED = 'unthemed';
+const MAX_COMMITTEE_PLAYERS_PER_SIDE = 12;
 
 function normalizeThemeMode(value) {
   return value === THEME_MODE_UNTHEMED ? THEME_MODE_UNTHEMED : THEME_MODE_THEMED;
@@ -26,6 +27,15 @@ function defaultArcherName(side, slot = 0, themeMode = THEME_MODE_THEMED) {
   return `${sideName === 'left' ? 'Bread Slinger' : 'Rice Flinger'} ${index}`;
 }
 
+function defaultCommitteeName(side, ordinal = 1, themeMode = THEME_MODE_THEMED) {
+  const sideName = side === 'right' ? 'right' : 'left';
+  const index = Math.max(1, Math.floor(Number(ordinal) || 1));
+  if (normalizeThemeMode(themeMode) === THEME_MODE_UNTHEMED) {
+    return `${sideName === 'left' ? 'West Council' : 'East Council'} ${index}`;
+  }
+  return `${sideName === 'left' ? 'Bread Council' : 'Rice Council'} ${index}`;
+}
+
 function isDefaultPlayerName(name) {
   const value = String(name || '').trim();
   if (!value) return false;
@@ -38,6 +48,17 @@ function isDefaultPlayerName(name) {
     || /^East Keyboard$/i.test(value)
     || /^Bread Keyboard$/i.test(value)
     || /^Rice Keyboard$/i.test(value)
+  );
+}
+
+function isDefaultCommitteeName(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  return (
+    /^Bread Council \d+$/i.test(value)
+    || /^Rice Council \d+$/i.test(value)
+    || /^West Council \d+$/i.test(value)
+    || /^East Council \d+$/i.test(value)
   );
 }
 
@@ -97,8 +118,10 @@ class ServerRoom {
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.display = null;
     this.players = { left: [], right: [] };
+    this.committeePlayers = { left: [], right: [] };
     this.cpuSlots = this.createCpuSlots();
     this.nextBalancedJoinSide = 'left';
+    this.nextCommitteeJoinSide = 'left';
     this.started = false;
     this.gameOver = false;
     this.winner = null;
@@ -107,6 +130,7 @@ class ServerRoom {
     this.nextControllerStateEmitAtMs = null;
     this.hostAuthoritative = true;
     this.rematchVotes = new Set();
+    this.cpuOnlyStartRequested = false;
   }
 
   createCpuSlots() {
@@ -172,6 +196,10 @@ class ServerRoom {
     return defaultArcherName(side, slot, this.themeMode);
   }
 
+  defaultCommitteeNameForSide(side, ordinal = 1) {
+    return defaultCommitteeName(side, ordinal, this.themeMode);
+  }
+
   renameDefaultPlayersForTheme() {
     for (const sideName of ['left', 'right']) {
       const sidePlayers = Array.isArray(this.players?.[sideName]) ? this.players[sideName] : [];
@@ -183,17 +211,109 @@ class ServerRoom {
     }
   }
 
+  renameDefaultCommitteePlayersForTheme() {
+    for (const sideName of ['left', 'right']) {
+      const committee = Array.isArray(this.committeePlayers?.[sideName]) ? this.committeePlayers[sideName] : [];
+      for (let i = 0; i < committee.length; i += 1) {
+        const member = committee[i];
+        if (!member || !isDefaultCommitteeName(member.name)) continue;
+        const ordinal = Number.isFinite(member.ordinal) ? member.ordinal : (i + 1);
+        const nextName = this.defaultCommitteeNameForSide(sideName, ordinal);
+        member.name = nextName;
+        member.voterName = nextName;
+      }
+    }
+  }
+
   requiredPlayers() {
     return this.archersPerSide * 2;
   }
 
   totalPlayers() {
+    return this.players.left.length
+      + this.players.right.length
+      + this.committeePlayers.left.length
+      + this.committeePlayers.right.length;
+  }
+
+  archerHumanCount() {
     return this.players.left.length + this.players.right.length;
   }
 
-  isReadyToStart() {
+  archersFilled() {
     return this.filledSlotsForSide('left') >= this.archersPerSide
       && this.filledSlotsForSide('right') >= this.archersPerSide;
+  }
+
+  syncCpuOnlyStartRequest() {
+    if (!this.archersFilled()) this.cpuOnlyStartRequested = false;
+    if (this.archerHumanCount() > 0) this.cpuOnlyStartRequested = false;
+  }
+
+  cpuOnlyStartNeeded() {
+    return this.archersFilled()
+      && this.archerHumanCount() <= 0
+      && !this.cpuOnlyStartRequested;
+  }
+
+  allHumanPlayers() {
+    return [
+      ...this.players.left,
+      ...this.players.right,
+      ...this.committeePlayers.left,
+      ...this.committeePlayers.right,
+    ];
+  }
+
+  readySummary(socketId = null) {
+    const archers = [...this.players.left, ...this.players.right];
+    let readyCount = 0;
+    for (const player of archers) {
+      if (player?.ready !== false) readyCount += 1;
+    }
+    const connected = archers.length;
+    const allReady = connected <= 0 ? true : readyCount >= connected;
+    const committeeConnected = this.committeePlayers.left.length + this.committeePlayers.right.length;
+    const committeeReady = [...this.committeePlayers.left, ...this.committeePlayers.right]
+      .filter((player) => player?.ready !== false)
+      .length;
+    const people = this.allHumanPlayers();
+    const self = socketId ? people.find((player) => player?.id === socketId) : null;
+    const selfReady = self
+      ? ((self.role === 'committee') ? true : (self.ready !== false))
+      : false;
+    return {
+      connected,
+      ready: readyCount,
+      waiting: Math.max(0, connected - readyCount),
+      allReady,
+      selfReady,
+      committeeConnected,
+      committeeReady,
+    };
+  }
+
+  allHumansReady() {
+    const summary = this.readySummary();
+    return summary.connected <= 0 ? true : summary.allReady;
+  }
+
+  isReadyToStart() {
+    if (!this.archersFilled()) return false;
+    if (this.archerHumanCount() <= 0 && !this.cpuOnlyStartRequested) return false;
+    return this.allHumansReady();
+  }
+
+  requestCpuOnlyStart() {
+    if (!this.archersFilled()) {
+      return { ok: false, message: 'Fill all shooter slots first.' };
+    }
+    if (this.archerHumanCount() > 0) {
+      return { ok: false, message: 'Manual start is only for CPU-only shooter lobbies.' };
+    }
+    this.cpuOnlyStartRequested = true;
+    this.started = this.isReadyToStart();
+    return { ok: true };
   }
 
   clearRematchVotes() {
@@ -204,6 +324,8 @@ class ServerRoom {
     const ids = [];
     for (const p of this.players.left) if (p?.id) ids.push(p.id);
     for (const p of this.players.right) if (p?.id) ids.push(p.id);
+    for (const p of this.committeePlayers.left) if (p?.id) ids.push(p.id);
+    for (const p of this.committeePlayers.right) if (p?.id) ids.push(p.id);
     return ids;
   }
 
@@ -216,7 +338,7 @@ class ServerRoom {
   }
 
   setRematchVote(socketId, wantsRematch) {
-    const found = this.playerBySocket(socketId);
+    const found = this.controllerBySocket(socketId);
     if (!found) return { ok: false, message: 'Only connected controllers can vote for rematch.' };
     if (wantsRematch) this.rematchVotes.add(socketId);
     else this.rematchVotes.delete(socketId);
@@ -247,49 +369,136 @@ class ServerRoom {
 
   playerBySocket(socketId) {
     const leftPlayer = this.players.left.find((p) => p.id === socketId);
-    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, player: leftPlayer };
+    if (leftPlayer) return { side: 'left', slot: leftPlayer.slot, role: 'archer', player: leftPlayer };
     const rightPlayer = this.players.right.find((p) => p.id === socketId);
-    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, player: rightPlayer };
+    if (rightPlayer) return { side: 'right', slot: rightPlayer.slot, role: 'archer', player: rightPlayer };
+    return null;
+  }
+
+  committeeBySocket(socketId) {
+    const leftMember = this.committeePlayers.left.find((p) => p.id === socketId);
+    if (leftMember) return { side: 'left', slot: null, role: 'committee', player: leftMember };
+    const rightMember = this.committeePlayers.right.find((p) => p.id === socketId);
+    if (rightMember) return { side: 'right', slot: null, role: 'committee', player: rightMember };
+    return null;
+  }
+
+  controllerBySocket(socketId) {
+    const archer = this.playerBySocket(socketId);
+    if (archer) return archer;
+    const committee = this.committeeBySocket(socketId);
+    if (committee) return committee;
     return null;
   }
 
   addPlayer(socketId, name) {
-    const existing = this.playerBySocket(socketId);
-    if (existing) return { side: existing.side, slot: existing.slot, existing: true };
+    const existing = this.controllerBySocket(socketId);
+    if (existing) {
+      return {
+        side: existing.side,
+        slot: existing.slot,
+        role: existing.role || 'archer',
+        voterName: existing.player?.voterName || existing.player?.name || null,
+        existing: true,
+      };
+    }
     const leftOpen = this.availableHumanJoinSlots('left');
     const rightOpen = this.availableHumanJoinSlots('right');
-    if (!leftOpen.length && !rightOpen.length) return null;
+    const canJoinArcher = leftOpen.length || rightOpen.length;
+    const canJoinCommittee = this.committeePlayers.left.length < MAX_COMMITTEE_PLAYERS_PER_SIDE
+      || this.committeePlayers.right.length < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    if (!canJoinArcher && !canJoinCommittee) return null;
 
-    let side = 'left';
-    if (leftOpen.length && rightOpen.length) {
-      const leftCount = this.players.left.length;
-      const rightCount = this.players.right.length;
-      if (leftCount === rightCount) {
-        side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
-        const preferredOpen = side === 'left' ? leftOpen : rightOpen;
-        if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
-        this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
-      } else if (leftCount < rightCount) {
-        side = leftOpen.length ? 'left' : 'right';
+    if (canJoinArcher) {
+      let side = 'left';
+      if (leftOpen.length && rightOpen.length) {
+        const leftCount = this.players.left.length;
+        const rightCount = this.players.right.length;
+        if (leftCount === rightCount) {
+          side = this.nextBalancedJoinSide === 'right' ? 'right' : 'left';
+          const preferredOpen = side === 'left' ? leftOpen : rightOpen;
+          if (!preferredOpen.length) side = side === 'left' ? 'right' : 'left';
+          this.nextBalancedJoinSide = side === 'left' ? 'right' : 'left';
+        } else if (leftCount < rightCount) {
+          side = leftOpen.length ? 'left' : 'right';
+        } else {
+          side = rightOpen.length ? 'right' : 'left';
+        }
       } else {
-        side = rightOpen.length ? 'right' : 'left';
+        side = leftOpen.length ? 'left' : 'right';
       }
-    } else {
-      side = leftOpen.length ? 'left' : 'right';
+
+      const sideOpen = side === 'left' ? leftOpen : rightOpen;
+      const slot = sideOpen[0];
+      if (!Number.isFinite(slot)) return null;
+
+      const player = {
+        id: socketId,
+        role: 'archer',
+        name: name || this.defaultPlayerNameForSide(side, slot),
+        slot,
+        ready: false,
+      };
+      this.players[side].push(player);
+      this.started = this.isReadyToStart();
+      return { side, slot, role: 'archer', voterName: null, existing: false };
     }
 
-    const sideOpen = side === 'left' ? leftOpen : rightOpen;
-    const slot = sideOpen[0];
-    if (!Number.isFinite(slot)) return null;
+    const leftCount = this.committeePlayers.left.length;
+    const rightCount = this.committeePlayers.right.length;
+    const leftOpenCommittee = leftCount < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    const rightOpenCommittee = rightCount < MAX_COMMITTEE_PLAYERS_PER_SIDE;
+    let side = 'left';
+    if (leftOpenCommittee && rightOpenCommittee) {
+      if (leftCount === rightCount) {
+        side = this.nextCommitteeJoinSide === 'right' ? 'right' : 'left';
+        this.nextCommitteeJoinSide = side === 'left' ? 'right' : 'left';
+      } else {
+        side = leftCount <= rightCount ? 'left' : 'right';
+      }
+    } else if (leftOpenCommittee) {
+      side = 'left';
+    } else if (rightOpenCommittee) {
+      side = 'right';
+    } else {
+      return null;
+    }
 
-    const player = {
+    const committee = this.committeePlayers[side];
+    const ordinal = committee.length + 1;
+    const voterName = name || this.defaultCommitteeNameForSide(side, ordinal);
+    const member = {
       id: socketId,
-      name: name || this.defaultPlayerNameForSide(side, slot),
-      slot,
+      role: 'committee',
+      side,
+      slot: null,
+      ordinal,
+      name: voterName,
+      voterName,
+      ready: false,
     };
-    this.players[side].push(player);
+    committee.push(member);
+    this.syncCpuOnlyStartRequest();
     this.started = this.isReadyToStart();
-    return { side, slot, existing: false };
+    return { side, slot: null, role: 'committee', voterName, existing: false };
+  }
+
+  setPlayerReady(socketId, ready = true) {
+    const entry = this.controllerBySocket(socketId);
+    if (!entry?.player) return { ok: false, message: 'Only connected controllers can update ready status.' };
+    if (this.started && !this.gameOver) {
+      return { ok: false, message: 'Match already started.' };
+    }
+    entry.player.ready = Boolean(ready);
+    this.syncCpuOnlyStartRequest();
+    this.started = this.isReadyToStart();
+    return {
+      ok: true,
+      role: entry.role || 'archer',
+      side: entry.side,
+      ready: Boolean(entry.player.ready),
+      summary: this.readySummary(socketId),
+    };
   }
 
   setMode(mode) {
@@ -313,6 +522,7 @@ class ServerRoom {
     this.mode = nextMode;
     this.archersPerSide = nextArchersPerSide;
     this.normalizeCpuSlotsShape();
+    this.syncCpuOnlyStartRequest();
     this.started = this.isReadyToStart();
     this.clearRematchVotes();
     return { ok: true, changed: true };
@@ -334,6 +544,7 @@ class ServerRoom {
     const next = Boolean(enabled);
     const previous = Boolean(this.cpuSlots[sideName][lane]);
     this.cpuSlots[sideName][lane] = next;
+    this.syncCpuOnlyStartRequest();
     this.started = this.isReadyToStart();
     return { ok: true, changed: previous !== next };
   }
@@ -346,6 +557,7 @@ class ServerRoom {
     if (nextTheme === this.themeMode) return { ok: true, changed: false };
     this.themeMode = nextTheme;
     this.renameDefaultPlayersForTheme();
+    this.renameDefaultCommitteePlayersForTheme();
     return { ok: true, changed: true };
   }
 
@@ -364,13 +576,26 @@ class ServerRoom {
     const rightBefore = this.players.right.length;
     this.players.right = this.players.right.filter((p) => p.id !== socketId);
     if (this.players.right.length !== rightBefore) changed = true;
+    const leftCommitteeBefore = this.committeePlayers.left.length;
+    this.committeePlayers.left = this.committeePlayers.left.filter((p) => p.id !== socketId);
+    if (this.committeePlayers.left.length !== leftCommitteeBefore) changed = true;
+    const rightCommitteeBefore = this.committeePlayers.right.length;
+    this.committeePlayers.right = this.committeePlayers.right.filter((p) => p.id !== socketId);
+    if (this.committeePlayers.right.length !== rightCommitteeBefore) changed = true;
 
-    if (changed) this.started = this.isReadyToStart();
+    if (changed) {
+      this.syncCpuOnlyStartRequest();
+      this.started = this.isReadyToStart();
+    }
 
     return {
       changed,
       removedDisplay,
-      empty: this.players.left.length === 0 && this.players.right.length === 0 && !this.display,
+      empty: this.players.left.length === 0
+        && this.players.right.length === 0
+        && this.committeePlayers.left.length === 0
+        && this.committeePlayers.right.length === 0
+        && !this.display,
     };
   }
 }
@@ -519,11 +744,51 @@ class GameServer {
           roomId: room.id,
           side: join.side,
           slot: join.slot,
+          role: join.role || 'archer',
+          voterName: join.voterName || null,
           mode: room.mode,
           themeMode: room.themeMode,
           requiredPlayers: room.requiredPlayers(),
+          ready: Boolean(room.readySummary(socket.id)?.selfReady),
         });
         this.broadcastRoom(room, { forceController: true });
+      });
+
+      socket.on('set_ready', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
+        if (!room) {
+          socket.emit('controller_ready_error', { message: 'Room not found.' });
+          return;
+        }
+        const result = room.setPlayerReady(socket.id, payload.ready !== false);
+        if (!result?.ok) {
+          socket.emit('controller_ready_error', { message: result?.message || 'Unable to update ready status.' });
+          return;
+        }
+        this.broadcastRoom(room, { forceController: true });
+      });
+
+      socket.on('committee_vote', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
+        if (!room) {
+          socket.emit('committee_vote_error', { message: 'Room not found.' });
+          return;
+        }
+        const member = room.committeeBySocket(socket.id);
+        if (!member) {
+          socket.emit('committee_vote_error', { message: 'Only committee phones can vote on upgrades.' });
+          return;
+        }
+        if (!room.hostAuthoritative || !room.display?.id) {
+          socket.emit('committee_vote_error', { message: 'Voting is currently unavailable.' });
+          return;
+        }
+        this.io.to(room.display.id).emit('host_committee_vote', {
+          socketId: socket.id,
+          optionId: payload.optionId,
+        });
       });
 
       socket.on('set_room_mode', (rawPayload = {}) => {
@@ -589,6 +854,25 @@ class GameServer {
         this.broadcastRoom(room, { forceController: true });
       });
 
+      socket.on('host_start_match', (rawPayload = {}) => {
+        const payload = safePayload(rawPayload);
+        const room = this.rooms.get(normalizeRoomId(payload.roomId));
+        if (!room) {
+          socket.emit('room_start_error', { message: 'Room not found.' });
+          return;
+        }
+        if (!room.display || room.display.id !== socket.id) {
+          socket.emit('room_start_error', { message: 'Only the host display can start this match.' });
+          return;
+        }
+        const result = room.requestCpuOnlyStart();
+        if (!result?.ok) {
+          socket.emit('room_start_error', { message: result?.message || 'Unable to start match.' });
+          return;
+        }
+        this.broadcastRoom(room, { forceController: true });
+      });
+
       socket.on('restart_room', (rawPayload = {}) => {
         const payload = safePayload(rawPayload);
         const room = this.rooms.get(normalizeRoomId(payload.roomId));
@@ -614,7 +898,7 @@ class GameServer {
           socket.emit('controller_rematch_error', { message: 'Room not found.' });
           return;
         }
-        const player = room.playerBySocket(socket.id);
+        const player = room.controllerBySocket(socket.id);
         if (!player) {
           socket.emit('controller_rematch_error', { message: 'Only connected controllers can request rematch.' });
           return;
@@ -640,6 +924,7 @@ class GameServer {
         if (room.hostAuthoritative) {
           const player = room.playerBySocket(socket.id);
           if (!player || !room.display?.id) return;
+          if (player.role !== 'archer') return;
           this.io.to(room.display.id).emit('host_control_pull', {
             side: player.side,
             slot: player.slot,
@@ -703,6 +988,8 @@ class GameServer {
     const ids = [];
     for (const p of room.players.left) if (p?.id) ids.push(p.id);
     for (const p of room.players.right) if (p?.id) ids.push(p.id);
+    for (const p of room.committeePlayers.left) if (p?.id) ids.push(p.id);
+    for (const p of room.committeePlayers.right) if (p?.id) ids.push(p.id);
     return ids;
   }
 
@@ -770,7 +1057,7 @@ class GameServer {
     };
   }
 
-  buildControllerState(room, snapshot, side, slot, socketId = null) {
+  buildControllerState(room, snapshot, side, slot, socketId = null, role = 'archer') {
     const defaultSide = {
       towerHp: 0,
       shotCd: 0,
@@ -793,10 +1080,67 @@ class GameServer {
     };
     const sideName = side === 'right' ? 'right' : 'left';
     const enemySide = sideName === 'left' ? 'right' : 'left';
+    const ready = room.readySummary(socketId);
+    const rawVote = source?.committeeVotes?.[sideName];
+    const voteOptions = Array.isArray(rawVote?.options) ? rawVote.options.map((option) => ({
+      id: option?.id || null,
+      type: option?.type || null,
+      level: Math.max(0, Number(option?.level) || 0),
+      votes: Math.max(0, Number(option?.votes) || 0),
+      voters: Array.isArray(option?.voters) ? option.voters.map((name) => String(name || '')).filter(Boolean) : [],
+    })) : [];
+    const selectedOptionId = (rawVote?.votesByPlayerId && socketId)
+      ? String(rawVote.votesByPlayerId[socketId] || '')
+      : '';
+    const committeeVote = rawVote
+      ? {
+        active: Boolean(rawVote.active),
+        remaining: Math.max(0, Number(rawVote.remaining) || 0),
+        resolveAt: Number(rawVote.resolveAt) || 0,
+        startedAt: Number(rawVote.startedAt) || 0,
+        committeeCount: Math.max(0, Number(rawVote.committeeCount) || 0),
+        votersReady: Math.max(0, Number(rawVote.votersReady) || 0),
+        options: voteOptions,
+        selectedOptionId: selectedOptionId || null,
+      }
+      : null;
+    const rawVoteFx = source?.committeeVoteFx?.[sideName];
+    const committeeVoteFx = rawVoteFx
+      ? {
+        ttl: Math.max(0, Number(rawVoteFx.ttl) || 0),
+        maxTtl: Math.max(0.001, Number(rawVoteFx.maxTtl) || 1),
+        winningOptionId: rawVoteFx.winningOptionId || null,
+        winningType: rawVoteFx.winningType || null,
+        options: Array.isArray(rawVoteFx.options) ? rawVoteFx.options.map((option) => ({
+          id: option?.id || null,
+          type: option?.type || null,
+          level: Math.max(0, Number(option?.level) || 0),
+          votes: Math.max(0, Number(option?.votes) || 0),
+          voters: Array.isArray(option?.voters) ? option.voters.map((name) => String(name || '')).filter(Boolean) : [],
+        })) : [],
+      }
+      : null;
+    const rawUpgradeSelectionFx = source?.upgradeSelectionFx?.[sideName];
+    const upgradeSelectionFx = rawUpgradeSelectionFx
+      ? {
+        ttl: Math.max(0, Number(rawUpgradeSelectionFx.ttl) || 0),
+        maxTtl: Math.max(0.001, Number(rawUpgradeSelectionFx.maxTtl) || 1),
+        selectedType: rawUpgradeSelectionFx.selectedType || null,
+        selectedOptionId: rawUpgradeSelectionFx.selectedOptionId || null,
+        options: Array.isArray(rawUpgradeSelectionFx.options) ? rawUpgradeSelectionFx.options.map((option) => ({
+          id: option?.id ?? null,
+          slot: Number.isFinite(option?.slot) ? option.slot : 0,
+          type: option?.type || null,
+          level: Math.max(0, Number(option?.level) || 0),
+          selected: Boolean(option?.selected),
+        })) : [],
+      }
+      : null;
     return {
       roomId: room.id,
       side: sideName,
-      slot: Number.isFinite(slot) ? slot : 0,
+      slot: Number.isFinite(slot) ? slot : null,
+      role: role === 'committee' ? 'committee' : 'archer',
       mode: source.mode === '2v2' ? '2v2' : '1v1',
       themeMode: normalizeThemeMode(source.themeMode || room.themeMode),
       started: Boolean(source.started),
@@ -807,6 +1151,10 @@ class GameServer {
       me: this.compactControllerSide(source[sideName] || defaultSide),
       enemy: this.compactControllerSide(source[enemySide] || defaultSide),
       rematch: room.rematchStatus(socketId),
+      ready,
+      committeeVote,
+      committeeVoteFx,
+      upgradeSelectionFx,
     };
   }
 
@@ -820,11 +1168,19 @@ class GameServer {
     room.nextControllerStateEmitAtMs = nowMs + CONTROLLER_STATE_EMIT_MS;
     for (const p of room.players.left) {
       if (!p?.id) continue;
-      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'left', p.slot, p.id));
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'left', p.slot, p.id, 'archer'));
     }
     for (const p of room.players.right) {
       if (!p?.id) continue;
-      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'right', p.slot, p.id));
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'right', p.slot, p.id, 'archer'));
+    }
+    for (const p of room.committeePlayers.left) {
+      if (!p?.id) continue;
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'left', null, p.id, 'committee'));
+    }
+    for (const p of room.committeePlayers.right) {
+      if (!p?.id) continue;
+      this.io.to(p.id).emit('controller_state', this.buildControllerState(room, snapshot, 'right', null, p.id, 'committee'));
     }
   }
 
@@ -842,6 +1198,7 @@ class GameServer {
   }
 
   roomRoster(room) {
+    const ready = room.readySummary();
     return {
       roomId: room.id,
       mode: room.mode,
@@ -849,7 +1206,10 @@ class GameServer {
       archersPerSide: room.archersPerSide,
       requiredPlayers: room.requiredPlayers(),
       playerCount: room.totalFilledSlots(),
+      archerHumanCount: room.archerHumanCount(),
+      cpuOnlyStartNeeded: room.cpuOnlyStartNeeded(),
       started: room.started,
+      ready,
       rematch: room.rematchStatus(),
       spectatorDisplays: this.roomSpectatorDisplayCount(room),
       cpuSlots: {
@@ -857,8 +1217,42 @@ class GameServer {
         right: Array.isArray(room.cpuSlots?.right) ? room.cpuSlots.right.slice(0, room.archersPerSide).map(Boolean) : [],
       },
       players: {
-        left: room.players.left.map((p) => ({ id: p.id, name: p.name, slot: p.slot })),
-        right: room.players.right.map((p) => ({ id: p.id, name: p.name, slot: p.slot })),
+        left: room.players.left.map((p) => ({
+          id: p.id,
+          role: 'archer',
+          name: p.name,
+          slot: p.slot,
+          ready: Boolean(p.ready),
+        })),
+        right: room.players.right.map((p) => ({
+          id: p.id,
+          role: 'archer',
+          name: p.name,
+          slot: p.slot,
+          ready: Boolean(p.ready),
+        })),
+      },
+      committeePlayers: {
+        left: room.committeePlayers.left.map((p) => ({
+          id: p.id,
+          role: 'committee',
+          side: 'left',
+          slot: null,
+          ordinal: Number.isFinite(p.ordinal) ? p.ordinal : null,
+          name: p.name || p.voterName || null,
+          voterName: p.voterName || p.name || null,
+          ready: Boolean(p.ready),
+        })),
+        right: room.committeePlayers.right.map((p) => ({
+          id: p.id,
+          role: 'committee',
+          side: 'right',
+          slot: null,
+          ordinal: Number.isFinite(p.ordinal) ? p.ordinal : null,
+          name: p.name || p.voterName || null,
+          voterName: p.voterName || p.name || null,
+          ready: Boolean(p.ready),
+        })),
       },
     };
   }

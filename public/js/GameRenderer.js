@@ -142,6 +142,10 @@ const RESOURCE_APPEAR_START_SCALE = 0.34;
 const RESOURCE_APPEAR_START_ALPHA = 0.42;
 const RESOURCE_APPEAR_STALE_TTL = 0.22;
 const RESOURCE_TELEGRAPH_END_HOLD = 0.08;
+const UPGRADE_SELECTION_CARD_W = 90;
+const UPGRADE_SELECTION_CARD_H = 44;
+const UPGRADE_SELECTION_LOSER_EXIT_PORTION = 0.42;
+const UPGRADE_SELECTION_WINNER_FADE_START = 0.56;
 
 const UPGRADE_CATEGORY_STYLE = {
   arrow: {
@@ -5211,6 +5215,7 @@ export class GameRenderer {
       const sideState = card?.side === 'right' ? snapshot?.right : snapshot?.left;
       this.drawUpgradeCard(card, sideState);
     }
+    this.drawUpgradeSelectionFx(snapshot);
     if (Array.isArray(snapshot.candleScorches)) {
       for (let i = 0; i < snapshot.candleScorches.length; i += 1) {
         if (this.fxQuality === 'low' && i % 2 === 1) continue;
@@ -9846,17 +9851,25 @@ export class GameRenderer {
       const ready = side.upgradeCharge >= side.upgradeChargeMax;
       const pct = Math.round(Math.max(0, Math.min(1, side.upgradeCharge / Math.max(1, side.upgradeChargeMax))) * 100);
       const debtLeft = Math.max(0, Math.ceil(side.upgradeChargeMax - side.upgradeCharge));
+      const committeeVote = snapshot?.committeeVotes?.[sideName] || null;
+      const committeeActive = Boolean(committeeVote?.active);
+      const committeeCount = Math.max(0, Number(committeeVote?.committeeCount) || 0);
+      const committeeReady = Math.max(0, Number(committeeVote?.votersReady) || 0);
       const autoPickIn = Number.isFinite(side.upgradeAutoPickAt)
         ? Math.max(0, Math.ceil(side.upgradeAutoPickAt - snapshot.t))
         : 20;
       ctx.fillStyle = ready ? '#b8dcff' : '#7e8fa8';
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(
-        ready ? `Upgrade Ready: choose in ${autoPickIn}s` : `Upgrade debt ${debtLeft} (${pct}%)`,
-        (x0 + x1) / 2,
-        y - 29
-      );
+      const centerX = (x0 + x1) / 2;
+      const baseText = ready ? `Upgrade Ready: choose in ${autoPickIn}s` : `Upgrade debt ${debtLeft} (${pct}%)`;
+      ctx.fillText(baseText, centerX, y - 29);
+      if (committeeCount > 0) {
+        ctx.fillStyle = committeeActive ? '#ffd49a' : '#e6b06d';
+        ctx.font = '10px sans-serif';
+        const timerText = committeeActive ? `vote ${Math.max(0, Number(committeeVote?.remaining) || 0).toFixed(1)}s` : 'vote idle';
+        ctx.fillText(`Committee ${committeeReady}/${committeeCount} (${timerText})`, centerX, y - 18);
+      }
     }
   }
 
@@ -9866,13 +9879,15 @@ export class GameRenderer {
     const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
     const textX = card.x + 10;
     const cardLevel = Math.max(0, Number(sideState?.[card.type]) || 0);
+    const committeeLocked = Boolean(card?.committeeLocked);
+    const committeeVoteActive = Boolean(card?.committeeVoteActive);
     const capLevel = upgradeLevelCap(card.type);
     const isFinalCapUpgrade = Number.isFinite(capLevel) && capLevel > 0 && (cardLevel + 1 >= capLevel);
     ctx.fillStyle = style.panel;
     ctx.fillRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
     ctx.fillStyle = style.glow;
     ctx.fillRect(card.x - card.w / 2 + 1, card.y - card.h / 2 + 1, card.w - 2, card.h - 2);
-    ctx.strokeStyle = isFinalCapUpgrade ? '#f6ce62' : style.border;
+    ctx.strokeStyle = committeeLocked ? '#f2a75c' : (isFinalCapUpgrade ? '#f6ce62' : style.border);
     ctx.lineWidth = isFinalCapUpgrade ? 2.4 : 2;
     ctx.strokeRect(card.x - card.w / 2, card.y - card.h / 2, card.w, card.h);
     if (isFinalCapUpgrade) {
@@ -9909,10 +9924,10 @@ export class GameRenderer {
     ctx.stroke();
     this.drawUpgradeGlyph(card.type, iconX, iconY, 8, '#1f2230');
 
-    ctx.fillStyle = style.hint;
+    ctx.fillStyle = committeeLocked ? '#ffd5a7' : style.hint;
     ctx.font = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(style.tag, textX, card.y - 15);
+    ctx.fillText(committeeLocked ? 'COMMITTEE' : style.tag, textX, card.y - 15);
 
     ctx.fillStyle = style.title;
     ctx.font = '10px sans-serif';
@@ -9933,9 +9948,123 @@ export class GameRenderer {
     ctx.fillStyle = style.cost;
     ctx.font = 'bold 9px sans-serif';
     ctx.fillText(`cost ${Math.max(1, Math.round(Number(card.cost) || 0))}`, card.x, card.y + 13);
-    ctx.fillStyle = style.hint;
+    ctx.fillStyle = committeeLocked ? '#f5cfab' : style.hint;
     ctx.font = '8px sans-serif';
-    ctx.fillText('shoot to choose', card.x, card.y + 20);
+    ctx.fillText(
+      committeeLocked
+        ? (committeeVoteActive ? 'phone vote live' : 'phone vote decides')
+        : 'shoot to choose',
+      card.x,
+      card.y + 20
+    );
+  }
+
+  drawUpgradeSelectionFx(snapshot) {
+    const fxBySide = snapshot?.upgradeSelectionFx;
+    if (!fxBySide || typeof fxBySide !== 'object') return;
+    this.drawUpgradeSelectionFxForSide('left', fxBySide.left);
+    this.drawUpgradeSelectionFxForSide('right', fxBySide.right);
+  }
+
+  drawUpgradeSelectionFxForSide(sideName, fxEntry) {
+    if (!fxEntry || typeof fxEntry !== 'object') return;
+    const ttl = Math.max(0, Number(fxEntry.ttl) || 0);
+    if (ttl <= 0) return;
+    const maxTtl = Math.max(0.001, Number(fxEntry.maxTtl) || 1);
+    const progress = clamp01(1 - ttl / maxTtl);
+    const loserProgress = easeOutCubic(clamp01(progress / UPGRADE_SELECTION_LOSER_EXIT_PORTION));
+    const winnerFadeProgress = easeInCubic(clamp01((progress - UPGRADE_SELECTION_WINNER_FADE_START) / (1 - UPGRADE_SELECTION_WINNER_FADE_START)));
+    const selectedId = fxEntry.selectedOptionId == null ? null : String(fxEntry.selectedOptionId);
+    const selectedType = fxEntry.selectedType || null;
+    const options = Array.isArray(fxEntry.options) ? fxEntry.options : [];
+    if (!options.length) return;
+
+    for (let i = 0; i < options.length; i += 1) {
+      const option = options[i];
+      const type = option?.type || null;
+      if (!type) continue;
+      const optionId = option?.id == null ? null : String(option.id);
+      const selected = Boolean(option?.selected)
+        || (selectedId !== null && optionId !== null && optionId === selectedId)
+        || (selectedId === null && selectedType && type === selectedType);
+      const slot = Math.max(0, Math.min(1, Math.floor(Number(option?.slot) || i)));
+      const baseX = sideCardSlotX(sideName, slot);
+      const baseY = 90;
+      const driftDir = sideName === 'right' ? 1 : -1;
+      const driftX = selected ? 0 : driftDir * 26 * loserProgress;
+      const driftY = selected ? (-2 * Math.sin(Math.min(1, progress / 0.23) * Math.PI)) : (-9 * loserProgress);
+      const alpha = selected
+        ? Math.max(0, 1 - winnerFadeProgress * 0.96)
+        : Math.max(0, 1 - loserProgress);
+      const scale = selected
+        ? (1 + 0.07 * Math.sin(Math.min(1, progress / 0.23) * Math.PI))
+        : (1 - 0.18 * loserProgress);
+      this.drawUpgradeSelectionFxCard(type, Number(option?.level) || 0, selected, baseX + driftX, baseY + driftY, alpha, scale);
+    }
+  }
+
+  drawUpgradeSelectionFxCard(type, level, selected, centerX, centerY, alpha = 1, scale = 1) {
+    if (!type || alpha <= 0.01) return;
+    const { ctx } = this;
+    const category = upgradeCategory(type);
+    const style = UPGRADE_CATEGORY_STYLE[category] || UPGRADE_CATEGORY_STYLE.misc;
+    const cardW = UPGRADE_SELECTION_CARD_W;
+    const cardH = UPGRADE_SELECTION_CARD_H;
+    const cardLevel = Math.max(0, Number(level) || 0);
+    const panelColor = selected ? this.mixColor(style.panel, '#604b16', 0.2) : style.panel;
+    const glowColor = selected ? this.withAlpha('#ffd26f', 0.32) : style.glow;
+    const borderColor = selected ? '#ffe4a0' : style.border;
+    const tagColor = selected ? '#ffe2a8' : style.hint;
+    const titleColor = selected ? '#fff4d4' : style.title;
+    const subColor = selected ? '#f7d89f' : style.hint;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(centerX, centerY);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = panelColor;
+    ctx.fillRect(-cardW / 2, -cardH / 2, cardW, cardH);
+    ctx.fillStyle = glowColor;
+    ctx.fillRect(-cardW / 2 + 1, -cardH / 2 + 1, cardW - 2, cardH - 2);
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = selected ? 2.3 : 1.8;
+    ctx.strokeRect(-cardW / 2, -cardH / 2, cardW, cardH);
+
+    const iconX = -cardW / 2 + 11;
+    const iconY = -cardH / 2 + 10.5;
+    ctx.fillStyle = '#0c1526d8';
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 10.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = this.mixColor(style.badge, '#ffffff', selected ? 0.9 : 0.82);
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 9.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = selected ? this.withAlpha('#ffe4a0', 0.95) : this.withAlpha(style.border, 0.95);
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    this.drawUpgradeGlyph(type, iconX, iconY, 8, '#1f2230');
+
+    const textX = 10;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = tagColor;
+    ctx.font = 'bold 7px sans-serif';
+    ctx.fillText(selected ? 'SELECTED' : style.tag, textX, -15);
+    ctx.fillStyle = titleColor;
+    ctx.font = '10px sans-serif';
+    const title = this.fitUpgradeCardText(
+      upgradeLabelForLevel(type, cardLevel),
+      Math.max(20, cardW - 22),
+      '10px sans-serif'
+    );
+    ctx.fillText(title, textX, -5);
+    ctx.fillStyle = subColor;
+    ctx.font = '8px sans-serif';
+    const subText = selected ? 'locked in' : 'not chosen';
+    ctx.fillText(subText, textX, 4);
+    ctx.font = 'bold 8px sans-serif';
+    ctx.fillText(`L${cardLevel}`, 0, 20);
+    ctx.restore();
   }
 
   drawShotPowerIcon(powerType, x, y, size = 16, side = 'left', options = {}) {

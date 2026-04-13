@@ -134,12 +134,16 @@
           <p class="guide-line"><strong>Option B - Phones as controllers:</strong> Scan the QR, open the link on each phone, join the room, then drag to aim. The game auto-shoots!</p>
           <p class="guide-line"><strong>Choose one control mode per match:</strong> keyboard or phones (not both together).</p>
         </section>
-        <div class="row">
+        <div class="row lobby-action-row">
           <button id="localKeyboardTestBtn" class="local-test-btn" type="button">Play On This Computer (Keyboard)</button>
           <button id="localKeyboardVsCpuBtn" class="local-test-btn" type="button">Play Vs CPU</button>
           <button id="localCpuVsCpuBtn" class="local-test-btn" type="button">CPU Vs CPU</button>
         </div>
+        <div class="row lobby-action-row host-start-row">
+          <button id="hostStartBtn" class="host-start-btn hidden" type="button">Start Game (CPU Shooters)</button>
+        </div>
         <p id="localKeyboardHint" class="sub">Keyboard mode: Bread Empire aims with W/A/S/D and Rice Empire aims with Arrow keys.</p>
+        <p class="sub hotkey-hint">Upgrade hotkeys: <kbd>1</kbd>/<kbd>2</kbd> for left side, <kbd>9</kbd>/<kbd>0</kbd> for right side. In CPU vs CPU, extra quick pick keys: <kbd>A</kbd>/<kbd>D</kbd> and <kbd>&larr;</kbd>/<kbd>&rarr;</kbd>.</p>
         <details id="testSettingsPanel" class="test-settings">
           <summary id="testSettingsSummary">Secret Test Settings - Testing OFF</summary>
           <div class="test-settings-inner">
@@ -265,8 +269,24 @@
           </div>
         </div>
         <section id="controls" class="controls hidden">
-          <p class="sub">The Game Auto Shoots. Just aim and watch the game!</p>
-          <canvas id="pullPad" width="520" height="520"></canvas>
+          <section id="controllerReadyPanel" class="controller-ready-panel" aria-live="polite">
+            <button id="controllerReadyBtn" type="button">Set Ready</button>
+            <p id="controllerReadyStatus" class="sub">Press ready when your team setup is done.</p>
+          </section>
+          <section id="controllerArcherPanel" class="controller-archer-panel">
+            <p class="sub">The Game Auto Shoots. Just aim and watch the game!</p>
+            <canvas id="pullPad" width="520" height="520"></canvas>
+          </section>
+          <section id="controllerCommitteePanel" class="controller-committee hidden" aria-live="polite">
+            <div class="committee-head">
+              <p class="sub committee-title">Committee Vote</p>
+              <span class="committee-role-pill">Phone Voting</span>
+            </div>
+            <p class="sub">Committee phones vote on upgrades for this side.</p>
+            <p id="committeeVoteTimer" class="sub">Waiting for your side to charge an upgrade vote.</p>
+            <div id="committeeVoteOptions" class="committee-vote-options" role="group" aria-label="Committee upgrade vote options"></div>
+            <p id="committeeVoteStatus" class="sub">Vote results and voter names will appear here.</p>
+          </section>
           <section id="controllerRematchPanel" class="controller-rematch hidden" aria-live="polite">
             <button id="controllerRematchBtn" type="button">Request Rematch</button>
             <p id="controllerRematchStatus" class="sub">Vote for rematch after match end.</p>
