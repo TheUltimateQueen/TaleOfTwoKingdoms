@@ -313,7 +313,6 @@ const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
 
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
-const STONE_GOLEM_SPAWN_EVERY_OFFSET = 6;
 const STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION = 0.5;
 
 const FAILED_SPECIAL_HAT_STYLES = {
@@ -340,6 +339,8 @@ const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
+const BARRACKS_CADENCE_DELTA_FLASH_TTL_MS = 1000;
+const BARRACKS_CADENCE_DELTA_MIN_SECONDS = 0.15;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SHIELD_DARK_METAL_DURATION = 5;
 const STONE_GOLEM_SMASH_TTL = 0.45;
@@ -353,8 +354,7 @@ const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
-const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
-const NECRO_BASE_EVERY = 12;
+const BASIC_SPECIAL_SHARED_DEFAULT_BASE_EVERY = 30;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
@@ -466,6 +466,8 @@ export class GameRenderer {
       right: { ttl: 0, key: '' },
     };
     this.barracksDoorStatePrimed = false;
+    this.barracksCadenceDeltaFx = new Map();
+    this.barracksPrevCycleSecondsByRow = new Map();
     this.treasurePileState = {
       left: { items: [], lastGold: 0 },
       right: { items: [], lastGold: 0 },
@@ -520,6 +522,8 @@ export class GameRenderer {
         right: { ttl: 0, key: '' },
       };
       this.barracksDoorStatePrimed = false;
+      this.barracksCadenceDeltaFx.clear();
+      this.barracksPrevCycleSecondsByRow.clear();
       this.treasurePileState.left = { items: [], lastGold: 0 };
       this.treasurePileState.right = { items: [], lastGold: 0 };
       this.treasureShotGoldState.left = { lastValue: 0, lastChangeMs: 0 };
@@ -7375,6 +7379,305 @@ export class GameRenderer {
     return this.baseSpawnEveryForLevel(sideState?.spawnLevel);
   }
 
+  barracksTypeKeys(rowType, specialType = null) {
+    const keys = [];
+    const pushKey = (key) => {
+      if (!key || keys.includes(key)) return;
+      keys.push(key);
+    };
+    pushKey(rowType);
+    pushKey(specialType);
+    if (specialType && SPECIAL_TYPE_TO_ROW_TYPE[specialType]) {
+      pushKey(SPECIAL_TYPE_TO_ROW_TYPE[specialType]);
+    }
+    if (rowType === 'stonegolem') pushKey('stoneGolem');
+    if (specialType === 'necrominion') pushKey('necro');
+    return keys;
+  }
+
+  barracksTypedValueForTypes(source, typeKeys = [], fieldNames = []) {
+    if (!source || typeof source !== 'object') return null;
+    const keys = Array.isArray(typeKeys) ? typeKeys.filter(Boolean) : [typeKeys].filter(Boolean);
+    const fields = Array.isArray(fieldNames) ? fieldNames : [fieldNames];
+    const containers = ['byType', 'types', 'values', 'map'];
+
+    for (const fieldName of fields) {
+      if (!fieldName) continue;
+      if (!Object.prototype.hasOwnProperty.call(source, fieldName)) continue;
+      const fieldValue = source[fieldName];
+      const directValue = Number(fieldValue);
+      if (Number.isFinite(directValue)) return directValue;
+      if (!fieldValue || typeof fieldValue !== 'object') continue;
+
+      const nestedSources = [fieldValue];
+      for (const containerKey of containers) {
+        if (fieldValue[containerKey] && typeof fieldValue[containerKey] === 'object') {
+          nestedSources.push(fieldValue[containerKey]);
+        }
+      }
+
+      for (const nestedSource of nestedSources) {
+        for (const key of keys) {
+          const nestedValue = Number(nestedSource[key]);
+          if (Number.isFinite(nestedValue)) return nestedValue;
+        }
+      }
+
+      const fallbackValue = Number(
+        fieldValue.value
+        ?? fieldValue.every
+        ?? fieldValue.chance
+        ?? fieldValue.seconds
+        ?? fieldValue.sec
+        ?? fieldValue.time
+      );
+      if (Number.isFinite(fallbackValue)) return fallbackValue;
+    }
+
+    return null;
+  }
+
+  barracksCadenceEntryForTypes(sideState, typeKeys = []) {
+    const cadenceByType = sideState?.specialSpawnCadenceByType;
+    if (!cadenceByType || typeof cadenceByType !== 'object') return null;
+    const keys = Array.isArray(typeKeys) ? typeKeys.filter(Boolean) : [typeKeys].filter(Boolean);
+    for (const key of keys) {
+      const entry = cadenceByType[key];
+      if (entry && typeof entry === 'object') return entry;
+    }
+    return null;
+  }
+
+  barracksCadenceForRow(sideState, row, matchTimeSec = 0) {
+    const specialType = ROW_TO_SPECIAL_TYPE[row?.type] || null;
+    const typeKeys = this.barracksTypeKeys(row?.type, specialType);
+    const cadenceEntry = this.barracksCadenceEntryForTypes(sideState, typeKeys);
+    const spawnEvery = Math.max(0.0001, this.spawnEveryForSide(sideState));
+    const baseFallbackCycles = Math.max(0.0001, Number(row?.every) || 0);
+    const baseFallbackSeconds = Math.max(0.0001, baseFallbackCycles * spawnEvery);
+    const candleFallbackSeconds = Number.isFinite(Number(row?.etaSec))
+      ? Math.max(0.0001, Number(row.etaSec))
+      : baseFallbackSeconds;
+    const currentFallbackSeconds = row?.type === 'candle'
+      ? candleFallbackSeconds
+      : baseFallbackSeconds;
+    const isMilitia = row?.type === 'militia';
+    const supportSortUsesDisplayChance = Boolean(specialType && SUPPORT_SPECIAL_TYPE_SET.has(specialType));
+    const displayChance = isMilitia
+      ? 1
+      : (Number.isFinite(Number(row?.rollChance))
+        ? Math.max(0, Math.min(0.99, Number(row.rollChance)))
+        : null);
+    const actualChance = isMilitia
+      ? 1
+      : (Number.isFinite(Number(row?.rollActualChance))
+        ? Math.max(0, Math.min(0.99, Number(row.rollActualChance)))
+        : displayChance);
+    const sortChance = supportSortUsesDisplayChance
+      ? displayChance
+      : actualChance;
+    const safeSortChance = Number.isFinite(sortChance) && sortChance > 0 ? sortChance : 0;
+
+    const baseExpectedSeconds = this.barracksTypedValueForTypes(sideState, typeKeys, [
+      'specialSpawnBaseExpectedSecByType',
+      'specialSpawnBaseExpectedSecondsByType',
+      'specialSpawnBaseTimeSecByType',
+      'specialSpawnBaseCadenceSecByType',
+      'specialSpawnBaseExpectedByType',
+      'candleSpawnBaseExpectedSecByType',
+      'candleSpawnBaseExpectedSecondsByType',
+    ]);
+    const nextExpectedSeconds = this.barracksTypedValueForTypes(sideState, typeKeys, [
+      'specialSpawnNextExpectedSecByType',
+      'specialSpawnNextExpectedSecondsByType',
+      'specialSpawnCurrentExpectedSecByType',
+      'specialSpawnCurrentExpectedSecondsByType',
+      'specialSpawnCurrentTimeSecByType',
+      'specialSpawnCurrentCadenceSecByType',
+      'specialSpawnNextTimeSecByType',
+      'candleSpawnNextExpectedSecByType',
+      'candleSpawnCurrentExpectedSecByType',
+    ]);
+    const cadenceBaseEvery = Number(cadenceEntry?.baseEvery);
+    const cadenceCurrentEvery = Number(cadenceEntry?.currentEvery);
+    const cadenceDeltaRatio = Number(cadenceEntry?.deltaRatio);
+    const cadenceRemainingSpawns = Number(cadenceEntry?.remainingSpawns);
+    const baseCycleValue = Number.isFinite(cadenceBaseEvery)
+      ? cadenceBaseEvery
+      : this.barracksTypedValueForTypes(sideState, typeKeys, [
+      'specialSpawnBaseEveryByType',
+      'specialSpawnBaseCycleByType',
+      'specialSpawnCycleBaseByType',
+      'specialSpawnInitialEveryByType',
+      'specialSpawnBaselineEveryByType',
+      'specialSpawnBaseCadenceByType',
+      'specialSpawnCadenceBaseByType',
+      'candleSpawnBaseEveryByType',
+      'candleSpawnBaseCycleByType',
+    ]);
+    const currentCycleValue = Number.isFinite(cadenceCurrentEvery)
+      ? cadenceCurrentEvery
+      : this.barracksTypedValueForTypes(sideState, typeKeys, [
+      'specialSpawnCurrentEveryByType',
+      'specialSpawnNextEveryByType',
+      'specialSpawnCycleEveryByType',
+      'specialSpawnEveryByType',
+      'specialSpawnCadenceByType',
+      'specialSpawnRandomizedEveryByType',
+      'specialSpawnJitterEveryByType',
+      'specialSpawnCurrentCadenceByType',
+      'candleSpawnCurrentEveryByType',
+      'candleSpawnCycleEveryByType',
+      'candleSpawnEveryByType',
+    ]);
+
+    const baseCycleSeconds = Number.isFinite(baseCycleValue)
+      ? Math.max(0.0001, Number(baseCycleValue) * spawnEvery)
+      : baseFallbackSeconds;
+    const currentCycleSeconds = Number.isFinite(currentCycleValue)
+      ? Math.max(0.0001, Number(currentCycleValue) * spawnEvery)
+      : currentFallbackSeconds;
+    const fallbackBaseExpectedSeconds = safeSortChance > 0
+      ? baseCycleSeconds / safeSortChance
+      : Infinity;
+    const fallbackNextExpectedSeconds = safeSortChance > 0
+      ? currentCycleSeconds / safeSortChance
+      : Infinity;
+    const resolvedBaseExpectedSeconds = Number.isFinite(baseExpectedSeconds)
+      ? Math.max(0.0001, Number(baseExpectedSeconds))
+      : fallbackBaseExpectedSeconds;
+    const resolvedNextExpectedSeconds = Number.isFinite(nextExpectedSeconds)
+      ? Math.max(0.0001, Number(nextExpectedSeconds))
+      : fallbackNextExpectedSeconds;
+    const resolvedSortMetric = Number.isFinite(resolvedNextExpectedSeconds)
+      ? resolvedNextExpectedSeconds
+      : Infinity;
+    const speedDeltaRatio = Number.isFinite(cadenceDeltaRatio)
+      ? -cadenceDeltaRatio
+      : (
+        baseCycleSeconds > 0
+          ? (baseCycleSeconds - currentCycleSeconds) / baseCycleSeconds
+          : 0
+      );
+
+    return {
+      displayChance,
+      actualChance,
+      sortChance: safeSortChance,
+      baseCycleSeconds,
+      currentCycleSeconds,
+      cycleSpawns: Number.isFinite(cadenceCurrentEvery) && cadenceCurrentEvery > 0 ? cadenceCurrentEvery : null,
+      remainingSpawns: Number.isFinite(cadenceRemainingSpawns) ? Math.max(0, cadenceRemainingSpawns) : null,
+      baseExpectedSeconds: resolvedBaseExpectedSeconds,
+      nextExpectedSeconds: resolvedNextExpectedSeconds,
+      speedDeltaRatio,
+      sortMetric: resolvedSortMetric,
+      sortChanceUsesDisplayChance: supportSortUsesDisplayChance,
+    };
+  }
+
+  barracksCompactSeconds(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds < 0) return '--';
+    const abs = Math.abs(seconds);
+    if (abs < 10) return `${seconds.toFixed(1)}s`;
+    if (abs < 100) return `${Math.round(seconds)}s`;
+    if (abs < 1000) return `${Math.round(seconds)}s`;
+    const kilo = seconds / 1000;
+    return `${kilo.toFixed(abs < 10000 ? 1 : 0)}k`;
+  }
+
+  barracksCountdownText(seconds) {
+    const n = Number(seconds);
+    if (!Number.isFinite(n) || n < 0) return '--';
+    if (n < 1) return '0s';
+    if (n < 1000) return `${Math.ceil(n)}s`;
+    const kilo = n / 1000;
+    return `${kilo.toFixed(n < 10000 ? 1 : 0)}k`;
+  }
+
+  barracksSignedPercent(ratio) {
+    const value = Number(ratio);
+    if (!Number.isFinite(value)) return '+0%';
+    const pct = Math.round(value * 100);
+    return `${pct >= 0 ? '+' : ''}${pct}%`;
+  }
+
+  updateBarracksCadenceDeltaFxForRows(side, rows = [], nowMs = performance.now()) {
+    const sideKey = side === 'right' ? 'right' : 'left';
+    const rowKeys = new Set();
+    for (const row of rows) {
+      const type = typeof row?.type === 'string' ? row.type : null;
+      if (!type) continue;
+      const key = `${sideKey}:${type}`;
+      rowKeys.add(key);
+      const currentCycleSeconds = Number(row?.currentCycleSeconds);
+      const eligible = Boolean(
+        row?.unlocked
+        && type !== 'militia'
+        && Number.isFinite(currentCycleSeconds)
+        && currentCycleSeconds > 0
+      );
+      if (!eligible) {
+        this.barracksPrevCycleSecondsByRow.delete(key);
+        continue;
+      }
+      const prevCycleSeconds = Number(this.barracksPrevCycleSecondsByRow.get(key));
+      this.barracksPrevCycleSecondsByRow.set(key, currentCycleSeconds);
+      if (!Number.isFinite(prevCycleSeconds) || prevCycleSeconds <= 0) continue;
+      const deltaSeconds = currentCycleSeconds - prevCycleSeconds;
+      if (Math.abs(deltaSeconds) < BARRACKS_CADENCE_DELTA_MIN_SECONDS) continue;
+      this.barracksCadenceDeltaFx.set(key, {
+        deltaSeconds,
+        startMs: nowMs,
+        ttlMs: BARRACKS_CADENCE_DELTA_FLASH_TTL_MS,
+      });
+    }
+
+    for (const key of this.barracksPrevCycleSecondsByRow.keys()) {
+      if (!key.startsWith(`${sideKey}:`)) continue;
+      if (!rowKeys.has(key)) this.barracksPrevCycleSecondsByRow.delete(key);
+    }
+    for (const [key, fx] of this.barracksCadenceDeltaFx) {
+      if (!key.startsWith(`${sideKey}:`)) continue;
+      const ageMs = nowMs - (Number(fx?.startMs) || 0);
+      const ttlMs = Math.max(1, Number(fx?.ttlMs) || BARRACKS_CADENCE_DELTA_FLASH_TTL_MS);
+      if (!rowKeys.has(key) || ageMs >= ttlMs) this.barracksCadenceDeltaFx.delete(key);
+    }
+  }
+
+  clearBarracksCadenceDeltaStateForSide(side) {
+    const sideKey = side === 'right' ? 'right' : 'left';
+    for (const key of this.barracksPrevCycleSecondsByRow.keys()) {
+      if (key.startsWith(`${sideKey}:`)) this.barracksPrevCycleSecondsByRow.delete(key);
+    }
+    for (const key of this.barracksCadenceDeltaFx.keys()) {
+      if (key.startsWith(`${sideKey}:`)) this.barracksCadenceDeltaFx.delete(key);
+    }
+  }
+
+  barracksCadenceDeltaFxForRow(side, rowType, nowMs = performance.now()) {
+    const sideKey = side === 'right' ? 'right' : 'left';
+    const type = typeof rowType === 'string' ? rowType : '';
+    const key = `${sideKey}:${type}`;
+    const fx = this.barracksCadenceDeltaFx.get(key);
+    if (!fx || typeof fx !== 'object') return null;
+    const deltaSeconds = Number(fx.deltaSeconds);
+    const startMs = Number(fx.startMs) || 0;
+    const ttlMs = Math.max(1, Number(fx.ttlMs) || BARRACKS_CADENCE_DELTA_FLASH_TTL_MS);
+    const ageMs = nowMs - startMs;
+    if (!Number.isFinite(deltaSeconds) || ageMs < 0 || ageMs >= ttlMs) {
+      this.barracksCadenceDeltaFx.delete(key);
+      return null;
+    }
+    const p = clamp01(ageMs / ttlMs);
+    return {
+      deltaSeconds,
+      alpha: 1 - p,
+      yShift: -4 * p,
+    };
+  }
+
   baseSpawnEveryForLevel(spawnLevel) {
     const level = Math.max(1, Number(spawnLevel) || 1);
     return Math.max(0.65, 2.2 - level * 0.09);
@@ -7422,8 +7725,14 @@ export class GameRenderer {
     return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
   }
 
-  stoneGolemEveryForSide(sideState) {
-    return Math.max(1, this.candleEveryForSide(sideState) + STONE_GOLEM_SPAWN_EVERY_OFFSET);
+  stoneGolemEveryForSide(sideState, matchTimeSec = 0) {
+    const spawn = Math.max(1, Number(sideState?.spawnLevel) || 1);
+    const hp = Math.max(1, Number(sideState?.unitHpLevel) || 1);
+    const power = Math.max(1, Number(sideState?.powerLevel) || 1);
+    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
+    const golemTech = Math.floor((spawn + hp + power + resource) / 7);
+    const baseEvery = Math.max(30, 46 - golemTech * 2);
+    return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
   }
 
   stoneGolemSpawnUnlocked(sideState) {
@@ -7431,15 +7740,16 @@ export class GameRenderer {
     return Boolean(sideState?.towerGolemRescueUsed) || (hp > 0 && hp <= 6000 * STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION);
   }
 
-  necroTrainingEvery(sideState, matchTimeSec = 0) {
-    const level = Math.max(1, Number(sideState?.spawnLevel) || 1);
-    const levelOneEvery = this.baseSpawnEveryForLevel(1);
-    const currentEvery = this.baseSpawnEveryForLevel(level);
-    const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
-    const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
-    const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
-    const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, 'necrominion');
-    return this.scaledSpecialEveryForUi(NECRO_BASE_EVERY * necroEveryFactor * repeatMul, matchTimeSec);
+  basicSpecialSharedBaseEveryForSide(sideState) {
+    const value = Number(sideState?.specialBasicSharedBaseEvery);
+    if (Number.isFinite(value) && value > 0) return value;
+    return BASIC_SPECIAL_SHARED_DEFAULT_BASE_EVERY;
+  }
+
+  basicSpecialTrainingEvery(sideState, specialType, matchTimeSec = 0) {
+    const baseEvery = this.basicSpecialSharedBaseEveryForSide(sideState);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, specialType);
+    return this.scaledSpecialEveryForUi(baseEvery * repeatMul, matchTimeSec);
   }
 
   specialSpawnChanceForType(sideState, specialType) {
@@ -7528,26 +7838,22 @@ export class GameRenderer {
     if (type === 'candle') {
       return this.candleEveryForSide(s);
     }
-    if (type === 'necro') return this.necroTrainingEvery(s, matchTimeSec);
+    if (type === 'necro') return this.basicSpecialTrainingEvery(s, 'necrominion', matchTimeSec);
     if (type === 'gunner') {
-      const baseEvery = Math.max(14, 22 - Math.floor((unit + power + eco) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'gunner');
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.basicSpecialTrainingEvery(s, 'gunner', matchTimeSec);
     }
     if (type === 'rider') {
-      const baseEvery = Math.max(15, 23 - Math.floor((unit + spawn + eco) / 5)) * this.specialRepeatSpawnEveryMultiplier(s, 'rider');
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.basicSpecialTrainingEvery(s, 'rider', matchTimeSec);
     }
     if (type === 'digger') {
-      const baseEvery = Math.max(14, 24 - Math.floor((hp + spawn + eco) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'digger');
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.basicSpecialTrainingEvery(s, 'digger', matchTimeSec);
     }
     if (type === 'monk') {
-      const baseEvery = Math.max(20, 30 - Math.floor((hp + power + resource) / 7)) * this.specialRepeatSpawnEveryMultiplier(s, 'monk');
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.basicSpecialTrainingEvery(s, 'monk', matchTimeSec);
     }
     if (type === 'stonegolem') {
       if (!this.stoneGolemSpawnUnlocked(s)) return Infinity;
-      return this.stoneGolemEveryForSide(s);
+      return this.stoneGolemEveryForSide(s, matchTimeSec);
     }
     if (type === 'shield') {
       const baseEvery = Math.max(17, 26 - Math.floor((hp + power + spawn) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'shield');
@@ -7558,8 +7864,7 @@ export class GameRenderer {
       return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
     }
     if (type === 'president') {
-      const baseEvery = Math.max(36, 54 - Math.floor((eco + resource + power) / 6)) * this.specialRepeatSpawnEveryMultiplier(s, 'president');
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.basicSpecialTrainingEvery(s, 'president', matchTimeSec);
     }
     if (type === 'balloon') {
       if (balloon <= 0) return Infinity;
@@ -7794,8 +8099,30 @@ export class GameRenderer {
     const specialRollByType = sideState?.specialRollByType && typeof sideState.specialRollByType === 'object'
       ? sideState.specialRollByType
       : {};
+    const withCadence = (baseRow) => {
+      const cadence = this.barracksCadenceForRow(sideState, baseRow, matchTimeSec);
+      const rowWithCadence = {
+        ...baseRow,
+        ...cadence,
+      };
+      const cadenceCycleSpawns = Number(cadence.cycleSpawns);
+      if (rowWithCadence.unlocked && rowWithCadence.type !== 'militia' && Number.isFinite(cadenceCycleSpawns) && cadenceCycleSpawns > 0) {
+        const cadenceRemaining = Number.isFinite(Number(cadence.remainingSpawns))
+          ? Math.max(0, Number(cadence.remainingSpawns))
+          : cadenceCycleSpawns;
+        const derivedInSpawns = Math.max(1, cadenceRemaining);
+        rowWithCadence.inSpawns = derivedInSpawns;
+        rowWithCadence.etaSec = rowWithCadence.type === 'candle' && rowWithCadence.candleActive
+          ? 0
+          : (minionCd + Math.max(0, derivedInSpawns - 1) * spawnEvery);
+        rowWithCadence.progress = rowWithCadence.type === 'candle' && rowWithCadence.candleActive
+          ? 1
+          : Math.max(0, Math.min(1, 1 - (cadenceRemaining / cadenceCycleSpawns)));
+      }
+      return rowWithCadence;
+    };
 
-    return rows.map((row) => {
+    const builtRows = rows.map((row, index) => {
       const rollChance = this.specialSpawnChanceForRow(sideState, row.type);
       const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
       const supportAliveCount = specialType
@@ -7821,8 +8148,9 @@ export class GameRenderer {
         const candleRollSuccess = typeof sideState?.candleRollSuccess === 'boolean'
           ? sideState.candleRollSuccess
           : null;
-        return {
+        return withCadence({
           ...row,
+          sourceIndex: index,
           level: levelOf[row.type],
           activeCount: activeCountByType[row.type] || 0,
           unlocked: true,
@@ -7837,7 +8165,7 @@ export class GameRenderer {
           rollDebuffRatio,
           supportAliveCount,
           lastRollSuccess: candleRollSuccess,
-        };
+        });
       }
       const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
       const unlocked = Number.isFinite(every);
@@ -7859,8 +8187,9 @@ export class GameRenderer {
       const etaSec = unlocked
         ? (minionCd + Math.max(0, inSpawns - 1) * spawnEvery)
         : Infinity;
-      return {
+      return withCadence({
         ...row,
+        sourceIndex: index,
         level: levelOf[row.type],
         activeCount: activeCountByType[row.type] || 0,
         unlocked,
@@ -7874,8 +8203,20 @@ export class GameRenderer {
         rollDebuffRatio,
         supportAliveCount,
         lastRollSuccess,
-      };
+      });
     });
+    builtRows.sort((a, b) => {
+      if (a.type === 'militia' && b.type !== 'militia') return -1;
+      if (b.type === 'militia' && a.type !== 'militia') return 1;
+      const aLocked = !a.unlocked && a.type !== 'militia';
+      const bLocked = !b.unlocked && b.type !== 'militia';
+      if (aLocked !== bLocked) return aLocked ? 1 : -1;
+      const aMetric = Number.isFinite(a.sortMetric) ? a.sortMetric : Infinity;
+      const bMetric = Number.isFinite(b.sortMetric) ? b.sortMetric : Infinity;
+      if (aMetric !== bMetric) return aMetric - bMetric;
+      return (a.sourceIndex || 0) - (b.sourceIndex || 0);
+    });
+    return builtRows;
   }
 
   barracksUpgradeLevel(sideState, type, base = 0) {
@@ -8403,6 +8744,7 @@ export class GameRenderer {
     const rollDebuffCausedFail = Boolean(sideState?.specialRollDebuffCausedFail);
     const rollValueRaw = sideState?.specialRollValue;
     const rollValue = rollValueRaw == null ? NaN : Number(rollValueRaw);
+    const matchTimeSec = Math.max(0, Number(snapshot?.t) || 0);
     const rows = this.barracksRows(
       sideState,
       side,
@@ -8411,8 +8753,11 @@ export class GameRenderer {
         ? snapshot.candles
         : (snapshot?.candle ? [snapshot.candle] : []),
       precomputedCounts,
-      Math.max(0, Number(snapshot?.t) || 0)
+      matchTimeSec
     );
+    if (matchTimeSec <= 0.25) this.clearBarracksCadenceDeltaStateForSide(side);
+    const nowMs = performance.now();
+    this.updateBarracksCadenceDeltaFxForRows(side, rows, nowMs);
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
     const panelW = 390;
     const rowH = 16;
@@ -8488,13 +8833,12 @@ export class GameRenderer {
     }
 
     const colLabelX = px + 28;
-    const colStatusX = px + 108;
-    const colChanceX = px + 132;
+    const chipX = px + 78;
+    const chipW = 66;
     const barX = px + 152;
     const barW = 54;
     const barH = 6;
-    const chipX = px + 214;
-    const chipW = 86;
+    const statusX = px + 206;
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
@@ -8520,39 +8864,84 @@ export class GameRenderer {
       ctx.textAlign = 'left';
       const fittedRowLabel = this.fitUpgradeCardText(
         row.label,
-        Math.max(18, colStatusX - colLabelX - 7),
+        Math.max(18, chipX - colLabelX - 6),
         '9px sans-serif'
       );
       ctx.fillText(fittedRowLabel, colLabelX, lineY);
-      let rowStatusTag = '...';
+
+      const active = Math.max(0, Number(row.activeCount) || 0);
+      ctx.save();
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const activeBadgeText = `${active}`;
+      const activeBadgePadX = 3;
+      const activeBadgeIconSlotW = 12;
+      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2 + activeBadgeIconSlotW;
+      const activeBadgeH = 10;
+      const activeBadgeX = px + panelW - activeBadgeW - 10;
+      const activeBadgeY = ry + (rowH - activeBadgeH) * 0.5;
+      ctx.restore();
+
+      let rowStatusTag = '';
       let rowStatusColor = '#9da8ba';
       if (isLockedRow) {
         rowStatusTag = 'LOCK';
         rowStatusColor = '#d8b59d';
+      } else if (row.candleActive) {
+        rowStatusTag = 'ON';
+        rowStatusColor = '#ffe8a6';
       } else if (row.lastRollSuccess === true) {
         rowStatusTag = 'OK';
         rowStatusColor = '#8affcf';
       } else if (row.lastRollSuccess === false) {
         rowStatusTag = 'NO';
         rowStatusColor = '#ffb9a9';
+      } else if (row.every <= 1) {
+        rowStatusTag = 'ON';
+        rowStatusColor = '#8affcf';
       }
-      ctx.fillStyle = rowStatusColor;
-      ctx.fillText(rowStatusTag, colStatusX, lineY);
-      const rowChancePct = Number.isFinite(row.rollChance) ? Math.round(row.rollChance * 100) : null;
-      if (rowChancePct != null && row.unlocked && row.type !== 'militia') {
-        ctx.fillStyle = '#9fc8ef';
-        ctx.fillText(`${rowChancePct}%`, colChanceX, lineY);
-      } else if (!row.unlocked && row.type !== 'militia') {
-        const lockImage = this.getUpgradeGlyphImage(BARRACKS_LOCK_TWEMOJI);
-        if (lockImage?.complete && lockImage.naturalWidth > 0 && lockImage.naturalHeight > 0) {
-          const lockSize = 9;
-          ctx.drawImage(lockImage, colChanceX, lineY - 7, lockSize, lockSize);
-        } else {
-          ctx.fillStyle = '#7f8aa0';
-          ctx.fillText('LOCK', colChanceX, lineY);
-        }
+      if (rowStatusTag) {
+        const statusMaxW = Math.max(22, activeBadgeX - statusX - 10);
+        const fittedStatusText = this.fitUpgradeCardText(
+          rowStatusTag,
+          statusMaxW,
+          '8px sans-serif'
+        );
+        ctx.fillStyle = rowStatusColor;
+        ctx.font = '8px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(fittedStatusText, statusX, lineY);
       }
-      const active = Math.max(0, Number(row.activeCount) || 0);
+
+      const chanceValue = Number.isFinite(row.rollActualChance)
+        ? row.rollActualChance
+        : (Number.isFinite(row.rollChance)
+          ? row.rollChance
+          : (row.type === 'militia' ? 1 : null));
+      const chanceText = chanceValue == null ? '--' : `${Math.round(chanceValue * 100)}%`;
+      const countdownText = row.unlocked ? this.barracksCountdownText(row.etaSec) : '--';
+      const infoText = `${countdownText} ${chanceText}`;
+      const infoMaxW = Math.max(28, activeBadgeX - statusX - 44);
+      const fittedInfoText = this.fitUpgradeCardText(infoText, infoMaxW, '7px sans-serif');
+      ctx.fillStyle = row.unlocked ? '#9fc8ef' : '#7f8ba0';
+      ctx.font = '7px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(fittedInfoText, activeBadgeX - 6, lineY);
+
+      const cadenceDeltaFx = this.barracksCadenceDeltaFxForRow(side, row.type, nowMs);
+      if (cadenceDeltaFx && row.unlocked && row.type !== 'militia') {
+        const deltaSeconds = Number(cadenceDeltaFx.deltaSeconds);
+        const absDelta = Math.abs(deltaSeconds);
+        const signedText = `${deltaSeconds < 0 ? '-' : '+'}${this.barracksCompactSeconds(absDelta)}`;
+        ctx.save();
+        ctx.globalAlpha = clamp01(cadenceDeltaFx.alpha);
+        ctx.fillStyle = deltaSeconds < 0 ? '#86f3bf' : '#ffb9a9';
+        ctx.font = 'bold 7px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(signedText, activeBadgeX - 6, lineY - 6 + cadenceDeltaFx.yShift);
+        ctx.restore();
+      }
 
       ctx.fillStyle = '#1f2940';
       ctx.fillRect(barX, barY, barW, barH);
@@ -8580,50 +8969,11 @@ export class GameRenderer {
         { compact: true }
       );
 
-      const statusX = px + panelW - 36;
-      const statusLeftX = chipX + chipW + 8;
-      let statusText = '';
-      let statusColor = '#b8c8e2';
-      if (row.type === 'candle') {
-        if (row.candleActive) {
-          statusText = 'active';
-          statusColor = '#ffe8a6';
-        } else {
-          statusText = `roll ${Math.max(0, Math.ceil(row.etaSec))}s`;
-        }
-      } else if (isLockedRow) {
-        statusText = `LOCKED ${row.unlockHint || ''}`.trim();
-        statusColor = '#d8b59d';
-      } else if (row.every <= 1) {
-        statusText = 'active';
-        statusColor = '#8affcf';
-      } else {
-        const eta = Math.max(0, Math.ceil(row.etaSec));
-        statusText = `next ${eta}s`;
-        statusColor = row.inSpawns === 1 ? '#ffe8a6' : '#b8c8e2';
-      }
-      const fittedStatusText = this.fitUpgradeCardText(
-        statusText,
-        Math.max(24, statusX - statusLeftX),
-        '8px sans-serif'
-      );
-      ctx.textAlign = 'right';
-      ctx.fillStyle = statusColor;
-      ctx.font = '8px sans-serif';
-      ctx.fillText(fittedStatusText, statusX, lineY);
-
       // Icon + count badge so the number clearly maps to this row's unit type.
-      const activeBadgeText = `${active}`;
       ctx.save();
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      const activeBadgePadX = 3;
-      const activeBadgeIconSlotW = 12;
-      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2 + activeBadgeIconSlotW;
-      const activeBadgeH = 10;
-      const activeBadgeX = px + panelW - activeBadgeW - 10;
-      const activeBadgeY = ry + (rowH - activeBadgeH) * 0.5;
       ctx.fillStyle = active > 0 ? '#153526' : '#1a2334';
       ctx.fillRect(activeBadgeX, activeBadgeY, activeBadgeW, activeBadgeH);
       ctx.strokeStyle = active > 0 ? '#5fd78c' : '#5f7393';

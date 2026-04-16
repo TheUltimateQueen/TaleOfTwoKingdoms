@@ -76,6 +76,15 @@ export const SPECIAL_SPAWN_QUEUE_ORDER = Object.freeze([
   'super',
 ]);
 
+export const BASIC_SPECIAL_SPAWN_TYPES = Object.freeze([
+  'president',
+  'gunner',
+  'rider',
+  'monk',
+  'necrominion',
+  'digger',
+]);
+
 export const SUPPORT_SPECIAL_TYPES = Object.freeze([
   'necrominion',
   'monk',

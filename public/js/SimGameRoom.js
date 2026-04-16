@@ -17,6 +17,7 @@ import {
 } from './simConstants.js';
 import {
   SPECIAL_SPAWN_QUEUE_ORDER,
+  BASIC_SPECIAL_SPAWN_TYPES,
   SUPPORT_SPECIAL_TYPES,
   SUPPORT_SPAWN_DEBUFF_FIRST_MULT,
   SUPPORT_SPAWN_DEBUFF_ADDITIONAL_MULT,
@@ -140,6 +141,17 @@ const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
   )
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
+const BASIC_SPECIAL_TYPE_SET = new Set(BASIC_SPECIAL_SPAWN_TYPES);
+const SPECIAL_CADENCE_MATCH_MULT_MIN = 0.5;
+const SPECIAL_CADENCE_MATCH_MULT_MAX = 1.5;
+const SPECIAL_CADENCE_JITTER_MAX = 0.2;
+const SPECIAL_CADENCE_JITTER_BELL_SAMPLES = 6;
+const BASIC_SPECIAL_SHARED_BASE_CENTER = 30;
+const BASIC_SPECIAL_SHARED_BASE_VARIANCE = 15;
+const SPECIAL_CADENCE_TRACKED_TYPES = Object.freeze([
+  ...SPECIAL_SPAWN_QUEUE_ORDER,
+  'candle',
+]);
 const DRAGON_SUPER_BREATH_INTERVAL = 5;
 const DRAGON_SUPER_BREATH_COOLDOWN_JITTER = 1.25;
 const DRAGON_SUPER_BREATH_RANGE = 300;
@@ -175,8 +187,6 @@ const PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL = 0.55;
 const PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT = 0.1;
 const PRESIDENT_EXECUTIVE_ORDER_HITS = 1;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
-const NECRO_SPAWN_SPEED_EFFECT_SCALE = 1 / 5;
-const NECRO_BASE_EVERY = 12;
 const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
 const DIGGER_GOLD_FINDER_MINE_TIME = 1;
 const NECRO_SELF_SHIELD_FADE_SECONDS = 20;
@@ -329,8 +339,6 @@ const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
-const NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 0.5;
-const RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE = 2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -363,7 +371,6 @@ const CANDLE_RECRUIT_RANGE = 210;
 const CANDLE_SPAWN_OFFSET = 56;
 const CANDLE_CART_HALF_W = 34;
 const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
-const STONE_GOLEM_SPAWN_EVERY_OFFSET = 6;
 const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22 / 3;
@@ -507,6 +514,31 @@ function roundTo(value, places = 1) {
   return Math.round(n * f) / f;
 }
 
+function randomCadenceMatchMultiplier() {
+  return SPECIAL_CADENCE_MATCH_MULT_MIN
+    + Math.random() * Math.max(0, SPECIAL_CADENCE_MATCH_MULT_MAX - SPECIAL_CADENCE_MATCH_MULT_MIN);
+}
+
+function randomBellRatio(maxAbs = SPECIAL_CADENCE_JITTER_MAX, sampleCount = SPECIAL_CADENCE_JITTER_BELL_SAMPLES) {
+  const samples = Math.max(1, Math.floor(Number(sampleCount) || 1));
+  const limit = Math.max(0, Number(maxAbs) || 0);
+  if (limit <= 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples; i += 1) sum += Math.random();
+  const centered = ((sum / samples) - 0.5) * 2;
+  return clamp(centered, -1, 1) * limit;
+}
+
+function randomCadenceJitterRatio() {
+  return randomBellRatio(SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_BELL_SAMPLES);
+}
+
+function randomBasicSpecialSharedBaseEvery() {
+  const min = Math.max(1, BASIC_SPECIAL_SHARED_BASE_CENTER - BASIC_SPECIAL_SHARED_BASE_VARIANCE);
+  const max = Math.max(min, BASIC_SPECIAL_SHARED_BASE_CENTER + BASIC_SPECIAL_SHARED_BASE_VARIANCE);
+  return min + Math.random() * (max - min);
+}
+
 function finiteOrNull(value, places = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -581,8 +613,12 @@ function serializeSideState(side) {
   const specialSpawnProgressByTypeRaw = state.specialSpawnProgressByType && typeof state.specialSpawnProgressByType === 'object'
     ? state.specialSpawnProgressByType
     : {};
+  const specialSpawnCadenceByTypeRaw = state.specialSpawnCadenceByType && typeof state.specialSpawnCadenceByType === 'object'
+    ? state.specialSpawnCadenceByType
+    : {};
   const specialRollByType = {};
   const specialSpawnProgressByType = {};
+  const specialSpawnCadenceByType = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
     const entry = specialRollByTypeRaw[type];
     specialRollByType[type] = {
@@ -594,6 +630,18 @@ function serializeSideState(side) {
       roll: finiteOrNull(entry?.roll, 3),
     };
     specialSpawnProgressByType[type] = finiteOrNull(specialSpawnProgressByTypeRaw[type], 3);
+  }
+  for (const type of SPECIAL_CADENCE_TRACKED_TYPES) {
+    const entry = specialSpawnCadenceByTypeRaw[type];
+    specialSpawnCadenceByType[type] = {
+      baseEvery: finiteOrNull(entry?.baseEvery, 3),
+      currentEvery: finiteOrNull(entry?.currentEvery, 3),
+      matchMultiplier: finiteOrNull(entry?.matchMultiplier, 3),
+      jitterRatio: finiteOrNull(entry?.jitterRatio, 3),
+      deltaRatio: finiteOrNull(entry?.deltaRatio, 3),
+      progress: finiteOrNull(entry?.progress, 3),
+      remainingSpawns: finiteOrNull(entry?.remainingSpawns, 3),
+    };
   }
   return {
     towerHp: roundTo(state.towerHp, 1),
@@ -651,7 +699,7 @@ function serializeSideState(side) {
     minionCd: roundTo(state.minionCd, 2),
     spawnCount: Math.max(0, Math.round(Number(state.spawnCount) || 0)),
     candleCd: roundTo(state.candleCd, 2),
-    candleSpawnInSpawns: Math.max(0, Math.round(Number(state.candleSpawnInSpawns) || 0)),
+    candleSpawnInSpawns: finiteOrNull(state.candleSpawnInSpawns, 3),
     candleActive: Boolean(state.candleActive),
     candleRollSuccess: typeof state.candleRollSuccess === 'boolean' ? state.candleRollSuccess : null,
     candleRollChance: finiteOrNull(state.candleRollChance, 3),
@@ -668,6 +716,8 @@ function serializeSideState(side) {
     specialRollTtl: roundTo(state.specialRollTtl, 2),
     specialRollByType,
     specialSpawnProgressByType,
+    specialSpawnCadenceByType,
+    specialBasicSharedBaseEvery: finiteOrNull(state.specialBasicSharedBaseEvery, 3),
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
     towerGolemRescueUsed: Boolean(state.towerGolemRescueUsed),
@@ -766,6 +816,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     pendingShotPowerShots: 0,
     pendingSpecialSpawns: [],
     specialSpawnProgressByType: {},
+    specialSpawnCadenceByType: {},
     arrowsFired: 0,
     arrowHits: 0,
     comboHitStreak: 0,
@@ -788,6 +839,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     specialRollValue: null,
     specialRollTtl: 0,
     specialRollByType: {},
+    specialBasicSharedBaseEvery: null,
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
     towerGolemRescueUsed: false,
@@ -840,6 +892,9 @@ class GameRoom {
 
     this.left = left;
     this.right = right;
+    this.basicSpecialSharedBaseEvery = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
+    this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
+    this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
 
     this.arrows = [];
     this.minions = [];
@@ -1524,7 +1579,9 @@ class GameRoom {
       side.specialRollByType = {};
       side.pendingSpecialSpawns = [];
       side.specialSpawnProgressByType = {};
+      side.specialSpawnCadenceByType = {};
     }
+    for (const sideName of allSides) this.primeSpecialSpawnCadenceState(sideName, this.t);
 
     if (refreshExisting) {
       for (const sideName of allSides) this.refreshDebugMinionFlags(sideName);
@@ -2006,6 +2063,9 @@ class GameRoom {
 
     this.left = makeSideState('left', this.archersPerSide);
     this.right = makeSideState('right', this.archersPerSide);
+    this.basicSpecialSharedBaseEvery = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
+    this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
+    this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.gameOver = false;
     this.winner = null;
     this.t = 0;
@@ -2689,7 +2749,13 @@ class GameRoom {
   }
 
   statStoneGolemEvery(side) {
-    return Math.max(1, this.statCandleEvery(side) + STONE_GOLEM_SPAWN_EVERY_OFFSET);
+    const spawn = Math.max(1, Number(side?.spawnLevel) || 1);
+    const hp = Math.max(1, Number(side?.unitHpLevel) || 1);
+    const power = Math.max(1, Number(side?.powerLevel) || 1);
+    const resource = Math.max(1, Number(side?.resourceLevel) || 1);
+    const golemTech = Math.floor((spawn + hp + power + resource) / 7);
+    const baseEvery = Math.max(30, 46 - golemTech * 2);
+    return this.scaleSpecialCooldownEvery(baseEvery, side, 0.88);
   }
 
   stoneGolemSpawnUnlocked(side) {
@@ -2705,7 +2771,15 @@ class GameRoom {
     if (this.candles?.[side]) return 0;
     const spawnEvery = this.statSpawnEvery(sideState);
     const minionCd = Math.max(0, Number(sideState.minionCd) || 0);
-    const inSpawns = Math.max(1, Math.floor(Number(sideState.candleSpawnInSpawns) || this.statCandleEvery(sideState)));
+    const candleCadence = sideState.specialSpawnCadenceByType?.candle;
+    const inSpawnsRaw = Number(candleCadence?.remainingSpawns);
+    const fallbackInSpawns = Number(sideState.candleSpawnInSpawns);
+    const inSpawns = Math.max(
+      1,
+      Number.isFinite(inSpawnsRaw)
+        ? inSpawnsRaw
+        : (Number.isFinite(fallbackInSpawns) && fallbackInSpawns > 0 ? fallbackInSpawns : this.statCandleEvery(sideState))
+    );
     return minionCd + Math.max(0, inSpawns - 1) * spawnEvery;
   }
 
@@ -2714,11 +2788,14 @@ class GameRoom {
     const sideState = this[side];
     if (!sideState) return;
     if (this.candles?.[side]) return;
-    if (!Number.isFinite(sideState.candleSpawnInSpawns) || sideState.candleSpawnInSpawns <= 0) {
-      sideState.candleSpawnInSpawns = this.statCandleEvery(sideState);
-    }
-    sideState.candleSpawnInSpawns = Math.max(0, Math.floor(sideState.candleSpawnInSpawns) - 1);
-    if (sideState.candleSpawnInSpawns <= 0) {
+    const candleEvery = this.statCandleEvery(sideState);
+    const dueCount = this.advanceSpecialSpawnProgress(sideName, 'candle', candleEvery, 1, this.t);
+    const candleCadence = this.specialSpawnCadenceStateForType(sideState, 'candle', this.t);
+    sideState.candleSpawnInSpawns = Number.isFinite(candleCadence?.remainingSpawns)
+      ? candleCadence.remainingSpawns
+      : Math.max(0, Number(sideState.candleSpawnInSpawns) || candleEvery);
+    sideState.candleCd = this.candleSpawnEtaSeconds(side);
+    if (dueCount > 0) {
       const chance = this.statCandleSpawnChance(sideState);
       const roll = Math.random();
       const success = roll <= chance;
@@ -2726,7 +2803,6 @@ class GameRoom {
       sideState.candleRollValue = roll;
       sideState.candleRollSuccess = success;
       if (success) this.spawnCandleUnit(side);
-      sideState.candleSpawnInSpawns = this.statCandleEvery(sideState);
     }
     sideState.candleCd = this.candleSpawnEtaSeconds(side);
   }
@@ -5631,6 +5707,32 @@ class GameRoom {
     return Math.max(0.18, base / mul);
   }
 
+  basicSpecialSharedBaseEveryForSide(side = null) {
+    const local = Number(side?.specialBasicSharedBaseEvery);
+    if (Number.isFinite(local) && local > 0) return local;
+    const global = Number(this.basicSpecialSharedBaseEvery);
+    if (Number.isFinite(global) && global > 0) {
+      if (side && typeof side === 'object') side.specialBasicSharedBaseEvery = roundTo(global, 3);
+      return global;
+    }
+    const rolled = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
+    this.basicSpecialSharedBaseEvery = rolled;
+    if (side && typeof side === 'object') side.specialBasicSharedBaseEvery = rolled;
+    if (this.left && typeof this.left === 'object' && !Number.isFinite(Number(this.left.specialBasicSharedBaseEvery))) {
+      this.left.specialBasicSharedBaseEvery = rolled;
+    }
+    if (this.right && typeof this.right === 'object' && !Number.isFinite(Number(this.right.specialBasicSharedBaseEvery))) {
+      this.right.specialBasicSharedBaseEvery = rolled;
+    }
+    return rolled;
+  }
+
+  statBasicSpecialEvery(side, specialType) {
+    const sharedBase = this.basicSpecialSharedBaseEveryForSide(side);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, specialType);
+    return this.scaleSpecialCooldownEvery(sharedBase * repeatMul, side);
+  }
+
   statSpecialCooldownMultiplier(matchTimeSec = null) {
     const t = Number.isFinite(matchTimeSec) ? matchTimeSec : this.t;
     const safeT = Math.max(0, Number(t) || 0);
@@ -5665,27 +5767,19 @@ class GameRoom {
   }
 
   statGunnerEvery(side) {
-    const tech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 6);
-    const baseEvery = Math.max(14, 22 - tech) * this.specialRepeatSpawnEveryMultiplier(side, 'gunner');
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.statBasicSpecialEvery(side, 'gunner');
   }
 
   statRiderEvery(side) {
-    const cavalryTech = Math.floor((side.unitLevel + side.spawnLevel + side.economyLevel) / 5);
-    const baseEvery = Math.max(15, 23 - cavalryTech) * this.specialRepeatSpawnEveryMultiplier(side, 'rider');
-    return this.scaleSpecialCooldownEvery(baseEvery, side, RIDER_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE);
+    return this.statBasicSpecialEvery(side, 'rider');
   }
 
   statDiggerEvery(side) {
-    const burrowTech = Math.floor((side.unitHpLevel + side.spawnLevel + side.economyLevel) / 6);
-    const baseEvery = Math.max(14, 24 - burrowTech) * this.specialRepeatSpawnEveryMultiplier(side, 'digger');
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.statBasicSpecialEvery(side, 'digger');
   }
 
   statMonkEvery(side) {
-    const supportTech = Math.floor((side.unitHpLevel + side.powerLevel + side.resourceLevel) / 7);
-    const baseEvery = Math.max(20, 30 - supportTech) * this.specialRepeatSpawnEveryMultiplier(side, 'monk');
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.statBasicSpecialEvery(side, 'monk');
   }
 
   statShieldEvery(side) {
@@ -5701,9 +5795,7 @@ class GameRoom {
   }
 
   statPresidentEvery(side) {
-    const civicTech = Math.floor((side.economyLevel + side.resourceLevel + side.powerLevel) / 6);
-    const baseEvery = Math.max(36, 54 - civicTech) * this.specialRepeatSpawnEveryMultiplier(side, 'president');
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.statBasicSpecialEvery(side, 'president');
   }
 
   statBalloonEvery(side) {
@@ -5715,17 +5807,7 @@ class GameRoom {
   }
 
   statNecroEvery(side = null) {
-    const level = Math.max(1, Number(side?.spawnLevel) || 1);
-    const levelOneEvery = this.baseSpawnEveryForLevel(1);
-    const currentEvery = this.baseSpawnEveryForLevel(level);
-    const currentSpeedMul = levelOneEvery / Math.max(0.0001, currentEvery);
-    const desiredSpeedMul = 1 + (currentSpeedMul - 1) * NECRO_SPAWN_SPEED_EFFECT_SCALE;
-    const necroEveryFactor = currentSpeedMul / Math.max(0.0001, desiredSpeedMul);
-    return this.scaleSpecialCooldownEvery(
-      NECRO_BASE_EVERY * necroEveryFactor * this.specialRepeatSpawnEveryMultiplier(side, 'necrominion'),
-      side,
-      NECRO_SPECIAL_COOLDOWN_RAMP_EFFECT_SCALE
-    );
+    return this.statBasicSpecialEvery(side, 'necrominion');
   }
 
   statSuperEvery(side) {
@@ -5775,6 +5857,165 @@ class GameRoom {
     return side.specialSpawnProgressByType;
   }
 
+  ensureSpecialSpawnCadenceMap(side) {
+    if (!side || typeof side !== 'object') return {};
+    if (!side.specialSpawnCadenceByType || typeof side.specialSpawnCadenceByType !== 'object') {
+      side.specialSpawnCadenceByType = {};
+    }
+    return side.specialSpawnCadenceByType;
+  }
+
+  specialSpawnBaseEveryForType(side, type, matchTimeSec = this.t) {
+    const s = side || null;
+    if (type === 'candle') return this.statCandleEvery(s);
+    if (type === 'stonegolem') return this.statStoneGolemEvery(s);
+    if (BASIC_SPECIAL_TYPE_SET.has(type)) return this.statBasicSpecialEvery(s, type);
+    if (type === 'dragon') return this.statDragonEvery(s);
+    if (type === 'shield') return this.statShieldEvery(s);
+    if (type === 'hero') return this.statHeroEvery(s);
+    if (type === 'balloon') return this.statBalloonEvery(s);
+    if (type === 'super') return this.statSuperEvery(s);
+    return Infinity;
+  }
+
+  specialSpawnCadenceStateForType(side, type, matchTimeSec = this.t) {
+    const cadenceMap = this.ensureSpecialSpawnCadenceMap(side);
+    const progressMap = this.ensureSpecialSpawnProgressMap(side);
+    const existing = cadenceMap[type];
+    if (existing && typeof existing === 'object') {
+      const baseEvery = Number(existing.baseEvery);
+      const currentEvery = Number(existing.currentEvery);
+      const progress = Math.max(0, Number(existing.progress) || 0);
+      if (Number.isFinite(baseEvery) && Number.isFinite(currentEvery) && currentEvery > 0) {
+        existing.baseEvery = roundTo(baseEvery, 3);
+        existing.currentEvery = roundTo(currentEvery, 3);
+        const matchMultiplier = Number(existing.matchMultiplier);
+        const jitterRatio = Number(existing.jitterRatio);
+        if (Number.isFinite(matchMultiplier) && Number.isFinite(jitterRatio)) {
+          existing.matchMultiplier = roundTo(clamp(matchMultiplier, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
+          existing.jitterRatio = roundTo(clamp(jitterRatio, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX), 3);
+        } else if (Number.isFinite(matchMultiplier)) {
+          existing.matchMultiplier = roundTo(clamp(matchMultiplier, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
+          existing.jitterRatio = roundTo(clamp(
+            (currentEvery / Math.max(0.0001, baseEvery * existing.matchMultiplier)) - 1,
+            -SPECIAL_CADENCE_JITTER_MAX,
+            SPECIAL_CADENCE_JITTER_MAX
+          ), 3);
+        } else if (Number.isFinite(jitterRatio)) {
+          existing.jitterRatio = roundTo(clamp(jitterRatio, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX), 3);
+          existing.matchMultiplier = roundTo(clamp(currentEvery / Math.max(0.0001, baseEvery * (1 + existing.jitterRatio)), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
+        } else {
+          existing.matchMultiplier = roundTo(clamp(currentEvery / Math.max(0.0001, baseEvery), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
+          existing.jitterRatio = roundTo(clamp(
+            (currentEvery / Math.max(0.0001, baseEvery * existing.matchMultiplier)) - 1,
+            -SPECIAL_CADENCE_JITTER_MAX,
+            SPECIAL_CADENCE_JITTER_MAX
+          ), 3);
+        }
+        existing.deltaRatio = roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3);
+        existing.progress = roundTo(progress, 3);
+        existing.remainingSpawns = roundTo(Math.max(0, currentEvery - progress), 3);
+        progressMap[type] = existing.progress;
+        return existing;
+      }
+      existing.matchMultiplier = Number.isFinite(existing.matchMultiplier)
+        ? roundTo(clamp(Number(existing.matchMultiplier), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3)
+        : roundTo(randomCadenceMatchMultiplier(), 3);
+      existing.baseEvery = null;
+      existing.currentEvery = null;
+      existing.jitterRatio = null;
+      existing.deltaRatio = null;
+      existing.progress = roundTo(progress, 3);
+      existing.remainingSpawns = null;
+      progressMap[type] = existing.progress;
+      return existing;
+    }
+
+    const baseEvery = this.specialSpawnBaseEveryForType(side, type, matchTimeSec);
+    const matchMultiplier = roundTo(randomCadenceMatchMultiplier(), 3);
+    if (!Number.isFinite(baseEvery) || baseEvery <= 0) {
+      const entry = {
+        baseEvery: null,
+        currentEvery: null,
+        matchMultiplier,
+        jitterRatio: null,
+        deltaRatio: null,
+        progress: roundTo(Math.max(0, Number(progressMap[type]) || 0), 3),
+        remainingSpawns: null,
+      };
+      cadenceMap[type] = entry;
+      progressMap[type] = entry.progress;
+      return entry;
+    }
+
+    const jitterRatio = roundTo(randomCadenceJitterRatio(), 3);
+    const currentEvery = Math.max(1, baseEvery * matchMultiplier * (1 + jitterRatio));
+    const progress = Math.max(0, Number(progressMap[type]) || 0);
+    const entry = {
+      baseEvery: roundTo(baseEvery, 3),
+      currentEvery: roundTo(currentEvery, 3),
+      matchMultiplier,
+      jitterRatio,
+      deltaRatio: roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3),
+      progress: roundTo(progress, 3),
+      remainingSpawns: roundTo(Math.max(0, currentEvery - progress), 3),
+    };
+    cadenceMap[type] = entry;
+    progressMap[type] = entry.progress;
+    return entry;
+  }
+
+  refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec = this.t, carryProgress = 0) {
+    const side = this[sideName];
+    if (!side) return null;
+    const cadenceMap = this.ensureSpecialSpawnCadenceMap(side);
+    const progressMap = this.ensureSpecialSpawnProgressMap(side);
+    const prev = cadenceMap[type] && typeof cadenceMap[type] === 'object' ? cadenceMap[type] : {};
+    const matchMultiplier = Number.isFinite(prev.matchMultiplier)
+      ? clamp(Number(prev.matchMultiplier), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX)
+      : randomCadenceMatchMultiplier();
+    const jitterRatio = randomCadenceJitterRatio();
+    const baseEvery = this.specialSpawnBaseEveryForType(side, type, matchTimeSec);
+    const progress = Math.max(0, Number(carryProgress) || 0);
+    if (!Number.isFinite(baseEvery) || baseEvery <= 0) {
+      const entry = {
+        baseEvery: null,
+        currentEvery: null,
+        matchMultiplier: roundTo(matchMultiplier, 3),
+        jitterRatio: null,
+        deltaRatio: null,
+        progress: roundTo(progress, 3),
+        remainingSpawns: null,
+      };
+      cadenceMap[type] = entry;
+      progressMap[type] = entry.progress;
+      return entry;
+    }
+    const currentEvery = Math.max(1, baseEvery * matchMultiplier * (1 + jitterRatio));
+    const entry = {
+      baseEvery: roundTo(baseEvery, 3),
+      currentEvery: roundTo(currentEvery, 3),
+      matchMultiplier: roundTo(matchMultiplier, 3),
+      jitterRatio: roundTo(jitterRatio, 3),
+      deltaRatio: roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3),
+      progress: roundTo(progress, 3),
+      remainingSpawns: roundTo(Math.max(0, currentEvery - progress), 3),
+    };
+    cadenceMap[type] = entry;
+    progressMap[type] = entry.progress;
+    return entry;
+  }
+
+  primeSpecialSpawnCadenceState(sideName, matchTimeSec = this.t) {
+    const side = this[sideName];
+    if (!side) return {};
+    const cadenceMap = this.ensureSpecialSpawnCadenceMap(side);
+    for (const type of SPECIAL_CADENCE_TRACKED_TYPES) {
+      this.specialSpawnCadenceStateForType(side, type, matchTimeSec);
+    }
+    return cadenceMap;
+  }
+
   specialSpawnQueueGateOpen(side, type) {
     if (!side) return false;
     if (type === 'hero') return Boolean(side.towerDamagedOnce);
@@ -5784,6 +6025,13 @@ class GameRoom {
 
   specialSpawnProgressForType(side, type, every) {
     if (!Number.isFinite(every) || every <= 0) return null;
+    const cadenceEntry = side?.specialSpawnCadenceByType?.[type];
+    const cadenceProgress = Number(cadenceEntry?.progress);
+    const cadenceEvery = Number(cadenceEntry?.currentEvery);
+    if (Number.isFinite(cadenceProgress) && Number.isFinite(cadenceEvery) && cadenceEvery > 0) {
+      const normalized = cadenceProgress % cadenceEvery;
+      return normalized >= 0 ? normalized : (normalized + cadenceEvery);
+    }
     const progressMap = this.ensureSpecialSpawnProgressMap(side);
     const stored = progressMap[type];
     const raw = stored == null ? NaN : Number(stored);
@@ -5795,23 +6043,53 @@ class GameRoom {
     return ((Math.max(0, spawnCount - 1)) % every);
   }
 
-  advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns = 0) {
+  advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns = 0, matchTimeSec = this.t) {
     const side = this[sideName];
     if (!side) return 0;
+    const cadenceMap = this.ensureSpecialSpawnCadenceMap(side);
     const progressMap = this.ensureSpecialSpawnProgressMap(side);
-    if (!Number.isFinite(every) || every <= 0) {
-      progressMap[type] = null;
+    let entry = cadenceMap[type];
+    if (!entry || typeof entry !== 'object') {
+      entry = this.specialSpawnCadenceStateForType(side, type, matchTimeSec);
+    }
+    const increment = Math.max(0, Number(deltaSpawns) || 0);
+    if (increment <= 0) {
+      if (entry && typeof entry === 'object') {
+        entry.progress = roundTo(Math.max(0, Number(entry.progress) || 0), 3);
+        if (Number.isFinite(entry.currentEvery) && Number(entry.currentEvery) > 0) {
+          entry.remainingSpawns = roundTo(Math.max(0, Number(entry.currentEvery) - Number(entry.progress || 0)), 3);
+        }
+        progressMap[type] = entry.progress;
+      }
       return 0;
     }
-    let progress = this.specialSpawnProgressForType(side, type, every);
-    progress += Math.max(0, Number(deltaSpawns) || 0);
-    if (!(progress > 0)) {
-      progressMap[type] = progress;
-      return 0;
+    if (!Number.isFinite(Number(entry?.currentEvery)) || Number(entry.currentEvery) <= 0) {
+      const carry = Math.max(0, Number(entry?.progress) || 0) + increment;
+      if (Number.isFinite(every) && every > 0) {
+        entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, carry);
+      } else {
+        entry.progress = roundTo(carry, 3);
+        progressMap[type] = entry.progress;
+        return 0;
+      }
     }
-    const dueCount = Math.floor(progress / every);
-    progress -= dueCount * every;
-    progressMap[type] = progress;
+    entry.progress = Math.max(0, Number(entry.progress) || 0) + increment;
+    let dueCount = 0;
+    let guard = 0;
+    while (Number.isFinite(entry.currentEvery) && entry.currentEvery > 0 && entry.progress >= entry.currentEvery && guard < 64) {
+      entry.progress -= entry.currentEvery;
+      dueCount += 1;
+      entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, entry.progress);
+      guard += 1;
+    }
+    entry.progress = roundTo(Math.max(0, Number(entry.progress) || 0), 3);
+    if (Number.isFinite(entry.currentEvery) && entry.currentEvery > 0) {
+      entry.remainingSpawns = roundTo(Math.max(0, Number(entry.currentEvery) - Number(entry.progress)), 3);
+    } else {
+      entry.remainingSpawns = null;
+    }
+    progressMap[type] = entry.progress;
+    cadenceMap[type] = entry;
     return Math.max(0, dueCount);
   }
 
@@ -5827,7 +6105,7 @@ class GameRoom {
     if (!side) return;
     for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
       const every = Number(everyByType?.[type]);
-      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, 1);
+      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, 1, this.t);
       if (dueCount <= 0) continue;
       if (!this.specialSpawnQueueGateOpen(side, type)) continue;
       this.enqueuePendingSpecialSpawns(sideName, type, dueCount);
@@ -5854,7 +6132,7 @@ class GameRoom {
     const share = totalSpawns / targetTypes.length;
     for (const type of targetTypes) {
       const every = Number(everyByType?.[type]);
-      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, share);
+      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, share, this.t);
       if (dueCount <= 0) continue;
       if (!this.specialSpawnQueueGateOpen(side, type)) continue;
       this.enqueuePendingSpecialSpawns(sideName, type, dueCount);
