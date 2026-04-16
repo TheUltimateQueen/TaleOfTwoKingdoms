@@ -187,6 +187,9 @@ const PRESIDENT_EXECUTIVE_ORDER_BEAM_TTL = 0.55;
 const PRESIDENT_EXECUTIVE_ORDER_DAMAGE_TAKEN_MULT = 0.1;
 const PRESIDENT_EXECUTIVE_ORDER_HITS = 1;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
+const PRESIDENT_CREEP_SPEED_MULT = 0.12;
+const PRESIDENT_CREEP_SPEED_MIN = 5.5;
+const PRESIDENT_CREEP_TOWER_BUFFER = 118;
 const DIGGER_GOLD_FINDER_PICKUP_PAD = 5;
 const DIGGER_GOLD_FINDER_MINE_TIME = 1;
 const NECRO_SELF_SHIELD_FADE_SECONDS = 20;
@@ -8062,6 +8065,13 @@ class GameRoom {
       }
       return;
     }
+
+    const dir = president.side === 'left' ? 1 : -1;
+    const enemyX = president.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+    const crawlTargetX = enemyX - dir * PRESIDENT_CREEP_TOWER_BUFFER;
+    const crawlSpeed = Math.max(PRESIDENT_CREEP_SPEED_MIN, (Number(president.speed) || 0) * PRESIDENT_CREEP_SPEED_MULT);
+    const crawlDeltaX = crawlTargetX - president.x;
+    if (Math.abs(crawlDeltaX) > 0.5) president.x += clamp(crawlDeltaX, -crawlSpeed * dt, crawlSpeed * dt);
 
     if (president.presidentExecutiveOrderUpgraded && (Number(president.presidentExecutiveOrderCd) || 0) === 0) {
       const target = this.pickPresidentialPardonTarget(president);
