@@ -354,7 +354,7 @@ const MAX_DAMAGE_TEXTS = 180;
 const MAX_HERO_LINES = 80;
 const MAX_DEATH_GHOSTS = 110;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
-const BASIC_SPECIAL_SHARED_DEFAULT_BASE_EVERY = 30;
+const BASIC_SPECIAL_DEFAULT_BASE_EVERY = 30;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
@@ -7749,14 +7749,16 @@ export class GameRenderer {
     return Boolean(sideState?.towerGolemRescueUsed) || (hp > 0 && hp <= 6000 * STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION);
   }
 
-  basicSpecialSharedBaseEveryForSide(sideState) {
-    const value = Number(sideState?.specialBasicSharedBaseEvery);
-    if (Number.isFinite(value) && value > 0) return value;
-    return BASIC_SPECIAL_SHARED_DEFAULT_BASE_EVERY;
+  basicSpecialBaseEveryForType(sideState, specialType) {
+    const byTypeValue = Number(sideState?.specialBasicBaseEveryByType?.[specialType]);
+    if (Number.isFinite(byTypeValue) && byTypeValue > 0) return byTypeValue;
+    const legacyShared = Number(sideState?.specialBasicSharedBaseEvery);
+    if (Number.isFinite(legacyShared) && legacyShared > 0) return legacyShared;
+    return BASIC_SPECIAL_DEFAULT_BASE_EVERY;
   }
 
   basicSpecialTrainingEvery(sideState, specialType, matchTimeSec = 0) {
-    const baseEvery = this.basicSpecialSharedBaseEveryForSide(sideState);
+    const baseEvery = this.basicSpecialBaseEveryForType(sideState, specialType);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, specialType);
     return this.scaledSpecialEveryForUi(baseEvery * repeatMul, matchTimeSec);
   }

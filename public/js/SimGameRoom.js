@@ -536,10 +536,16 @@ function randomCadenceJitterRatio() {
   return randomBellRatio(SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_BELL_SAMPLES);
 }
 
-function randomBasicSpecialSharedBaseEvery() {
+function randomBasicSpecialBaseEvery() {
   const min = Math.max(1, BASIC_SPECIAL_SHARED_BASE_CENTER - BASIC_SPECIAL_SHARED_BASE_VARIANCE);
   const max = Math.max(min, BASIC_SPECIAL_SHARED_BASE_CENTER + BASIC_SPECIAL_SHARED_BASE_VARIANCE);
   return min + Math.random() * (max - min);
+}
+
+function randomBasicSpecialBaseEveryByType() {
+  return Object.fromEntries(
+    BASIC_SPECIAL_SPAWN_TYPES.map((type) => [type, roundTo(randomBasicSpecialBaseEvery(), 3)])
+  );
 }
 
 function finiteOrNull(value, places = 1) {
@@ -619,9 +625,13 @@ function serializeSideState(side) {
   const specialSpawnCadenceByTypeRaw = state.specialSpawnCadenceByType && typeof state.specialSpawnCadenceByType === 'object'
     ? state.specialSpawnCadenceByType
     : {};
+  const specialBasicBaseEveryByTypeRaw = state.specialBasicBaseEveryByType && typeof state.specialBasicBaseEveryByType === 'object'
+    ? state.specialBasicBaseEveryByType
+    : {};
   const specialRollByType = {};
   const specialSpawnProgressByType = {};
   const specialSpawnCadenceByType = {};
+  const specialBasicBaseEveryByType = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
     const entry = specialRollByTypeRaw[type];
     specialRollByType[type] = {
@@ -645,6 +655,9 @@ function serializeSideState(side) {
       progress: finiteOrNull(entry?.progress, 3),
       remainingSpawns: finiteOrNull(entry?.remainingSpawns, 3),
     };
+  }
+  for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
+    specialBasicBaseEveryByType[type] = finiteOrNull(specialBasicBaseEveryByTypeRaw[type], 3);
   }
   return {
     towerHp: roundTo(state.towerHp, 1),
@@ -720,6 +733,7 @@ function serializeSideState(side) {
     specialRollByType,
     specialSpawnProgressByType,
     specialSpawnCadenceByType,
+    specialBasicBaseEveryByType,
     specialBasicSharedBaseEvery: finiteOrNull(state.specialBasicSharedBaseEvery, 3),
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
@@ -842,6 +856,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     specialRollValue: null,
     specialRollTtl: 0,
     specialRollByType: {},
+    specialBasicBaseEveryByType: {},
     specialBasicSharedBaseEvery: null,
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
@@ -895,7 +910,10 @@ class GameRoom {
 
     this.left = left;
     this.right = right;
-    this.basicSpecialSharedBaseEvery = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
+    this.basicSpecialBaseEveryByType = randomBasicSpecialBaseEveryByType();
+    this.left.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.right.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
 
@@ -2066,7 +2084,10 @@ class GameRoom {
 
     this.left = makeSideState('left', this.archersPerSide);
     this.right = makeSideState('right', this.archersPerSide);
-    this.basicSpecialSharedBaseEvery = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
+    this.basicSpecialBaseEveryByType = randomBasicSpecialBaseEveryByType();
+    this.left.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.right.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.gameOver = false;
@@ -5710,30 +5731,71 @@ class GameRoom {
     return Math.max(0.18, base / mul);
   }
 
-  basicSpecialSharedBaseEveryForSide(side = null) {
-    const local = Number(side?.specialBasicSharedBaseEvery);
-    if (Number.isFinite(local) && local > 0) return local;
-    const global = Number(this.basicSpecialSharedBaseEvery);
-    if (Number.isFinite(global) && global > 0) {
-      if (side && typeof side === 'object') side.specialBasicSharedBaseEvery = roundTo(global, 3);
-      return global;
+  basicSpecialBaseEveryByTypeForSide(side = null) {
+    const resolved = {};
+    const sideSource = side?.specialBasicBaseEveryByType;
+    const globalSource = this.basicSpecialBaseEveryByType;
+    for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
+      const sideValue = Number(sideSource?.[type]);
+      if (Number.isFinite(sideValue) && sideValue > 0) {
+        resolved[type] = roundTo(sideValue, 3);
+        continue;
+      }
+      const globalValue = Number(globalSource?.[type]);
+      if (Number.isFinite(globalValue) && globalValue > 0) {
+        resolved[type] = roundTo(globalValue, 3);
+        continue;
+      }
+      resolved[type] = roundTo(randomBasicSpecialBaseEvery(), 3);
     }
-    const rolled = roundTo(randomBasicSpecialSharedBaseEvery(), 3);
-    this.basicSpecialSharedBaseEvery = rolled;
-    if (side && typeof side === 'object') side.specialBasicSharedBaseEvery = rolled;
-    if (this.left && typeof this.left === 'object' && !Number.isFinite(Number(this.left.specialBasicSharedBaseEvery))) {
-      this.left.specialBasicSharedBaseEvery = rolled;
+
+    if (!this.basicSpecialBaseEveryByType || typeof this.basicSpecialBaseEveryByType !== 'object') {
+      this.basicSpecialBaseEveryByType = {};
     }
-    if (this.right && typeof this.right === 'object' && !Number.isFinite(Number(this.right.specialBasicSharedBaseEvery))) {
-      this.right.specialBasicSharedBaseEvery = rolled;
+    for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
+      this.basicSpecialBaseEveryByType[type] = resolved[type];
     }
-    return rolled;
+
+    if (side && typeof side === 'object') {
+      side.specialBasicBaseEveryByType = {
+        ...(side.specialBasicBaseEveryByType && typeof side.specialBasicBaseEveryByType === 'object'
+          ? side.specialBasicBaseEveryByType
+          : {}),
+        ...resolved,
+      };
+    }
+    for (const sideRef of [this.left, this.right]) {
+      if (!sideRef || typeof sideRef !== 'object') continue;
+      sideRef.specialBasicBaseEveryByType = {
+        ...(sideRef.specialBasicBaseEveryByType && typeof sideRef.specialBasicBaseEveryByType === 'object'
+          ? sideRef.specialBasicBaseEveryByType
+          : {}),
+        ...resolved,
+      };
+    }
+
+    const legacyShared = resolved[BASIC_SPECIAL_SPAWN_TYPES[0]];
+    this.basicSpecialSharedBaseEvery = legacyShared;
+    if (side && typeof side === 'object') side.specialBasicSharedBaseEvery = legacyShared;
+    if (this.left && typeof this.left === 'object') this.left.specialBasicSharedBaseEvery = legacyShared;
+    if (this.right && typeof this.right === 'object') this.right.specialBasicSharedBaseEvery = legacyShared;
+    return resolved;
+  }
+
+  basicSpecialBaseEveryForSideType(side = null, specialType = null) {
+    const type = BASIC_SPECIAL_TYPE_SET.has(specialType) ? specialType : BASIC_SPECIAL_SPAWN_TYPES[0];
+    const byType = this.basicSpecialBaseEveryByTypeForSide(side);
+    const value = Number(byType?.[type]);
+    if (Number.isFinite(value) && value > 0) return value;
+    const legacy = Number(side?.specialBasicSharedBaseEvery);
+    if (Number.isFinite(legacy) && legacy > 0) return legacy;
+    return roundTo(randomBasicSpecialBaseEvery(), 3);
   }
 
   statBasicSpecialEvery(side, specialType) {
-    const sharedBase = this.basicSpecialSharedBaseEveryForSide(side);
+    const baseEvery = this.basicSpecialBaseEveryForSideType(side, specialType);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, specialType);
-    return this.scaleSpecialCooldownEvery(sharedBase * repeatMul, side);
+    return this.scaleSpecialCooldownEvery(baseEvery * repeatMul, side);
   }
 
   statSpecialCooldownMultiplier(matchTimeSec = null) {
