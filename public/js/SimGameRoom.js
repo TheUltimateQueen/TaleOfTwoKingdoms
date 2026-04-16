@@ -47,6 +47,7 @@ const CPU_RETARGET_MIN_SECONDS = 0.18;
 const CPU_RETARGET_MAX_SECONDS = 0.44;
 const CPU_PULL_FOLLOW_SPEED = 8.2;
 const CPU_MIN_SOLUTION_DX = 10;
+const CPU_MIN_CLOSE_SOLUTION_DX = 1;
 const CPU_CLOSE_TARGET_DX = 90;
 const CPU_CLOSE_TARGET_PULL_Y = 0.72;
 const CPU_MAX_SOLUTION_TTL = 5.6;
@@ -8618,7 +8619,7 @@ class GameRoom {
       const mx = Number(m.x) || 0;
       const my = Number(m.y) || 0;
       const dxForward = (mx - sx) * dir;
-      if (dxForward < CPU_MIN_SOLUTION_DX) continue;
+      if (dxForward < CPU_MIN_CLOSE_SOLUTION_DX) continue;
       const dist = Math.hypot(mx - sx, my - sy);
       const distToOurTower = Math.abs(mx - ourTowerX);
       let threat = 0;
@@ -8656,21 +8657,24 @@ class GameRoom {
     const tx = Number(targetX) || 0;
     const ty = Number(targetY) || 0;
     const dx = (tx - sx) * dir;
-    if (dx < CPU_MIN_SOLUTION_DX) return null;
+    if (dx < CPU_MIN_CLOSE_SOLUTION_DX) return null;
     const closeBias = clamp(
-      1 - ((dx - CPU_MIN_SOLUTION_DX) / Math.max(1, CPU_CLOSE_TARGET_DX - CPU_MIN_SOLUTION_DX)),
+      1 - ((dx - CPU_MIN_CLOSE_SOLUTION_DX) / Math.max(1, CPU_CLOSE_TARGET_DX - CPU_MIN_CLOSE_SOLUTION_DX)),
       0,
       1
     );
-    const minHorizontal = lerp(0.24, 0.03, closeBias);
+    const veryCloseBias = clamp(1 - (dx / 26), 0, 1);
+    const minHorizontal = lerp(0.24, 0.006, closeBias);
     const minVertical = lerp(0, 0.24, closeBias);
     const ttlTarget = lerp(1.35, 0.62, closeBias);
     const ttlPenaltyWeight = lerp(3.2, 0.9, closeBias);
 
     let best = null;
     let bestErr = Infinity;
-    for (let h = minHorizontal; h <= 1.0001; h += 0.04) {
-      for (let v = minVertical; v <= 0.9601; v += 0.04) {
+    const hStep = dx <= CPU_CLOSE_TARGET_DX ? 0.02 : 0.04;
+    const vStep = dx <= CPU_CLOSE_TARGET_DX ? 0.02 : 0.04;
+    for (let h = minHorizontal; h <= 1.0001; h += hStep) {
+      for (let v = minVertical; v <= 0.9601; v += vStep) {
         const mag = Math.hypot(h, v);
         if (mag > 1) continue;
         const angle = Math.atan2(v, h);
@@ -8694,6 +8698,39 @@ class GameRoom {
             ttl,
             error: err,
           };
+        }
+      }
+    }
+
+    if (dx <= CPU_CLOSE_TARGET_DX) {
+      const fineMinH = clamp(dx / 2000, 0.0005, 0.03);
+      const fineMaxH = clamp(dx / 120 + 0.03, 0.04, 0.18);
+      const fineMinV = lerp(0.22, 0.6, 1 - veryCloseBias);
+      const fineTtlPenaltyWeight = ttlPenaltyWeight * (1 - veryCloseBias * 0.95);
+      for (let h = fineMinH; h <= fineMaxH + 0.0001; h += 0.0012) {
+        for (let v = fineMinV; v <= 0.995; v += 0.008) {
+          const mag = Math.hypot(h, v);
+          if (mag > 1) continue;
+          const angle = Math.atan2(v, h);
+          const strength = Math.max(0.05, Math.min(1, mag));
+          const speed = (230 + strength * 380) * 1.5;
+          const cos = Math.cos(angle);
+          if (cos <= 0.0006) continue;
+          const ttl = dx / (cos * speed);
+          if (!(ttl > 0.06 && ttl < CPU_MAX_SOLUTION_TTL)) continue;
+          const gravity = 980 - strength * 220;
+          const yPred = sy - Math.sin(angle) * speed * ttl + 0.5 * gravity * ttl * ttl;
+          const closeLiftPenalty = Math.max(0, (CPU_CLOSE_TARGET_PULL_Y - v)) * 56 * closeBias * (1 - veryCloseBias * 0.85);
+          const err = Math.abs(yPred - ty) + Math.abs(ttl - ttlTarget) * fineTtlPenaltyWeight + closeLiftPenalty;
+          if (err < bestErr) {
+            bestErr = err;
+            best = {
+              pullX: side === 'left' ? -h : h,
+              pullY: -v,
+              ttl,
+              error: err,
+            };
+          }
         }
       }
     }
@@ -8748,11 +8785,20 @@ class GameRoom {
           } else {
             const fallback = this.cpuDefaultPull(sideName);
             const sx = sideName === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+            const sy = ARCHER_ORIGIN_Y - slot * ARCHER_VERTICAL_GAP;
             const dir = sideName === 'left' ? 1 : -1;
             const dx = (aimX - sx) * dir;
-            if (dx > CPU_MIN_SOLUTION_DX && dx < CPU_CLOSE_TARGET_DX) {
-              state.pullX = sideName === 'left' ? -0.16 : 0.16;
-              state.pullY = -0.88;
+            if (dx > CPU_MIN_CLOSE_SOLUTION_DX && dx < CPU_CLOSE_TARGET_DX) {
+              const closeBias = clamp(
+                1 - ((dx - CPU_MIN_CLOSE_SOLUTION_DX) / Math.max(1, CPU_CLOSE_TARGET_DX - CPU_MIN_CLOSE_SOLUTION_DX)),
+                0,
+                1
+              );
+              const downBias = clamp((aimY - sy) / 180, 0, 1);
+              const fallbackHorizontal = lerp(0.16, 0.0025, closeBias);
+              const fallbackVertical = lerp(0.95, 0.52, downBias);
+              state.pullX = sideName === 'left' ? -fallbackHorizontal : fallbackHorizontal;
+              state.pullY = -fallbackVertical;
             } else {
               state.pullX = fallback.x;
               state.pullY = fallback.y;
