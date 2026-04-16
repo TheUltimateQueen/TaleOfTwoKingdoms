@@ -82,6 +82,9 @@ const ARROW_DAMAGE_GOLD_UNIT_KILL_EQUIV = 1.35;
 const ARROW_DAMAGE_GOLD_MAX_COMBO_MULT = 1.2;
 const ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT = 1;
 const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 5;
+const COMBO_MAX_STREAK = 10;
+const COMBO_OVERDRIVE_DAMAGE_PER_STACK = 2;
+const COMBO_OVERDRIVE_AOE_DAMAGE_PER_STACK = 1;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
@@ -5384,12 +5387,12 @@ class GameRoom {
   }
 
   comboProgress(side) {
-    return Math.max(0, Math.min(1, (side.comboHitStreak || 0) / 10));
+    return Math.max(0, Math.min(1, (side.comboHitStreak || 0) / COMBO_MAX_STREAK));
   }
 
   comboTier(side) {
-    const streak = Math.max(0, Math.min(10, side?.comboHitStreak || 0));
-    if (streak >= 10) return 4;
+    const streak = Math.max(0, Math.min(COMBO_MAX_STREAK, side?.comboHitStreak || 0));
+    if (streak >= COMBO_MAX_STREAK) return 4;
     if (streak >= 7) return 3;
     if (streak >= 4) return 2;
     return 1;
@@ -5400,7 +5403,12 @@ class GameRoom {
   }
 
   hasMaxCombo(side) {
-    return Math.max(0, side?.comboHitStreak || 0) >= 10;
+    return Math.max(0, side?.comboHitStreak || 0) >= COMBO_MAX_STREAK;
+  }
+
+  comboOverdriveStacks(side) {
+    const streak = Math.max(0, Math.floor(Number(side?.comboHitStreak) || 0));
+    return Math.max(0, streak - COMBO_MAX_STREAK);
   }
 
   markArrowHit(arrow) {
@@ -5409,7 +5417,7 @@ class GameRoom {
     arrow.comboCounted = true;
     const side = arrow.side === 'left' ? this.left : this.right;
     side.arrowHits = (side.arrowHits || 0) + 1;
-    side.comboHitStreak = Math.min(10, (side.comboHitStreak || 0) + 1);
+    side.comboHitStreak = Math.max(0, Number(side.comboHitStreak) || 0) + 1;
   }
 
   markArrowMiss(arrow) {
@@ -5423,7 +5431,8 @@ class GameRoom {
     const side = arrow.side === 'left' ? this.left : this.right;
     if (!this.hasMaxCombo(side)) return;
 
-    const splash = Math.max(1, baseDamage * 0.34);
+    const overdriveBonus = Math.max(0, Number(arrow?.comboOverdriveAoeBonus) || 0);
+    const splash = Math.max(1, baseDamage * 0.34 + overdriveBonus);
     const splashR = 76;
     const victims = [];
     this.forEachEnemyMinionInRadius(
@@ -9214,6 +9223,9 @@ class GameRoom {
     const launch = launchFromPull(sideName, pull.x, pull.y);
     const forwardSign = sideName === 'left' ? 1 : -1;
     const comboMul = this.comboMultiplier(side);
+    const comboOverdriveStacks = this.comboOverdriveStacks(side);
+    const comboOverdriveDamageBonus = comboOverdriveStacks * COMBO_OVERDRIVE_DAMAGE_PER_STACK;
+    const comboOverdriveAoeBonus = comboOverdriveStacks * COMBO_OVERDRIVE_AOE_DAMAGE_PER_STACK;
     const volleyId = Math.max(1, Math.round(Number(side.pendingArrowVolleyId) || 0));
 
     let count = this.statArrowCount(side);
@@ -9277,7 +9289,7 @@ class GameRoom {
     }
 
     syncPendingShotPowerState(side);
-    const baseArrowDamage = this.statArrowDamage(side) * dmgMul * chargeMul * comboMul;
+    const baseArrowDamage = this.statArrowDamage(side) * dmgMul * chargeMul * comboMul + comboOverdriveDamageBonus;
 
     for (let i = 0; i < angleSteps.length; i += 1) {
       const angleStep = angleSteps[i];
@@ -9317,6 +9329,8 @@ class GameRoom {
         arrowDamageGoldAwarded: 0,
         shotVolleyId: volleyId,
         comboTier: comboMul,
+        comboOverdriveStacks,
+        comboOverdriveAoeBonus,
         hitAnyUnit: false,
         stuck: false,
         stuckHitUnit: false,
@@ -9351,6 +9365,8 @@ class GameRoom {
         arrowDamageGoldAwarded: 0,
         shotVolleyId: volleyId,
         comboTier: comboMul,
+        comboOverdriveStacks,
+        comboOverdriveAoeBonus,
         hitAnyUnit: false,
         stuck: false,
         stuckHitUnit: false,

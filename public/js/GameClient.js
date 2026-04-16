@@ -314,10 +314,10 @@ function comboTier(sideState) {
 }
 
 function comboStatus(sideState) {
-  const streak = Math.max(0, Math.min(10, sideState?.comboHitStreak || 0));
+  const streak = Math.max(0, Math.floor(Number(sideState?.comboHitStreak) || 0));
   const tier = comboTier(sideState);
-  if (streak >= 10) return `x${tier} MAX (AOE)`;
-  return `x${tier} (${streak}/10)`;
+  if (streak >= 10) return `x${streak} (MAX T${tier} AOE)`;
+  return `x${streak}`;
 }
 
 function escapeHtml(value) {

@@ -55,9 +55,11 @@ function launchStrengthFromPull(sideName, pullX, pullY) {
   return Math.max(0.05, Math.min(1, Math.hypot(horizontal, vertical)));
 }
 
+const COMBO_MAX_STREAK = 10;
+
 function comboTierFromStreak(streak) {
-  const value = Math.max(0, Math.min(10, Number(streak) || 0));
-  if (value >= 10) return 4;
+  const value = Math.max(0, Math.min(COMBO_MAX_STREAK, Number(streak) || 0));
+  if (value >= COMBO_MAX_STREAK) return 4;
   if (value >= 7) return 3;
   if (value >= 4) return 2;
   return 1;
@@ -5187,8 +5189,6 @@ export class GameRenderer {
       const timing = this.archerShotTiming(snapshot.right, i, rightPulls.length, snapshot.mode);
       this.drawShotRing(world.towerRightX, world.towerY - 185 - i * 60, timing.cd, TEAM_COLORS.right.ring, timing.interval);
     }
-    this.drawComboBanner('left', world.towerLeftX, world.towerY - 230, snapshot.left);
-    this.drawComboBanner('right', world.towerRightX, world.towerY - 230, snapshot.right);
     const allMinions = Array.isArray(snapshot.minions) ? snapshot.minions : [];
     const balloonMinions = this.balloonMinionBuffer;
     const nonBalloonMinions = this.groundMinionBuffer;
@@ -5281,6 +5281,7 @@ export class GameRenderer {
       this.drawAimGuide('left', world.towerLeftX + 35, pull.archerAimY, leftAim, leftStrength, {
         shotPowerType: activePower,
         shotPowerShots: activeShots,
+        comboHitStreak: snapshot.left?.comboHitStreak,
       });
     }
     for (let i = 0; i < rightPulls.length; i += 1) {
@@ -5299,6 +5300,7 @@ export class GameRenderer {
       this.drawAimGuide('right', world.towerRightX - 35, pull.archerAimY, rightAim, rightStrength, {
         shotPowerType: activePower,
         shotPowerShots: activeShots,
+        comboHitStreak: snapshot.right?.comboHitStreak,
       });
     }
     this.drawArcherInstrumentOverlay(world, leftPulls, rightPulls);
@@ -6908,12 +6910,39 @@ export class GameRenderer {
     const guideOpacity = Number.isFinite(options.opacity)
       ? Math.max(0, Math.min(1, options.opacity))
       : 0.45;
+    const comboStreak = Math.max(0, Math.floor(Number(options.comboHitStreak) || 0));
+    const comboTier = comboTierFromStreak(comboStreak);
+    const comboMaxed = comboStreak >= COMBO_MAX_STREAK;
+    const comboOverdrive = Math.max(0, comboStreak - COMBO_MAX_STREAK);
     const shotPowerType = options.shotPowerType || null;
     const shotPowerShots = Math.max(0, Number(options.shotPowerShots) || 0);
     const len = 90 + strength * 180;
     const lineW = 1.5 + strength * 3.5;
     const ex = ox + Math.cos(angle) * len;
     const ey = oy + Math.sin(angle) * len;
+    const reticleR = 2.5 + strength * 3.5;
+
+    let guideCoreColor = palette.primary;
+    let reticleFillColor = palette.soft;
+    let textColor = '#d7e3f1';
+    let font = 'bold 10px sans-serif';
+    if (comboTier >= 2) {
+      guideCoreColor = '#74dfff';
+      reticleFillColor = '#e9fbff';
+      textColor = '#ecfaff';
+    }
+    if (comboTier >= 3) {
+      guideCoreColor = '#c6a9ff';
+      reticleFillColor = '#f6ebff';
+      textColor = '#f8eeff';
+      font = 'bold 11px sans-serif';
+    }
+    if (comboMaxed) {
+      guideCoreColor = '#f9c75f';
+      reticleFillColor = '#fff4ca';
+      textColor = '#fff3cf';
+      font = 'bold 12px sans-serif';
+    }
 
     ctx.save();
     ctx.globalAlpha = guideOpacity;
@@ -6924,17 +6953,36 @@ export class GameRenderer {
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
-    ctx.strokeStyle = this.withAlpha(palette.primary, 1);
+    ctx.strokeStyle = this.withAlpha(guideCoreColor, 1);
     ctx.lineWidth = lineW;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
     ctx.lineTo(ex, ey);
     ctx.stroke();
 
+    if (comboMaxed) {
+      ctx.globalAlpha = Math.min(0.85, 0.5 + comboOverdrive * 0.015);
+      ctx.strokeStyle = '#ffd36f';
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = '#ffd56e';
+      ctx.shadowBlur = 14 + Math.min(16, comboOverdrive * 0.7);
+      ctx.beginPath();
+      ctx.arc(ex, ey, reticleR + 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else if (comboTier >= 2) {
+      ctx.globalAlpha = 0.45 + (comboTier - 2) * 0.16;
+      ctx.strokeStyle = this.withAlpha(guideCoreColor, 1);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(ex, ey, reticleR + 2.8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.globalAlpha = 0.95;
-    ctx.fillStyle = this.withAlpha(palette.soft, 1);
+    ctx.fillStyle = this.withAlpha(reticleFillColor, 1);
     ctx.beginPath();
-    ctx.arc(ex, ey, 2.5 + strength * 3.5, 0, Math.PI * 2);
+    ctx.arc(ex, ey, reticleR, 0, Math.PI * 2);
     ctx.fill();
 
     if (shotPowerType) {
@@ -6946,6 +6994,23 @@ export class GameRenderer {
         ctx.fillText(`${shotPowerShots}x`, ex, ey - 14);
       }
     }
+
+    const text = `x${comboStreak}`;
+    ctx.font = font;
+    ctx.globalAlpha = Math.max(0.35, Math.min(1, guideOpacity + 0.25));
+    const textY = ey - (shotPowerType ? 30 : 18);
+    if (comboMaxed) {
+      ctx.shadowColor = '#ffcc72';
+      ctx.shadowBlur = 10;
+    } else {
+      ctx.shadowBlur = 0;
+    }
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, ex, textY);
+    ctx.shadowBlur = 0;
+    ctx.textBaseline = 'alphabetic';
 
     const px = ox + Math.cos(angle) * 40;
     const py = oy + Math.sin(angle) * 40;
