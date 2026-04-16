@@ -339,7 +339,7 @@ const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
-const BARRACKS_CADENCE_DELTA_FLASH_TTL_MS = 1000;
+const BARRACKS_CADENCE_DELTA_FLASH_TTL_MS = 5000;
 const BARRACKS_CADENCE_DELTA_MIN_SECONDS = 0.15;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SHIELD_DARK_METAL_DURATION = 5;
@@ -7596,6 +7596,15 @@ export class GameRenderer {
     return `${kilo.toFixed(n < 10000 ? 1 : 0)}k`;
   }
 
+  barracksHeatColor(score01, alpha = 1) {
+    const t = clamp01(score01);
+    const a = clamp01(alpha);
+    const r = Math.round(lerp(235, 103, t));
+    const g = Math.round(lerp(102, 214, t));
+    const b = Math.round(lerp(98, 128, t));
+    return `rgba(${r},${g},${b},${a.toFixed(3)})`;
+  }
+
   barracksSignedPercent(ratio) {
     const value = Number(ratio);
     if (!Number.isFinite(value)) return '+0%';
@@ -8139,6 +8148,9 @@ export class GameRenderer {
         : 0;
       const lastRollEntry = specialType ? specialRollByType[specialType] : null;
       const lastRollSuccess = typeof lastRollEntry?.success === 'boolean' ? lastRollEntry.success : null;
+      const lastRollDebuffCausedFail = typeof lastRollEntry?.debuffCausedFail === 'boolean'
+        ? lastRollEntry.debuffCausedFail
+        : false;
       if (row.type === 'candle') {
         const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
         const inSpawns = Math.max(1, Math.floor(Number(sideState?.candleSpawnInSpawns) || every));
@@ -8165,6 +8177,7 @@ export class GameRenderer {
           rollDebuffRatio,
           supportAliveCount,
           lastRollSuccess: candleRollSuccess,
+          lastRollDebuffCausedFail: false,
         });
       }
       const every = this.trainingEveryForType(sideState, row.type, matchTimeSec);
@@ -8203,6 +8216,7 @@ export class GameRenderer {
         rollDebuffRatio,
         supportAliveCount,
         lastRollSuccess,
+        lastRollDebuffCausedFail,
       });
     });
     builtRows.sort((a, b) => {
@@ -8759,10 +8773,10 @@ export class GameRenderer {
     const nowMs = performance.now();
     this.updateBarracksCadenceDeltaFxForRows(side, rows, nowMs);
     const doorPreviewRow = this.nextBarracksDoorPreviewRow(rows);
-    const panelW = 390;
-    const rowH = 16;
-    const rowStartY = 72;
-    const panelH = rowStartY + rows.length * rowH + 10;
+    const panelW = 428;
+    const rowH = 18;
+    const rowStartY = 76;
+    const panelH = rowStartY + rows.length * rowH + 12;
     const panelX = side === 'left' ? 350 : world.w - 350;
     const panelBottomPad = 10;
     const viewportBottom = Number(world?.h) || Number(world?.groundY) || 0;
@@ -8797,10 +8811,8 @@ export class GameRenderer {
       && Number.isFinite(rollValue)
       && rollSuccess != null
     ) {
-      const statusTag = rollSuccess
-        ? '[OK]'
-        : (rollDebuffCausedFail ? '[ORANGE FAIL]' : '[X]');
-      ctx.fillStyle = rollSuccess ? '#97f2c2' : '#ffb9a9';
+      const statusTag = rollSuccess ? '[SUCCESS]' : '[FAIL]';
+      ctx.fillStyle = rollSuccess ? '#97f2c2' : (rollDebuffCausedFail ? '#f09a2f' : '#ffb9a9');
       ctx.fillText(
         `Last roll ${statusTag} ${this.failedSpecialLabel(rollType)}`,
         px + 10,
@@ -8833,18 +8845,62 @@ export class GameRenderer {
     }
 
     const colLabelX = px + 28;
-    const chipX = px + 78;
-    const chipW = 66;
-    const barX = px + 152;
-    const barW = 54;
-    const barH = 6;
-    const statusX = px + 206;
+    const chipX = px + 82;
+    const chipW = 70;
+    const barX = px + 160;
+    const barW = 124;
+    const barH = 9;
+    const resultX = px + 292;
+    const resultW = 46;
+    const baseSpeedX = px + 346;
+    const baseChanceX = px + 390;
+    const headerY = py + rowStartY - 8;
+    const speedRows = rows.filter((row) => (
+      row?.unlocked
+      && Number.isFinite(Number(row?.baseCycleSeconds))
+      && Number(row.baseCycleSeconds) > 0
+    ));
+    let baseSpeedMin = Infinity;
+    let baseSpeedMax = 0;
+    for (const row of speedRows) {
+      const sec = Number(row.baseCycleSeconds);
+      if (!Number.isFinite(sec) || sec <= 0) continue;
+      baseSpeedMin = Math.min(baseSpeedMin, sec);
+      baseSpeedMax = Math.max(baseSpeedMax, sec);
+    }
+    const speedRangeValid = Number.isFinite(baseSpeedMin)
+      && Number.isFinite(baseSpeedMax)
+      && baseSpeedMax > baseSpeedMin;
+
+    ctx.fillStyle = '#7f93b1';
+    ctx.font = 'bold 6px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText('UNIT', colLabelX, headerY);
+    ctx.textAlign = 'center';
+    ctx.fillText('SPAWN', barX + barW * 0.5, headerY);
+    ctx.fillText('ROLL', resultX + resultW * 0.5, headerY);
+    ctx.fillText('BASE SPD', baseSpeedX, headerY);
+    ctx.fillText('BASE %', baseChanceX, headerY);
+
+    ctx.strokeStyle = '#2f415b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(barX - 8, py + rowStartY - 2);
+    ctx.lineTo(barX - 8, py + panelH - 10);
+    ctx.moveTo(resultX - 8, py + rowStartY - 2);
+    ctx.lineTo(resultX - 8, py + panelH - 10);
+    ctx.moveTo(baseSpeedX - 26, py + rowStartY - 2);
+    ctx.lineTo(baseSpeedX - 26, py + panelH - 10);
+    ctx.moveTo(baseChanceX - 22, py + rowStartY - 2);
+    ctx.lineTo(baseChanceX - 22, py + panelH - 10);
+    ctx.stroke();
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
       const ry = py + rowStartY + i * rowH;
-      const lineY = ry + rowH * 0.62;
-      const barY = ry + rowH - 5;
+      const lineY = ry + rowH * 0.56;
+      const barY = Math.round(ry + rowH * 0.5 - barH * 0.5);
       const isLockedRow = !row.unlocked && row.type !== 'militia' && row.type !== 'candle';
       const rowBg = isLockedRow
         ? (i % 2 === 0 ? '#161c29e2' : '#0f1826e2')
@@ -8862,56 +8918,41 @@ export class GameRenderer {
       ctx.fillStyle = labelColor;
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
+      const active = Math.max(0, Number(row.activeCount) || 0);
+      const rowLabelText = active > 0 ? `${row.label} x${active}` : row.label;
       const fittedRowLabel = this.fitUpgradeCardText(
-        row.label,
+        rowLabelText,
         Math.max(18, chipX - colLabelX - 6),
         '9px sans-serif'
       );
       ctx.fillText(fittedRowLabel, colLabelX, lineY);
 
-      const active = Math.max(0, Number(row.activeCount) || 0);
-      ctx.save();
-      ctx.font = 'bold 8px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      const activeBadgeText = `${active}`;
-      const activeBadgePadX = 3;
-      const activeBadgeIconSlotW = 12;
-      const activeBadgeW = Math.ceil(ctx.measureText(activeBadgeText).width) + activeBadgePadX * 2 + activeBadgeIconSlotW;
-      const activeBadgeH = 10;
-      const activeBadgeX = px + panelW - activeBadgeW - 10;
-      const activeBadgeY = ry + (rowH - activeBadgeH) * 0.5;
-      ctx.restore();
-
-      let rowStatusTag = '';
+      let rowStatusTag = 'WAIT';
       let rowStatusColor = '#9da8ba';
       if (isLockedRow) {
         rowStatusTag = 'LOCK';
         rowStatusColor = '#d8b59d';
-      } else if (row.candleActive) {
-        rowStatusTag = 'ON';
-        rowStatusColor = '#ffe8a6';
       } else if (row.lastRollSuccess === true) {
-        rowStatusTag = 'OK';
+        rowStatusTag = 'SUCCESS';
         rowStatusColor = '#8affcf';
       } else if (row.lastRollSuccess === false) {
-        rowStatusTag = 'NO';
-        rowStatusColor = '#ffb9a9';
-      } else if (row.every <= 1) {
-        rowStatusTag = 'ON';
-        rowStatusColor = '#8affcf';
+        rowStatusTag = 'FAIL';
+        rowStatusColor = row.lastRollDebuffCausedFail ? '#f09a2f' : '#ffb9a9';
+      } else if (row.candleActive || row.every <= 1) {
+        rowStatusTag = 'READY';
+        rowStatusColor = '#ffe8a6';
       }
       if (rowStatusTag) {
-        const statusMaxW = Math.max(22, activeBadgeX - statusX - 10);
+        const statusMaxW = Math.max(24, resultW);
         const fittedStatusText = this.fitUpgradeCardText(
           rowStatusTag,
           statusMaxW,
-          '8px sans-serif'
+          '7px sans-serif'
         );
         ctx.fillStyle = rowStatusColor;
-        ctx.font = '8px sans-serif';
+        ctx.font = '7px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(fittedStatusText, statusX, lineY);
+        ctx.fillText(fittedStatusText, resultX, lineY);
       }
 
       const chanceValue = Number.isFinite(row.rollActualChance)
@@ -8921,13 +8962,8 @@ export class GameRenderer {
           : (row.type === 'militia' ? 1 : null));
       const chanceText = chanceValue == null ? '--' : `${Math.round(chanceValue * 100)}%`;
       const countdownText = row.unlocked ? this.barracksCountdownText(row.etaSec) : '--';
-      const infoText = `${countdownText} ${chanceText}`;
-      const infoMaxW = Math.max(28, activeBadgeX - statusX - 44);
-      const fittedInfoText = this.fitUpgradeCardText(infoText, infoMaxW, '7px sans-serif');
-      ctx.fillStyle = row.unlocked ? '#9fc8ef' : '#7f8ba0';
-      ctx.font = '7px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(fittedInfoText, activeBadgeX - 6, lineY);
+      const spawnText = `${countdownText} ${chanceText}`;
+      const fittedSpawnText = this.fitUpgradeCardText(spawnText, Math.max(26, barW - 8), 'bold 7px sans-serif');
 
       const cadenceDeltaFx = this.barracksCadenceDeltaFxForRow(side, row.type, nowMs);
       if (cadenceDeltaFx && row.unlocked && row.type !== 'militia') {
@@ -8939,7 +8975,7 @@ export class GameRenderer {
         ctx.fillStyle = deltaSeconds < 0 ? '#86f3bf' : '#ffb9a9';
         ctx.font = 'bold 7px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(signedText, activeBadgeX - 6, lineY - 6 + cadenceDeltaFx.yShift);
+        ctx.fillText(signedText, barX + barW - 2, lineY - 7 + cadenceDeltaFx.yShift);
         ctx.restore();
       }
 
@@ -8961,6 +8997,42 @@ export class GameRenderer {
           ctx.stroke();
         }
       }
+
+      ctx.fillStyle = row.unlocked ? '#dce9ff' : '#a4afbe';
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(fittedSpawnText, barX + barW * 0.5, barY + barH * 0.5 + 0.2);
+
+      const baseSpeedSeconds = Number(row.baseCycleSeconds);
+      const baseSpeedText = Number.isFinite(baseSpeedSeconds) && baseSpeedSeconds > 0
+        ? this.barracksCompactSeconds(baseSpeedSeconds)
+        : '--';
+      const baseSpeedNorm = Number.isFinite(baseSpeedSeconds) && baseSpeedSeconds > 0
+        ? (
+          speedRangeValid
+            ? clamp01(1 - ((baseSpeedSeconds - baseSpeedMin) / Math.max(0.0001, baseSpeedMax - baseSpeedMin)))
+            : 0.5
+        )
+        : 0.5;
+      const baseSpeedColor = Number.isFinite(baseSpeedSeconds) && baseSpeedSeconds > 0
+        ? this.barracksHeatColor(baseSpeedNorm, row.unlocked ? 0.96 : 0.6)
+        : '#7f8ba0';
+      ctx.fillStyle = baseSpeedColor;
+      ctx.font = '7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(baseSpeedText, baseSpeedX, lineY);
+
+      const baseChanceValue = Number.isFinite(row.rollChance)
+        ? clamp01(row.rollChance)
+        : (row.type === 'militia' ? 1 : null);
+      const baseChanceText = baseChanceValue == null ? '--' : `${Math.round(baseChanceValue * 100)}%`;
+      const baseChanceColor = baseChanceValue == null
+        ? '#7f8ba0'
+        : this.barracksHeatColor(baseChanceValue, row.unlocked ? 0.96 : 0.6);
+      ctx.fillStyle = baseChanceColor;
+      ctx.fillText(baseChanceText, baseChanceX, lineY);
+
       this.drawBarracksMetaChips(
         chipX,
         lineY,
@@ -8968,27 +9040,6 @@ export class GameRenderer {
         this.barracksMetaChipsForRow(sideState, row),
         { compact: true }
       );
-
-      // Icon + count badge so the number clearly maps to this row's unit type.
-      ctx.save();
-      ctx.font = 'bold 8px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = active > 0 ? '#153526' : '#1a2334';
-      ctx.fillRect(activeBadgeX, activeBadgeY, activeBadgeW, activeBadgeH);
-      ctx.strokeStyle = active > 0 ? '#5fd78c' : '#5f7393';
-      ctx.lineWidth = 0.9;
-      ctx.strokeRect(activeBadgeX + 0.5, activeBadgeY + 0.5, activeBadgeW - 1, activeBadgeH - 1);
-      const activeGlyphX = activeBadgeX + activeBadgePadX + activeBadgeIconSlotW * 0.5;
-      const activeGlyphY = activeBadgeY + activeBadgeH * 0.52;
-      this.drawBarracksRowGlyph(row.type, rowGlyph, activeGlyphX, activeGlyphY, 3.8, '#1f2230');
-      ctx.fillStyle = active > 0 ? '#8dffab' : '#b2c2d8';
-      ctx.fillText(
-        activeBadgeText,
-        activeBadgeX + activeBadgePadX + activeBadgeIconSlotW,
-        activeBadgeY + activeBadgeH * 0.52
-      );
-      ctx.restore();
     }
 
     ctx.strokeStyle = '#f2e4b24a';
