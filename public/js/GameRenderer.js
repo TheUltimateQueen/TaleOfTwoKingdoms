@@ -7454,7 +7454,6 @@ export class GameRenderer {
       ? candleFallbackSeconds
       : baseFallbackSeconds;
     const isMilitia = row?.type === 'militia';
-    const supportSortUsesDisplayChance = Boolean(specialType && SUPPORT_SPECIAL_TYPE_SET.has(specialType));
     const displayChance = isMilitia
       ? 1
       : (Number.isFinite(Number(row?.rollChance))
@@ -7465,9 +7464,7 @@ export class GameRenderer {
       : (Number.isFinite(Number(row?.rollActualChance))
         ? Math.max(0, Math.min(0.99, Number(row.rollActualChance)))
         : displayChance);
-    const sortChance = supportSortUsesDisplayChance
-      ? displayChance
-      : actualChance;
+    const sortChance = actualChance;
     const safeSortChance = Number.isFinite(sortChance) && sortChance > 0 ? sortChance : 0;
 
     const baseExpectedSeconds = this.barracksTypedValueForTypes(sideState, typeKeys, [
@@ -7492,6 +7489,7 @@ export class GameRenderer {
     ]);
     const cadenceBaseEvery = Number(cadenceEntry?.baseEvery);
     const cadenceCurrentEvery = Number(cadenceEntry?.currentEvery);
+    const cadenceMatchMultiplier = Number(cadenceEntry?.matchMultiplier);
     const cadenceDeltaRatio = Number(cadenceEntry?.deltaRatio);
     const cadenceRemainingSpawns = Number(cadenceEntry?.remainingSpawns);
     const baseCycleValue = Number.isFinite(cadenceBaseEvery)
@@ -7523,9 +7521,24 @@ export class GameRenderer {
       'candleSpawnEveryByType',
     ]);
 
-    const baseCycleSeconds = Number.isFinite(baseCycleValue)
-      ? Math.max(0.0001, Number(baseCycleValue) * spawnEvery)
-      : baseFallbackSeconds;
+    const baseNoJitterCycleValue = Number.isFinite(cadenceBaseEvery) && cadenceBaseEvery > 0
+      ? Math.max(
+        0.0001,
+        cadenceBaseEvery
+          * (Number.isFinite(cadenceMatchMultiplier) && cadenceMatchMultiplier > 0
+            ? cadenceMatchMultiplier
+            : 1)
+      )
+      : (
+        Number.isFinite(baseFallbackCycles) && baseFallbackCycles > 0
+          ? Math.max(0.0001, Number(baseFallbackCycles))
+          : (
+            Number.isFinite(baseCycleValue) && baseCycleValue > 0
+              ? Math.max(0.0001, Number(baseCycleValue))
+              : Math.max(0.0001, Number(currentCycleValue) || 0.0001)
+          )
+      );
+    const baseCycleSeconds = Math.max(0.0001, baseNoJitterCycleValue * spawnEvery);
     const currentCycleSeconds = Number.isFinite(currentCycleValue)
       ? Math.max(0.0001, Number(currentCycleValue) * spawnEvery)
       : currentFallbackSeconds;
@@ -7542,7 +7555,7 @@ export class GameRenderer {
       ? Math.max(0.0001, Number(nextExpectedSeconds))
       : fallbackNextExpectedSeconds;
     const resolvedSortMetric = Number.isFinite(resolvedNextExpectedSeconds)
-      ? resolvedNextExpectedSeconds
+      ? (safeSortChance > 0 ? (baseCycleSeconds / safeSortChance) : Infinity)
       : Infinity;
     const speedDeltaRatio = Number.isFinite(cadenceDeltaRatio)
       ? -cadenceDeltaRatio
@@ -7564,7 +7577,7 @@ export class GameRenderer {
       nextExpectedSeconds: resolvedNextExpectedSeconds,
       speedDeltaRatio,
       sortMetric: resolvedSortMetric,
-      sortChanceUsesDisplayChance: supportSortUsesDisplayChance,
+      sortChanceUsesDisplayChance: false,
     };
   }
 
@@ -7639,11 +7652,9 @@ export class GameRenderer {
       if (!key.startsWith(`${sideKey}:`)) continue;
       if (!rowKeys.has(key)) this.barracksPrevCycleSecondsByRow.delete(key);
     }
-    for (const [key, fx] of this.barracksCadenceDeltaFx) {
+    for (const key of this.barracksCadenceDeltaFx.keys()) {
       if (!key.startsWith(`${sideKey}:`)) continue;
-      const ageMs = nowMs - (Number(fx?.startMs) || 0);
-      const ttlMs = Math.max(1, Number(fx?.ttlMs) || BARRACKS_CADENCE_DELTA_FLASH_TTL_MS);
-      if (!rowKeys.has(key) || ageMs >= ttlMs) this.barracksCadenceDeltaFx.delete(key);
+      if (!rowKeys.has(key)) this.barracksCadenceDeltaFx.delete(key);
     }
   }
 
@@ -7664,18 +7675,14 @@ export class GameRenderer {
     const fx = this.barracksCadenceDeltaFx.get(key);
     if (!fx || typeof fx !== 'object') return null;
     const deltaSeconds = Number(fx.deltaSeconds);
-    const startMs = Number(fx.startMs) || 0;
-    const ttlMs = Math.max(1, Number(fx.ttlMs) || BARRACKS_CADENCE_DELTA_FLASH_TTL_MS);
-    const ageMs = nowMs - startMs;
-    if (!Number.isFinite(deltaSeconds) || ageMs < 0 || ageMs >= ttlMs) {
+    if (!Number.isFinite(deltaSeconds)) {
       this.barracksCadenceDeltaFx.delete(key);
       return null;
     }
-    const p = clamp01(ageMs / ttlMs);
     return {
       deltaSeconds,
-      alpha: 1 - p,
-      yShift: -4 * p,
+      alpha: 1,
+      yShift: 0,
     };
   }
 
@@ -8849,7 +8856,8 @@ export class GameRenderer {
       if (failType && failTtl > 0) this.drawSpecialRollTypeBadge(failType, px + panelW - 20, py + 56, side);
     }
 
-    const colLabelX = px + 28;
+    const countX = px + 10;
+    const colLabelX = px + 34;
     const chipX = px + 82;
     const chipW = 70;
     const barX = px + 160;
@@ -8880,6 +8888,8 @@ export class GameRenderer {
     ctx.fillStyle = '#7f93b1';
     ctx.font = 'bold 6px sans-serif';
     ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('#', countX, headerY);
     ctx.textAlign = 'left';
     ctx.fillText('UNIT', colLabelX, headerY);
     ctx.textAlign = 'center';
@@ -8916,15 +8926,20 @@ export class GameRenderer {
       ctx.fillRect(px + 6, ry, panelW - 12, rowH - 1);
 
       const rowGlyph = BARRACKS_ROW_GLYPH_BY_TYPE[row.type] || 'unitLevel';
-      const iconX = px + 16;
+      const iconX = px + 22;
       const iconY = ry + rowH * 0.52;
       this.drawBarracksRowGlyph(row.type, rowGlyph, iconX, iconY, 5.8, '#1f2230');
+
+      const active = Math.max(0, Number(row.activeCount) || 0);
+      ctx.fillStyle = active > 0 ? '#f3e7c2' : '#7f8ba0';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(active), countX, lineY);
 
       ctx.fillStyle = labelColor;
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'left';
-      const active = Math.max(0, Number(row.activeCount) || 0);
-      const rowLabelText = active > 0 ? `${row.label} x${active}` : row.label;
+      const rowLabelText = row.label;
       const fittedRowLabel = this.fitUpgradeCardText(
         rowLabelText,
         Math.max(18, chipX - colLabelX - 6),

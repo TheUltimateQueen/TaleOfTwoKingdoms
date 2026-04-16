@@ -144,7 +144,7 @@ const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const BASIC_SPECIAL_TYPE_SET = new Set(BASIC_SPECIAL_SPAWN_TYPES);
 const SPECIAL_CADENCE_MATCH_MULT_MIN = 0.5;
 const SPECIAL_CADENCE_MATCH_MULT_MAX = 1.5;
-const SPECIAL_CADENCE_JITTER_MAX = 0.2;
+const SPECIAL_CADENCE_JITTER_MAX = 0.3;
 const SPECIAL_CADENCE_JITTER_BELL_SAMPLES = 6;
 const BASIC_SPECIAL_SHARED_BASE_CENTER = 30;
 const BASIC_SPECIAL_SHARED_BASE_VARIANCE = 15;
@@ -908,6 +908,8 @@ class GameRoom {
     this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
+    this.specialCadenceSharedRollByType = {};
+    for (const type of SPECIAL_CADENCE_TRACKED_TYPES) this.specialCadenceSharedRollForType(type);
 
     this.arrows = [];
     this.minions = [];
@@ -2082,6 +2084,8 @@ class GameRoom {
     this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
+    this.specialCadenceSharedRollByType = {};
+    for (const type of SPECIAL_CADENCE_TRACKED_TYPES) this.specialCadenceSharedRollForType(type);
     this.gameOver = false;
     this.winner = null;
     this.t = 0;
@@ -5921,6 +5925,36 @@ class GameRoom {
     return side.specialSpawnCadenceByType;
   }
 
+  ensureSpecialCadenceSharedRollMap() {
+    if (!this.specialCadenceSharedRollByType || typeof this.specialCadenceSharedRollByType !== 'object') {
+      this.specialCadenceSharedRollByType = {};
+    }
+    return this.specialCadenceSharedRollByType;
+  }
+
+  specialCadenceSharedRollForType(type) {
+    const key = typeof type === 'string' ? type : '';
+    const map = this.ensureSpecialCadenceSharedRollMap();
+    const existing = map[key];
+    const existingMatch = Number(existing?.matchMultiplier);
+    const existingJitter = Number(existing?.jitterRatio);
+    if (
+      Number.isFinite(existingMatch)
+      && Number.isFinite(existingJitter)
+    ) {
+      return {
+        matchMultiplier: roundTo(clamp(existingMatch, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3),
+        jitterRatio: roundTo(clamp(existingJitter, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX), 3),
+      };
+    }
+    const generated = {
+      matchMultiplier: roundTo(randomCadenceMatchMultiplier(), 3),
+      jitterRatio: roundTo(randomCadenceJitterRatio(), 3),
+    };
+    map[key] = generated;
+    return generated;
+  }
+
   specialSpawnBaseEveryForType(side, type, matchTimeSec = this.t) {
     const s = side || null;
     if (type === 'candle') return this.statCandleEvery(s);
@@ -5976,7 +6010,7 @@ class GameRoom {
       }
       existing.matchMultiplier = Number.isFinite(existing.matchMultiplier)
         ? roundTo(clamp(Number(existing.matchMultiplier), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3)
-        : roundTo(randomCadenceMatchMultiplier(), 3);
+        : this.specialCadenceSharedRollForType(type).matchMultiplier;
       existing.baseEvery = null;
       existing.currentEvery = null;
       existing.jitterRatio = null;
@@ -5988,7 +6022,8 @@ class GameRoom {
     }
 
     const baseEvery = this.specialSpawnBaseEveryForType(side, type, matchTimeSec);
-    const matchMultiplier = roundTo(randomCadenceMatchMultiplier(), 3);
+    const sharedRoll = this.specialCadenceSharedRollForType(type);
+    const matchMultiplier = sharedRoll.matchMultiplier;
     if (!Number.isFinite(baseEvery) || baseEvery <= 0) {
       const entry = {
         baseEvery: null,
@@ -6004,7 +6039,7 @@ class GameRoom {
       return entry;
     }
 
-    const jitterRatio = roundTo(randomCadenceJitterRatio(), 3);
+    const jitterRatio = sharedRoll.jitterRatio;
     const currentEvery = Math.max(1, baseEvery * matchMultiplier * (1 + jitterRatio));
     const progress = Math.max(0, Number(progressMap[type]) || 0);
     const entry = {
@@ -6029,7 +6064,7 @@ class GameRoom {
     const prev = cadenceMap[type] && typeof cadenceMap[type] === 'object' ? cadenceMap[type] : {};
     const matchMultiplier = Number.isFinite(prev.matchMultiplier)
       ? clamp(Number(prev.matchMultiplier), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX)
-      : randomCadenceMatchMultiplier();
+      : this.specialCadenceSharedRollForType(type).matchMultiplier;
     const jitterRatio = randomCadenceJitterRatio();
     const baseEvery = this.specialSpawnBaseEveryForType(side, type, matchTimeSec);
     const progress = Math.max(0, Number(carryProgress) || 0);
