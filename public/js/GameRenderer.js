@@ -261,15 +261,7 @@ const SPECIAL_REPEAT_EVERY_BONUS_MAX = 0.24;
 const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
   shield: 0.02,
 });
-const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set([
-  'necrominion',
-  'gunner',
-  'rider',
-  'digger',
-  'monk',
-  'shield',
-  'president',
-]);
+const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set(SPECIAL_SPAWN_QUEUE_ORDER);
 
 const BARRACKS_ROW_GLYPH_BY_TYPE = {
   militia: 'unitLevel',
@@ -7740,7 +7732,8 @@ export class GameRenderer {
     const power = Math.max(1, Number(sideState?.powerLevel) || 1);
     const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
     const golemTech = Math.floor((spawn + hp + power + resource) / 7);
-    const baseEvery = Math.max(30, 46 - golemTech * 2);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, 'stonegolem');
+    const baseEvery = Math.max(30, 46 - golemTech * 2) * repeatMul;
     return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
   }
 
@@ -7872,7 +7865,8 @@ export class GameRenderer {
     }
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
-      return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10, matchTimeSec);
+      const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'hero');
+      return this.scaledSpecialEveryForUi(Math.max(38, 56 - Math.floor((unit + power + eco) / 7)) * 10 * repeatMul, matchTimeSec);
     }
     if (type === 'president') {
       return this.basicSpecialTrainingEvery(s, 'president', matchTimeSec);
@@ -7880,10 +7874,19 @@ export class GameRenderer {
     if (type === 'balloon') {
       if (balloon <= 0) return Infinity;
       const airTech = Math.floor((spawn + power + balloon + eco) / 8);
-      return this.scaledSpecialEveryForUi(Math.max(8, 18 - balloon * 2 - airTech), matchTimeSec);
+      const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'balloon');
+      return this.scaledSpecialEveryForUi(Math.max(8, 18 - balloon * 2 - airTech) * repeatMul, matchTimeSec);
     }
-    if (type === 'dragon') return dragon <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(34, 68 - dragon * 5 - mythicPressure * 2), matchTimeSec);
-    if (type === 'super') return sup <= 0 ? Infinity : this.scaledSpecialEveryForUi(Math.max(28, 58 - sup * 4), matchTimeSec);
+    if (type === 'dragon') {
+      if (dragon <= 0) return Infinity;
+      const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'dragon');
+      return this.scaledSpecialEveryForUi(Math.max(34, 68 - dragon * 5 - mythicPressure * 2) * repeatMul, matchTimeSec);
+    }
+    if (type === 'super') {
+      if (sup <= 0) return Infinity;
+      const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'super');
+      return this.scaledSpecialEveryForUi(Math.max(28, 58 - sup * 4) * repeatMul, matchTimeSec);
+    }
     return Infinity;
   }
 

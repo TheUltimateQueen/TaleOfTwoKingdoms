@@ -43,6 +43,5 @@ export const SPAWN_LEVEL_EFFECTIVE_CAP = Math.max(
 export const UPGRADE_LEVEL_CAPS = Object.freeze({
   volleyLevel: 2,
   spawnLevel: SPAWN_LEVEL_EFFECTIVE_CAP,
-  balloonLevel: 4,
   dragonSuperBreathLevel: 1,
 });

@@ -354,15 +354,7 @@ const SPECIAL_REPEAT_EVERY_BONUS_MAX = 0.24;
 const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
   shield: 0.02,
 });
-const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set([
-  'necrominion',
-  'gunner',
-  'rider',
-  'digger',
-  'monk',
-  'shield',
-  'president',
-]);
+const SPECIAL_REPEAT_EVERY_TYPE_SET = new Set(SPECIAL_SPAWN_QUEUE_ORDER);
 const SPECIAL_FAIL_TTL = 5;
 const SPECIAL_ROLL_TTL = 6;
 const PRESIDENT_RANDOM_LINE_INTERVAL = 5;
@@ -2778,7 +2770,8 @@ class GameRoom {
     const power = Math.max(1, Number(side?.powerLevel) || 1);
     const resource = Math.max(1, Number(side?.resourceLevel) || 1);
     const golemTech = Math.floor((spawn + hp + power + resource) / 7);
-    const baseEvery = Math.max(30, 46 - golemTech * 2);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'stonegolem');
+    const baseEvery = Math.max(30, 46 - golemTech * 2) * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side, 0.88);
   }
 
@@ -5733,14 +5726,8 @@ class GameRoom {
 
   basicSpecialBaseEveryByTypeForSide(side = null) {
     const resolved = {};
-    const sideSource = side?.specialBasicBaseEveryByType;
     const globalSource = this.basicSpecialBaseEveryByType;
     for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
-      const sideValue = Number(sideSource?.[type]);
-      if (Number.isFinite(sideValue) && sideValue > 0) {
-        resolved[type] = roundTo(sideValue, 3);
-        continue;
-      }
       const globalValue = Number(globalSource?.[type]);
       if (Number.isFinite(globalValue) && globalValue > 0) {
         resolved[type] = roundTo(globalValue, 3);
@@ -5827,7 +5814,8 @@ class GameRoom {
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
     const mythicPressure = Math.floor((side.powerLevel + side.economyLevel) / 6);
-    const baseEvery = Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'dragon');
+    const baseEvery = Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2) * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -5855,7 +5843,8 @@ class GameRoom {
 
   statHeroEvery(side) {
     const mythicTech = Math.floor((side.unitLevel + side.powerLevel + side.economyLevel) / 7);
-    const baseEvery = Math.max(38, 56 - mythicTech) * 10;
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'hero');
+    const baseEvery = Math.max(38, 56 - mythicTech) * 10 * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -5867,7 +5856,8 @@ class GameRoom {
     if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
     const level = Math.max(1, Number(side?.balloonLevel) || 1);
     const airTech = Math.floor((side.spawnLevel + side.powerLevel + level + side.economyLevel) / 8);
-    const baseEvery = Math.max(8, 18 - level * 2 - airTech);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'balloon');
+    const baseEvery = Math.max(8, 18 - level * 2 - airTech) * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -5877,7 +5867,8 @@ class GameRoom {
 
   statSuperEvery(side) {
     if (side.superMinionLevel <= 0) return Infinity;
-    const baseEvery = Math.max(28, 58 - side.superMinionLevel * 4);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'super');
+    const baseEvery = Math.max(28, 58 - side.superMinionLevel * 4) * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
