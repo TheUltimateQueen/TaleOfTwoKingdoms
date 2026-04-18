@@ -145,8 +145,9 @@ const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const BASIC_SPECIAL_TYPE_SET = new Set(BASIC_SPECIAL_SPAWN_TYPES);
-const TIER2_SPECIAL_SPAWN_TYPES = Object.freeze(['dragon', 'shield', 'super', 'balloon']);
+const TIER2_SPECIAL_SPAWN_TYPES = Object.freeze(['dragon', 'shield', 'super', 'balloon', 'candle']);
 const TIER2_SPECIAL_TYPE_SET = new Set(TIER2_SPECIAL_SPAWN_TYPES);
+const SPECIAL_RANDOM_CHANCE_TYPES = Object.freeze([...SPECIAL_SPAWN_QUEUE_ORDER, 'candle']);
 const SPECIAL_CADENCE_MATCH_MULT_MIN = 0.5;
 const SPECIAL_CADENCE_MATCH_MULT_MAX = 1.5;
 const SPECIAL_CADENCE_JITTER_MAX = 0.3;
@@ -159,6 +160,7 @@ const BASIC_SPECIAL_BASE_CHANCE_MIN = 0.4;
 const BASIC_SPECIAL_BASE_CHANCE_MAX = 0.6;
 const TIER2_SPECIAL_BASE_CHANCE_MIN = 0.1;
 const TIER2_SPECIAL_BASE_CHANCE_MAX = 0.3;
+const CANDLE_TIER2_CADENCE_MULT = 2;
 const SPECIAL_CADENCE_TRACKED_TYPES = Object.freeze([
   ...SPECIAL_SPAWN_QUEUE_ORDER,
   'candle',
@@ -351,6 +353,7 @@ const STONE_GOLEM_BITE_RELEASE_LOCK_TTL = 0.55;
 const MINION_HIT_FLASH_TTL = 0.18;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
+const SPECIAL_TIER2_COOLDOWN_END_MULT = 0.4;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
@@ -376,7 +379,6 @@ const CANDLE_PICKUP_RANGE = 28;
 const CANDLE_RECRUIT_RANGE = 210;
 const CANDLE_SPAWN_OFFSET = 56;
 const CANDLE_CART_HALF_W = 34;
-const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_DELIVER_FUSE = 1.1;
 const CANDLE_FIRE_RANGE = 250;
 const CANDLE_FIRE_INTERVAL = 1.22 / 3;
@@ -552,15 +554,22 @@ function randomTier2SpecialBaseEvery() {
   return min + Math.random() * (max - min);
 }
 
+function randomTier2SpecialBaseEveryForType(type = null) {
+  const key = typeof type === 'string' ? type : '';
+  const base = randomTier2SpecialBaseEvery();
+  if (key === 'candle') return base * CANDLE_TIER2_CADENCE_MULT;
+  return base;
+}
+
 function randomTier2SpecialBaseEveryByType() {
   return Object.fromEntries(
-    TIER2_SPECIAL_SPAWN_TYPES.map((type) => [type, roundTo(randomTier2SpecialBaseEvery(), 3)])
+    TIER2_SPECIAL_SPAWN_TYPES.map((type) => [type, roundTo(randomTier2SpecialBaseEveryForType(type), 3)])
   );
 }
 
 function randomSpecialBaseChanceByType() {
   const values = {};
-  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+  for (const type of SPECIAL_RANDOM_CHANCE_TYPES) {
     if (BASIC_SPECIAL_TYPE_SET.has(type)) {
       values[type] = roundTo(
         BASIC_SPECIAL_BASE_CHANCE_MIN + Math.random() * (BASIC_SPECIAL_BASE_CHANCE_MAX - BASIC_SPECIAL_BASE_CHANCE_MIN),
@@ -699,7 +708,7 @@ function serializeSideState(side) {
   for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
     specialBasicBaseEveryByType[type] = finiteOrNull(specialBasicBaseEveryByTypeRaw[type], 3);
   }
-  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+  for (const type of SPECIAL_RANDOM_CHANCE_TYPES) {
     specialBaseChanceByType[type] = finiteOrNull(specialBaseChanceByTypeRaw[type], 3);
   }
   for (const type of TIER2_SPECIAL_SPAWN_TYPES) {
@@ -2826,17 +2835,14 @@ class GameRoom {
   }
 
   statCandleEvery(side) {
-    const spawnTech = Math.max(1, Number(side?.spawnLevel) || 1);
-    const resourceTech = Math.max(1, Number(side?.resourceLevel) || 1);
-    const eco = Math.max(0, Number(side?.economyLevel) || 0);
-    const tech = Math.floor((spawnTech + resourceTech + eco) / 6);
-    const baseEvery = Math.max(24, 35 - tech);
-    return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
+    const baseEvery = this.tier2SpecialBaseEveryForType('candle');
+    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
   }
 
   statCandleSpawnChance(side) {
+    const base = clamp(Number(this.specialBaseChanceForType('candle')) || CANDLE_SPAWN_BASE_CHANCE, 0, 0.99);
     const bonus = clamp(Number(side?.debugCandleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
-    return clamp(CANDLE_SPAWN_BASE_CHANCE + bonus, CANDLE_SPAWN_BASE_CHANCE, 0.92);
+    return clamp(base + bonus, base, 0.92);
   }
 
   statStoneGolemEvery(side) {
@@ -5889,29 +5895,32 @@ class GameRoom {
     }
     const value = Number(this.tier2SpecialBaseEveryByType[key]);
     if (Number.isFinite(value) && value > 0) return value;
-    const next = roundTo(randomTier2SpecialBaseEvery(), 3);
+    const next = roundTo(randomTier2SpecialBaseEveryForType(key), 3);
     this.tier2SpecialBaseEveryByType[key] = next;
     if (this.left && typeof this.left === 'object') this.left.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
     if (this.right && typeof this.right === 'object') this.right.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
     return next;
   }
 
-  statSpecialCooldownMultiplier(matchTimeSec = null) {
+  statSpecialCooldownMultiplier(matchTimeSec = null, endMult = SPECIAL_COOLDOWN_END_MULT) {
     const t = Number.isFinite(matchTimeSec) ? matchTimeSec : this.t;
     const safeT = Math.max(0, Number(t) || 0);
+    const startMult = SPECIAL_COOLDOWN_START_MULT;
+    const baseEnd = Number.isFinite(Number(endMult)) ? Number(endMult) : SPECIAL_COOLDOWN_END_MULT;
     const totalSteps = Math.max(1, Math.round(SPECIAL_COOLDOWN_RAMP_SECONDS / SPECIAL_COOLDOWN_STEP_SECONDS));
     const elapsedSteps = Math.min(totalSteps, Math.floor(safeT / SPECIAL_COOLDOWN_STEP_SECONDS));
-    const dropPerStep = (SPECIAL_COOLDOWN_START_MULT - SPECIAL_COOLDOWN_END_MULT) / totalSteps;
-    const mult = SPECIAL_COOLDOWN_START_MULT - elapsedSteps * dropPerStep;
-    return clamp(mult, SPECIAL_COOLDOWN_END_MULT, SPECIAL_COOLDOWN_START_MULT);
+    const dropPerStep = (startMult - baseEnd) / totalSteps;
+    const mult = startMult - elapsedSteps * dropPerStep;
+    return clamp(mult, Math.min(baseEnd, startMult), Math.max(baseEnd, startMult));
   }
 
-  scaleSpecialCooldownEvery(baseEvery, side = null, rampEffectScale = 1) {
+  scaleSpecialCooldownEvery(baseEvery, side = null, rampEffectScale = 1, endMult = SPECIAL_COOLDOWN_END_MULT) {
     if (!Number.isFinite(baseEvery)) return baseEvery;
-    const globalMult = this.statSpecialCooldownMultiplier();
+    const startMult = SPECIAL_COOLDOWN_START_MULT;
+    const rampBase = Number.isFinite(Number(endMult)) ? Number(endMult) : SPECIAL_COOLDOWN_END_MULT;
+    const globalMult = this.statSpecialCooldownMultiplier(null, rampBase);
     const effectScale = Math.max(0, Number(rampEffectScale) || 1);
-    const rampBase = SPECIAL_COOLDOWN_END_MULT;
-    const maxRampMult = rampBase + (SPECIAL_COOLDOWN_START_MULT - rampBase) * effectScale;
+    const maxRampMult = rampBase + (startMult - rampBase) * effectScale;
     const adjustedMult = clamp(
       rampBase + (globalMult - rampBase) * effectScale,
       Math.min(rampBase, maxRampMult),
@@ -5922,11 +5931,15 @@ class GameRoom {
     return Math.max(1, Math.round(scaled / mul));
   }
 
+  scaleTier2SpecialCooldownEvery(baseEvery, side = null) {
+    return this.scaleSpecialCooldownEvery(baseEvery, side, 1, SPECIAL_TIER2_COOLDOWN_END_MULT);
+  }
+
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'dragon');
     const baseEvery = this.tier2SpecialBaseEveryForType('dragon') * repeatMul;
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
   }
 
   statGunnerEvery(side) {
@@ -5948,7 +5961,7 @@ class GameRoom {
   statShieldEvery(side) {
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'shield');
     const baseEvery = this.tier2SpecialBaseEveryForType('shield') * repeatMul;
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
   }
 
   statHeroEvery(side) {
@@ -5966,7 +5979,7 @@ class GameRoom {
     if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'balloon');
     const baseEvery = this.tier2SpecialBaseEveryForType('balloon') * repeatMul;
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
   }
 
   statNecroEvery(side = null) {
@@ -5977,7 +5990,7 @@ class GameRoom {
     if (side.superMinionLevel <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'super');
     const baseEvery = this.tier2SpecialBaseEveryForType('super') * repeatMul;
-    return this.scaleSpecialCooldownEvery(baseEvery, side);
+    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
   }
 
   specialRepeatLevel(side, specialType) {

@@ -250,7 +250,7 @@ const SPECIAL_TYPE_TO_ROW_TYPE = Object.freeze(
   Object.fromEntries(Object.entries(ROW_TO_SPECIAL_TYPE).map(([rowType, specialType]) => [specialType, rowType]))
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
-const TIER2_SPECIAL_TYPE_SET = new Set(['dragon', 'shield', 'super', 'balloon']);
+const TIER2_SPECIAL_TYPE_SET = new Set(['dragon', 'shield', 'super', 'balloon', 'candle']);
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -305,7 +305,6 @@ const SPECIAL_SPAWN_QUEUE_PRIORITY = Object.freeze(
   Object.fromEntries(SPECIAL_SPAWN_QUEUE_ORDER.map((type, index) => [type, index]))
 );
 
-const CANDLE_SPAWN_COOLDOWN_MULT = 1.5;
 const CANDLE_SPAWN_BASE_CHANCE = 0.18;
 const STONE_GOLEM_UNLOCK_TOWER_HP_FRACTION = 0.5;
 
@@ -331,6 +330,7 @@ function upgradeCategory(type) {
 const GAME_OVER_CINEMATIC_MS = 4000;
 const SPECIAL_COOLDOWN_START_MULT = 1.5;
 const SPECIAL_COOLDOWN_END_MULT = 1;
+const SPECIAL_TIER2_COOLDOWN_END_MULT = 0.4;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const BARRACKS_CADENCE_DELTA_FLASH_TTL_MS = 5000;
@@ -350,6 +350,7 @@ const MAX_DEATH_GHOSTS = 110;
 const PRESIDENT_AURA_RANGE_SCALE = 0.25;
 const BASIC_SPECIAL_DEFAULT_BASE_EVERY = 30;
 const TIER2_SPECIAL_DEFAULT_BASE_EVERY = 108;
+const CANDLE_TIER2_CADENCE_MULT = 2;
 const MAX_REVIVE_SPIRITS = 90;
 const MAX_HEAL_CIRCLES = 42;
 const MAX_MILITIA_FOOD_FX = 380;
@@ -7790,13 +7791,9 @@ export class GameRenderer {
     return Math.max(0.4, 1 - bonus);
   }
 
-  candleEveryForSide(sideState) {
-    const spawn = Math.max(1, Number(sideState?.spawnLevel) || 1);
-    const resource = Math.max(1, Number(sideState?.resourceLevel) || 1);
-    const eco = Math.max(0, Number(sideState?.economyLevel) || 0);
-    const tech = Math.floor((spawn + resource + eco) / 6);
-    const baseEvery = Math.max(24, 35 - tech);
-    return Math.max(12, Math.round(baseEvery * CANDLE_SPAWN_COOLDOWN_MULT));
+  candleEveryForSide(sideState, matchTimeSec = 0) {
+    const baseEvery = this.tier2SpecialBaseEveryForType(sideState, 'candle');
+    return this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
   }
 
   stoneGolemEveryForSide(sideState, matchTimeSec = 0) {
@@ -7827,7 +7824,9 @@ export class GameRenderer {
     if (!TIER2_SPECIAL_TYPE_SET.has(specialType)) return Infinity;
     const byTypeValue = Number(sideState?.specialTier2BaseEveryByType?.[specialType]);
     if (Number.isFinite(byTypeValue) && byTypeValue > 0) return byTypeValue;
-    return TIER2_SPECIAL_DEFAULT_BASE_EVERY;
+    return specialType === 'candle'
+      ? TIER2_SPECIAL_DEFAULT_BASE_EVERY * CANDLE_TIER2_CADENCE_MULT
+      : TIER2_SPECIAL_DEFAULT_BASE_EVERY;
   }
 
   basicSpecialTrainingEvery(sideState, specialType, matchTimeSec = 0) {
@@ -7851,8 +7850,12 @@ export class GameRenderer {
   }
 
   candleSpawnChance(sideState) {
-    const chance = CANDLE_SPAWN_BASE_CHANCE;
-    return Math.max(CANDLE_SPAWN_BASE_CHANCE, Math.min(0.92, chance));
+    const rawBase = Number(sideState?.specialBaseChanceByType?.candle);
+    const base = Number.isFinite(rawBase)
+      ? rawBase
+      : CANDLE_SPAWN_BASE_CHANCE;
+    const bonus = Math.max(-0.2, Math.min(0.65, Number(sideState?.debugCandleChanceBonus) || 0));
+    return Math.max(base, Math.min(0.92, base + bonus));
   }
 
   specialSpawnChanceForRow(sideState, rowType) {
@@ -7886,18 +7889,24 @@ export class GameRenderer {
     return Math.max(0, Math.min(0.99, displayChance * mul));
   }
 
-  specialCooldownMultiplierAt(matchTimeSec = 0) {
+  specialCooldownMultiplierAt(matchTimeSec = 0, endMult = SPECIAL_COOLDOWN_END_MULT) {
     const safeT = Math.max(0, Number(matchTimeSec) || 0);
+    const startMult = SPECIAL_COOLDOWN_START_MULT;
+    const baseEnd = Number.isFinite(Number(endMult)) ? Number(endMult) : SPECIAL_COOLDOWN_END_MULT;
     const totalSteps = Math.max(1, Math.round(SPECIAL_COOLDOWN_RAMP_SECONDS / SPECIAL_COOLDOWN_STEP_SECONDS));
     const elapsedSteps = Math.min(totalSteps, Math.floor(safeT / SPECIAL_COOLDOWN_STEP_SECONDS));
-    const dropPerStep = (SPECIAL_COOLDOWN_START_MULT - SPECIAL_COOLDOWN_END_MULT) / totalSteps;
-    const mult = SPECIAL_COOLDOWN_START_MULT - elapsedSteps * dropPerStep;
-    return Math.max(SPECIAL_COOLDOWN_END_MULT, Math.min(SPECIAL_COOLDOWN_START_MULT, mult));
+    const dropPerStep = (startMult - baseEnd) / totalSteps;
+    const mult = startMult - elapsedSteps * dropPerStep;
+    return Math.max(Math.min(baseEnd, startMult), Math.min(Math.max(baseEnd, startMult), mult));
   }
 
-  scaledSpecialEveryForUi(baseEvery, matchTimeSec = 0) {
+  scaledSpecialEveryForUi(baseEvery, matchTimeSec = 0, endMult = SPECIAL_COOLDOWN_END_MULT) {
     if (!Number.isFinite(baseEvery)) return baseEvery;
-    return Math.max(1, Math.round(baseEvery * this.specialCooldownMultiplierAt(matchTimeSec)));
+    return Math.max(1, Math.round(baseEvery * this.specialCooldownMultiplierAt(matchTimeSec, endMult)));
+  }
+
+  scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec = 0) {
+    return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec, SPECIAL_TIER2_COOLDOWN_END_MULT);
   }
 
   failedSpecialLabel(type) {
@@ -7914,7 +7923,7 @@ export class GameRenderer {
     const sup = Math.max(0, Number(s.superMinionLevel) || 0);
     if (type === 'militia') return 1;
     if (type === 'candle') {
-      return this.candleEveryForSide(s);
+      return this.candleEveryForSide(s, matchTimeSec);
     }
     if (type === 'necro') return this.basicSpecialTrainingEvery(s, 'necrominion', matchTimeSec);
     if (type === 'gunner') {
@@ -7936,7 +7945,7 @@ export class GameRenderer {
     if (type === 'shield') {
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'shield');
       const baseEvery = this.tier2SpecialBaseEveryForType(s, 'shield') * repeatMul;
-      return this.scaledSpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
     }
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
@@ -7949,17 +7958,17 @@ export class GameRenderer {
     if (type === 'balloon') {
       if (balloon <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'balloon');
-      return this.scaledSpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'balloon') * repeatMul, matchTimeSec);
+      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'balloon') * repeatMul, matchTimeSec);
     }
     if (type === 'dragon') {
       if (dragon <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'dragon');
-      return this.scaledSpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'dragon') * repeatMul, matchTimeSec);
+      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'dragon') * repeatMul, matchTimeSec);
     }
     if (type === 'super') {
       if (sup <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'super');
-      return this.scaledSpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'super') * repeatMul, matchTimeSec);
+      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'super') * repeatMul, matchTimeSec);
     }
     return Infinity;
   }
