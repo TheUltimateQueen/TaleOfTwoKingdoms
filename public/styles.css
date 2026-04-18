@@ -564,11 +564,23 @@ button:hover {
   text-shadow: 0 1px 0 #fff4df88;
   box-shadow: 0 0 0 1px #f0b86754, 0 0 18px #f0a64a42;
   position: relative;
+  isolation: isolate;
   overflow: hidden;
 }
 
 .host-start-btn:not(.hidden) {
   animation: hostStartPulse 1.2s ease-in-out infinite;
+}
+
+.host-start-btn:not(.hidden)::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 8px;
+  border: 2px solid #ffe1a2cc;
+  opacity: 0;
+  pointer-events: none;
+  animation: hostStartRing 1.35s ease-out infinite;
 }
 
 .host-start-btn:not(.hidden)::after {
@@ -1815,11 +1827,26 @@ kbd {
 @keyframes hostStartPulse {
   0%, 100% {
     filter: saturate(1) brightness(1);
-    box-shadow: 0 0 0 1px #f0b86754, 0 0 18px #f0a64a42;
+    box-shadow: 0 0 0 1px #f0b86766, 0 0 20px #f0a64a4f;
   }
   50% {
-    filter: saturate(1.08) brightness(1.06);
-    box-shadow: 0 0 0 1px #ffc77872, 0 0 24px #f8ba5e67;
+    filter: saturate(1.12) brightness(1.09);
+    box-shadow: 0 0 0 1px #ffc77888, 0 0 30px #f8ba5e80;
+  }
+}
+
+@keyframes hostStartRing {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
   }
 }
 
