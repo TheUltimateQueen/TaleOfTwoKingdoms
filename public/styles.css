@@ -574,8 +574,9 @@ button:hover {
   background:
     linear-gradient(90deg, #ffffff00 0 47.5%, #ffffff7d 49.7%, #ffffff00 52.5%),
     linear-gradient(90deg, #ffffff00 0%, #ffffff54 50%, #ffffff00 100%);
-  opacity: 0.72;
-  animation: cpuSelectSweep 1.8s linear infinite;
+  opacity: 0;
+  animation: none;
+  transition: opacity 140ms ease;
 }
 
 #localKeyboardVsCpuBtn::after {
@@ -595,7 +596,7 @@ button:hover {
     linear-gradient(#d7bc84, #b69353) 0 10px / 24px 8px no-repeat;
   box-shadow: 0 0 0 1px #4f3a1873, 0 2px 4px #0000004d;
   transition: left 190ms ease;
-  animation: cpuCastleBounce 930ms ease-in-out infinite;
+  animation: none;
 }
 
 #localKeyboardVsCpuBtn.cpu-side-left {
@@ -629,8 +630,17 @@ button:hover {
   box-shadow: 0 0 0 1px #ffbac699, 0 0 22px #ff7f9680;
 }
 
-#localKeyboardVsCpuBtn.cpu-side-active {
-  animation: cpuSidePulse 1.2s ease-in-out infinite;
+#localKeyboardVsCpuBtn.cpu-side-hover-left::before,
+#localKeyboardVsCpuBtn.cpu-side-hover-right::before,
+#localKeyboardVsCpuBtn:hover::before {
+  opacity: 0.72;
+  animation: cpuSelectSweep 1.2s linear infinite;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-hover-left::after,
+#localKeyboardVsCpuBtn.cpu-side-hover-right::after,
+#localKeyboardVsCpuBtn:hover::after {
+  animation: cpuCastleBounce 930ms ease-in-out infinite;
 }
 
 #localCpuVsCpuBtn {

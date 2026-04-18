@@ -1340,7 +1340,7 @@ export class GameClient {
 
   localKeyboardModeLabel(mode = this.localKeyboardMode) {
     const normalized = this.normalizedLocalKeyboardMode(mode);
-    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) return 'Vs CPU';
+    if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) return 'Keyboard Vs CPU';
     if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) return 'CPU Vs CPU';
     return 'Keyboard 1v1';
   }
@@ -1362,7 +1362,8 @@ export class GameClient {
         ? 'right'
         : (this.localKeyboardVsCpuHoverSide === 'left' ? 'left' : null);
       const displaySide = hoverSide || selectedSide;
-      const sideText = selectedSide === 'right' ? 'Right Team' : 'Left Team';
+      const selectedSideText = selectedSide === 'right' ? 'Right Team' : 'Left Team';
+      const displaySideText = displaySide === 'right' ? 'Right Team' : 'Left Team';
       this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-left', displaySide === 'left');
       this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-right', displaySide === 'right');
       this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-hover-left', hoverSide === 'left');
@@ -1370,10 +1371,10 @@ export class GameClient {
       this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-active', isVsCpuActive);
       this.localKeyboardVsCpuBtn.dataset.side = displaySide;
       this.localKeyboardVsCpuBtn.dataset.selectedSide = selectedSide;
-      this.localKeyboardVsCpuBtn.setAttribute('aria-label', `Play Vs CPU. Click left side for Left Team or right side for Right Team. Selected: ${sideText}.`);
+      this.localKeyboardVsCpuBtn.setAttribute('aria-label', `Keyboard Vs CPU. Click left side for Left Team or right side for Right Team. Selected: ${selectedSideText}.`);
       this.localKeyboardVsCpuBtn.textContent = isVsCpuActive
-        ? `Restart Vs CPU (${sideText})`
-        : `Play Vs CPU (${sideText})`;
+        ? `Restart Keyboard Vs CPU (${displaySideText})`
+        : `Keyboard Vs CPU (${displaySideText})`;
     }
     if (this.localCpuVsCpuBtn) {
       this.localCpuVsCpuBtn.textContent = isCpuVsCpuActive
@@ -1408,7 +1409,7 @@ export class GameClient {
   }
 
   keyboardMatchHintText() {
-    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU (click left half for blue team or right half for red team), 3) CPU Vs CPU. Upgrade hotkeys: ${sideShortName('left', this.state.themeMode)} 1=left card, 2=right card | ${sideShortName('right', this.state.themeMode)} 9=left card, 0=right card (plus A/D and Left/Right in CPU vs CPU).`;
+    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Keyboard Vs CPU (click left half for blue team or right half for red team), 3) CPU Vs CPU. Upgrade hotkeys: ${sideShortName('left', this.state.themeMode)} 1=left card, 2=right card | ${sideShortName('right', this.state.themeMode)} 9=left card, 0=right card (plus A/D and Left/Right in CPU vs CPU).`;
   }
 
   keyboardActiveHintText(mode = this.localKeyboardMode) {
