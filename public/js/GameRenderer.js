@@ -12,7 +12,6 @@ import {
 } from './constants.js';
 import {
   DEFAULT_THEME_MODE,
-  normalizeThemeMode,
   sideBarracksLabel,
   sideDisplayName,
   sideVictoryLabel,
@@ -488,8 +487,8 @@ export class GameRenderer {
     return budget;
   }
 
-  setThemeMode(themeMode) {
-    const normalized = normalizeThemeMode(themeMode);
+  setThemeMode(_themeMode) {
+    const normalized = DEFAULT_THEME_MODE;
     const changed = normalized !== this.themeMode;
     this.themeMode = normalized;
     if (changed) {
@@ -676,7 +675,7 @@ export class GameRenderer {
   }
 
   isThemedEmpires() {
-    return this.themeMode === 'themed';
+    return true;
   }
 
   empireSpriteStyle(sideName) {
@@ -14055,7 +14054,7 @@ export class GameRenderer {
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    // Classic hot-air stripe/segments so normal mode reads as an actual balloon.
+    // Balloon shell segmentation for shape readability.
     ctx.strokeStyle = this.withAlpha(sidePalette.soft, themed ? 0.32 : 0.58);
     ctx.lineWidth = 1.2;
     for (let i = -2; i <= 2; i += 1) {
@@ -14101,7 +14100,7 @@ export class GameRenderer {
     ctx.stroke();
 
     if (!themed) {
-      // Classic wicker basket for normal mode.
+      // Wicker basket silhouette.
       ctx.fillStyle = basketFill;
       ctx.fillRect(x - r * 0.42, bodyY - r * 0.22, r * 0.84, r * 0.48);
       ctx.strokeStyle = basketStroke;
@@ -14324,7 +14323,7 @@ export class GameRenderer {
       }
     }
 
-    // Crew sprites are kept only for unthemed balloons.
+    // Crew sprites are optional for balloon variants.
     const crewY = bodyY - r * 0.08;
     if (!themed) {
       const leftCrewX = x - r * 0.2;
@@ -14373,7 +14372,7 @@ export class GameRenderer {
       const py = (1 - flight) * (1 - flight) * fromY + 2 * (1 - flight) * flight * midY + flight * flight * toY;
       const throwSize = r * 0.16;
       if (!themed) {
-        // Classic mode: launch a rock.
+        // Rock-style payload throw.
         const rockR = throwSize * 0.9;
         ctx.fillStyle = '#7f8895';
         ctx.beginPath();
@@ -14439,7 +14438,7 @@ export class GameRenderer {
       ctx.save();
       if (impactHold) ctx.globalAlpha = 0.8 - drop * 0.44;
       if (!themed) {
-        // Classic mode: dropped iron bomb.
+        // Iron bomb payload.
         const bombR = Math.max(bombFootprintH * 0.55, bombFootprintW * 0.2);
         ctx.fillStyle = '#2f3640';
         ctx.beginPath();

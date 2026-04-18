@@ -479,13 +479,10 @@ function weightedRandomFrom(entries = []) {
   return entries[entries.length - 1] || null;
 }
 
-function defaultCommitteeName(sideName = 'left', ordinal = 1, themeMode = DEFAULT_THEME_MODE) {
+function defaultCommitteeName(sideName = 'left', ordinal = 1) {
   const side = sideName === 'right' ? 'right' : 'left';
   const index = Math.max(1, Math.floor(Number(ordinal) || 1));
-  if (normalizeThemeMode(themeMode) === 'themed') {
-    return `${side === 'left' ? 'Bread Council' : 'Rice Council'} ${index}`;
-  }
-  return `${side === 'left' ? 'West Council' : 'East Council'} ${index}`;
+  return `${side === 'left' ? 'Bread Council' : 'Rice Council'} ${index}`;
 }
 
 function isDefaultCommitteeName(name) {
@@ -494,8 +491,6 @@ function isDefaultCommitteeName(name) {
   return (
     /^Bread Council \d+$/i.test(value)
     || /^Rice Council \d+$/i.test(value)
-    || /^West Council \d+$/i.test(value)
-    || /^East Council \d+$/i.test(value)
   );
 }
 
@@ -870,7 +865,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
 class GameRoom {
   constructor(id, baseUrl, options = {}) {
     this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
-    this.themeMode = normalizeThemeMode(options?.themeMode || options?.theme || DEFAULT_THEME_MODE);
+    this.themeMode = DEFAULT_THEME_MODE;
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.debugConfig = normalizeDebugConfig(options?.debugConfig || null);
     const left = makeSideState('left', this.archersPerSide);
@@ -1083,7 +1078,7 @@ class GameRoom {
         const member = committee[i];
         if (!member || !isDefaultCommitteeName(member.name)) continue;
         const ordinal = Number.isFinite(member.ordinal) ? member.ordinal : (i + 1);
-        const nextName = defaultCommitteeName(sideName, ordinal, this.themeMode);
+        const nextName = defaultCommitteeName(sideName, ordinal);
         member.name = nextName;
         member.voterName = nextName;
       }
@@ -2287,7 +2282,7 @@ class GameRoom {
 
     const committeeList = this.sideCommitteePlayers(side);
     const ordinal = committeeList.length + 1;
-    const voterName = name || defaultCommitteeName(side, ordinal, this.themeMode);
+    const voterName = name || defaultCommitteeName(side, ordinal);
     const committeeMember = {
       id: socketId,
       role: 'committee',

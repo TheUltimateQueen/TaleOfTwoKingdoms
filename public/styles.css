@@ -411,20 +411,6 @@ body.theme-themed .lobby-phone-side.east .lobby-phone-title {
   --controller-side-pill-text: #4f1d22;
 }
 
-#controllerPanel.controller-side-left.controller-side-unthemed {
-  --controller-side-edge: #5f9ed8;
-  --controller-side-bg: #152b45;
-  --controller-side-pill: #cce6ff;
-  --controller-side-pill-text: #14304b;
-}
-
-#controllerPanel.controller-side-right.controller-side-unthemed {
-  --controller-side-edge: #c77777;
-  --controller-side-bg: #3b1f27;
-  --controller-side-pill: #ffd9d9;
-  --controller-side-pill-text: #4f1d22;
-}
-
 body.controller-mode #controllerPanel {
   display: flex;
   flex-direction: column;

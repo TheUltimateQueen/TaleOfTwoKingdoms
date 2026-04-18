@@ -11,28 +11,21 @@ const CONTROLLER_STATE_EMIT_MS = 66;
 const ROOM_CREATE_COOLDOWN_MS = 800;
 const MAX_ACTIVE_ROOMS = 120;
 const THEME_MODE_THEMED = 'themed';
-const THEME_MODE_UNTHEMED = 'unthemed';
 const MAX_COMMITTEE_PLAYERS_PER_SIDE = 12;
 
-function normalizeThemeMode(value) {
-  return value === THEME_MODE_UNTHEMED ? THEME_MODE_UNTHEMED : THEME_MODE_THEMED;
+function normalizeThemeMode(_value) {
+  return THEME_MODE_THEMED;
 }
 
-function defaultArcherName(side, slot = 0, themeMode = THEME_MODE_THEMED) {
+function defaultArcherName(side, slot = 0) {
   const sideName = side === 'right' ? 'right' : 'left';
   const index = Math.max(1, Math.floor(Number(slot) || 0) + 1);
-  if (normalizeThemeMode(themeMode) === THEME_MODE_UNTHEMED) {
-    return `${sideName === 'left' ? 'West Archer' : 'East Archer'} ${index}`;
-  }
   return `${sideName === 'left' ? 'Bread Slinger' : 'Rice Flinger'} ${index}`;
 }
 
-function defaultCommitteeName(side, ordinal = 1, themeMode = THEME_MODE_THEMED) {
+function defaultCommitteeName(side, ordinal = 1) {
   const sideName = side === 'right' ? 'right' : 'left';
   const index = Math.max(1, Math.floor(Number(ordinal) || 1));
-  if (normalizeThemeMode(themeMode) === THEME_MODE_UNTHEMED) {
-    return `${sideName === 'left' ? 'West Council' : 'East Council'} ${index}`;
-  }
   return `${sideName === 'left' ? 'Bread Council' : 'Rice Council'} ${index}`;
 }
 
@@ -40,12 +33,8 @@ function isDefaultPlayerName(name) {
   const value = String(name || '').trim();
   if (!value) return false;
   return (
-    /^West Archer \d+$/i.test(value)
-    || /^East Archer \d+$/i.test(value)
-    || /^Bread Slinger \d+$/i.test(value)
+    /^Bread Slinger \d+$/i.test(value)
     || /^Rice Flinger \d+$/i.test(value)
-    || /^West Keyboard$/i.test(value)
-    || /^East Keyboard$/i.test(value)
     || /^Bread Keyboard$/i.test(value)
     || /^Rice Keyboard$/i.test(value)
   );
@@ -57,8 +46,6 @@ function isDefaultCommitteeName(name) {
   return (
     /^Bread Council \d+$/i.test(value)
     || /^Rice Council \d+$/i.test(value)
-    || /^West Council \d+$/i.test(value)
-    || /^East Council \d+$/i.test(value)
   );
 }
 
@@ -114,7 +101,7 @@ class ServerRoom {
   constructor(id, options = {}) {
     this.id = id;
     this.mode = options?.mode === '2v2' ? '2v2' : '1v1';
-    this.themeMode = normalizeThemeMode(options?.themeMode || options?.theme || THEME_MODE_THEMED);
+    this.themeMode = THEME_MODE_THEMED;
     this.archersPerSide = this.mode === '2v2' ? 2 : 1;
     this.display = null;
     this.players = { left: [], right: [] };
@@ -193,11 +180,11 @@ class ServerRoom {
   }
 
   defaultPlayerNameForSide(side, slot = 0) {
-    return defaultArcherName(side, slot, this.themeMode);
+    return defaultArcherName(side, slot);
   }
 
   defaultCommitteeNameForSide(side, ordinal = 1) {
-    return defaultCommitteeName(side, ordinal, this.themeMode);
+    return defaultCommitteeName(side, ordinal);
   }
 
   renameDefaultPlayersForTheme() {
@@ -549,18 +536,6 @@ class ServerRoom {
     return { ok: true, changed: previous !== next };
   }
 
-  setThemeMode(themeMode) {
-    const nextTheme = normalizeThemeMode(themeMode);
-    if (this.started) {
-      return { ok: false, message: 'Cannot change theme after the match has started.' };
-    }
-    if (nextTheme === this.themeMode) return { ok: true, changed: false };
-    this.themeMode = nextTheme;
-    this.renameDefaultPlayersForTheme();
-    this.renameDefaultCommitteePlayersForTheme();
-    return { ok: true, changed: true };
-  }
-
   removeSocket(socketId) {
     let changed = false;
     let removedDisplay = false;
@@ -715,8 +690,7 @@ class GameServer {
         while (this.rooms.has(id)) id = createRoomId();
 
         const roomMode = payload.mode === '2v2' ? '2v2' : '1v1';
-        const roomThemeMode = normalizeThemeMode(payload.themeMode || THEME_MODE_THEMED);
-        const room = new ServerRoom(id, { mode: roomMode, themeMode: roomThemeMode });
+        const room = new ServerRoom(id, { mode: roomMode, themeMode: THEME_MODE_THEMED });
         room.attachDisplay(socket.id, payload.name || 'Fuel Screen');
 
         this.rooms.set(id, room);
@@ -812,26 +786,6 @@ class GameServer {
           themeMode: room.themeMode,
           requiredPlayers: room.requiredPlayers(),
         });
-        this.broadcastRoom(room, { forceController: true });
-      });
-
-      socket.on('set_room_theme', (rawPayload = {}) => {
-        const payload = safePayload(rawPayload);
-        const room = this.rooms.get(normalizeRoomId(payload.roomId));
-        if (!room) {
-          socket.emit('room_theme_error', { message: 'Room not found.' });
-          return;
-        }
-        if (!room.display || room.display.id !== socket.id) {
-          socket.emit('room_theme_error', { message: 'Only the host display can change theme.' });
-          return;
-        }
-        const result = room.setThemeMode(payload.themeMode);
-        if (!result?.ok) {
-          socket.emit('room_theme_error', { message: result?.message || 'Unable to change theme.' });
-          return;
-        }
-        this.io.to(room.id).emit('room_theme_updated', { themeMode: room.themeMode });
         this.broadcastRoom(room, { forceController: true });
       });
 
@@ -942,7 +896,7 @@ class GameServer {
         if (!room.display || room.display.id !== socket.id) return;
         const nowMs = Date.now();
         const wasGameOver = Boolean(room.gameOver);
-        const frameThemeMode = normalizeThemeMode(payload.controllerFrame?.themeMode || payload.snapshot?.themeMode || room.themeMode);
+        const frameThemeMode = THEME_MODE_THEMED;
         if (room.themeMode !== frameThemeMode) room.themeMode = frameThemeMode;
         if (payload.controllerFrame && typeof payload.controllerFrame === 'object') {
           payload.controllerFrame.themeMode = frameThemeMode;

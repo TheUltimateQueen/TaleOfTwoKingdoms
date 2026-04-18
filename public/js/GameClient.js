@@ -6,8 +6,6 @@ import { GameRoom as SimGameRoom } from './SimGameRoom.js';
 import { SPECIAL_BUCKET_UPGRADE_TYPES } from './specialUnitUpgradeConfig.js';
 import {
   DEFAULT_THEME_MODE,
-  THEME_MODE_THEMED,
-  THEME_MODE_UNTHEMED,
   defaultArcherName,
   defaultKeyboardName,
   normalizeThemeMode,
@@ -62,7 +60,6 @@ const UPGRADE_HOTKEY_BINDINGS = Object.freeze([
   { code: 'ArrowLeft', side: 'right', slot: 1, requiresNoKeyboardPlayers: true },
   { code: 'ArrowRight', side: 'right', slot: 0, requiresNoKeyboardPlayers: true },
 ]);
-const THEME_STORAGE_KEY = 'enf_theme_mode_v1';
 const TEST_SETTINGS_STORAGE_KEY = 'totk_test_settings_v4';
 const BASE_TEAM_COLORS = {
   left: { ...TEAM_COLORS.left },
@@ -213,7 +210,7 @@ function hashString(value) {
 }
 
 function postGamePunTitle(winner, themeMode, seed = '') {
-  if (normalizeThemeMode(themeMode) !== THEME_MODE_THEMED) return null;
+  if (normalizeThemeMode(themeMode) !== DEFAULT_THEME_MODE) return null;
   const puns = winner === 'left'
     ? POST_GAME_BREAD_PUNS
     : winner === 'right'
@@ -349,7 +346,7 @@ export class GameClient {
       slot: 0,
       mode: '1v1',
       createMode: '1v1',
-      themeMode: this.loadThemeModeFromStorage(),
+      themeMode: DEFAULT_THEME_MODE,
       world: null,
       snapshot: null,
     };
@@ -414,7 +411,7 @@ export class GameClient {
     this.audioRoundStarted = false;
 
     this.bindDom();
-    this.applyThemeMode(this.state.themeMode, { persist: false, requestServer: false, updateRoom: false });
+    this.applyThemeMode(this.state.themeMode, { updateRoom: false });
     this.bindEvents();
     this.setupAudio();
     this.setupWakeLock();
@@ -451,8 +448,6 @@ export class GameClient {
     this.joinBtn = document.getElementById('joinBtn');
     this.mode2PlayersBtn = document.getElementById('mode2PlayersBtn');
     this.mode4PlayersBtn = document.getElementById('mode4PlayersBtn');
-    this.themeThemedBtn = document.getElementById('themeThemedBtn');
-    this.themeUnthemedBtn = document.getElementById('themeUnthemedBtn');
     this.themeModeHint = document.getElementById('themeModeHint');
     this.createRoomBtn = document.getElementById('createRoomBtn');
     this.menuMsg = document.getElementById('menuMsg');
@@ -462,8 +457,6 @@ export class GameClient {
     this.joinLink = document.getElementById('joinLink');
     this.lobbyMode2PlayersBtn = document.getElementById('lobbyMode2PlayersBtn');
     this.lobbyMode4PlayersBtn = document.getElementById('lobbyMode4PlayersBtn');
-    this.lobbyThemeThemedBtn = document.getElementById('lobbyThemeThemedBtn');
-    this.lobbyThemeUnthemedBtn = document.getElementById('lobbyThemeUnthemedBtn');
     this.lobbyThemeModeHint = document.getElementById('lobbyThemeModeHint');
     this.localKeyboardTestBtn = document.getElementById('localKeyboardTestBtn');
     this.localKeyboardVsCpuBtn = document.getElementById('localKeyboardVsCpuBtn');
@@ -558,8 +551,6 @@ export class GameClient {
     if (!this.isController) {
       this.mode2PlayersBtn?.addEventListener('click', () => this.setCreateMode('1v1'));
       this.mode4PlayersBtn?.addEventListener('click', () => this.setCreateMode('2v2'));
-      this.themeThemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_THEMED));
-      this.themeUnthemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_UNTHEMED));
       this.lobbyMode2PlayersBtn?.addEventListener('click', () => {
         this.setCreateMode('1v1');
         if (this.state.roomId) this.requestRoomModeChange('1v1');
@@ -568,8 +559,6 @@ export class GameClient {
         this.setCreateMode('2v2');
         if (this.state.roomId) this.requestRoomModeChange('2v2');
       });
-      this.lobbyThemeThemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_THEMED));
-      this.lobbyThemeUnthemedBtn?.addEventListener('click', () => this.handleThemeSelection(THEME_MODE_UNTHEMED));
       this.createRoomBtn?.addEventListener('click', () => this.requestRoomCreate(this.state.createMode));
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
       this.postGameTitle?.addEventListener('click', () => this.speakPostGameTitle({ force: true, userInitiated: true }));
@@ -626,8 +615,6 @@ export class GameClient {
       this.state.roomId = roomId;
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
       this.applyThemeMode(themeMode || this.state.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: false,
         rerenderHud: false,
       });
@@ -667,8 +654,6 @@ export class GameClient {
       this.state.mode = mode === '2v2' ? '2v2' : '1v1';
       if (themeMode) {
         this.applyThemeMode(themeMode, {
-          persist: true,
-          requestServer: false,
           updateRoom: true,
           rerenderHud: false,
         });
@@ -701,26 +686,9 @@ export class GameClient {
       else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to start match.';
     });
 
-    this.socket.on('room_theme_updated', ({ themeMode }) => {
-      this.applyThemeMode(themeMode, {
-        persist: true,
-        requestServer: false,
-        updateRoom: !this.isController,
-      });
-      if (!this.isController && this.lobbyThemeModeHint) this.lobbyThemeModeHint.textContent = this.themedModeHintText();
-    });
-
-    this.socket.on('room_theme_error', ({ message }) => {
-      if (this.isController) return;
-      if (this.lobbyThemeModeHint && this.state.roomId) this.lobbyThemeModeHint.textContent = message || 'Unable to change theme.';
-      else if (this.menuMsg) this.menuMsg.textContent = message || 'Unable to change theme.';
-    });
-
     this.socket.on('room_restarted', (payload = {}) => {
       if (payload?.themeMode) {
         this.applyThemeMode(payload.themeMode, {
-          persist: true,
-          requestServer: false,
           updateRoom: !this.isController,
           rerenderHud: false,
         });
@@ -784,8 +752,6 @@ export class GameClient {
       this.controllerCommitteeVoteMarkup = '';
       this.controllerMatchStarted = false;
       this.applyThemeMode(themeMode || this.state.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: false,
         rerenderHud: false,
       });
@@ -976,8 +942,6 @@ export class GameClient {
     if (payload.roomId && payload.roomId !== this.state.roomId) return;
     if (payload.themeMode) {
       this.applyThemeMode(payload.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: true,
         rerenderHud: false,
       });
@@ -1273,7 +1237,6 @@ export class GameClient {
       name: 'Fuel Screen',
       origin: window.location.origin + window.location.pathname,
       mode: normalized,
-      themeMode: this.state.themeMode,
     });
   }
 
@@ -1283,17 +1246,6 @@ export class GameClient {
     const label = normalized === '2v2' ? '4 players (2v2)' : '2 players (1v1)';
     if (this.lobbyModeMsg) this.lobbyModeMsg.textContent = `Switching room size to ${label}...`;
     this.socket.emit('set_room_mode', { roomId: this.state.roomId, mode: normalized });
-  }
-
-  requestRoomThemeChange(themeMode = DEFAULT_THEME_MODE) {
-    if (!this.state.roomId) return;
-    const normalized = normalizeThemeMode(themeMode);
-    if (this.lobbyThemeModeHint) {
-      this.lobbyThemeModeHint.textContent = normalized === THEME_MODE_THEMED
-        ? 'Switching to Bread vs Rice theme...'
-        : 'Switching to classic West vs East theme...';
-    }
-    this.socket.emit('set_room_theme', { roomId: this.state.roomId, themeMode: normalized });
   }
 
   requestRoomRestart() {
@@ -1382,40 +1334,9 @@ export class GameClient {
     this.renderLobbyPhonePreviews();
   }
 
-  loadThemeModeFromStorage() {
-    try {
-      const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
-      return normalizeThemeMode(raw || DEFAULT_THEME_MODE);
-    } catch {
-      return DEFAULT_THEME_MODE;
-    }
-  }
-
-  saveThemeModeToStorage(themeMode = DEFAULT_THEME_MODE) {
-    const normalized = normalizeThemeMode(themeMode);
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
-    } catch {
-      // Ignore storage errors and continue with in-memory preference.
-    }
-  }
-
-  applyTeamColors(themeMode = DEFAULT_THEME_MODE) {
-    // Keep team readability consistent in both modes: West stays blue, East stays red.
+  applyTeamColors() {
     TEAM_COLORS.left = { ...BASE_TEAM_COLORS.left };
     TEAM_COLORS.right = { ...BASE_TEAM_COLORS.right };
-  }
-
-  syncThemeToggleButtons(themedBtn, unthemedBtn, themeMode) {
-    const themed = normalizeThemeMode(themeMode) === THEME_MODE_THEMED;
-    if (themedBtn) {
-      themedBtn.classList.toggle('active', themed);
-      themedBtn.setAttribute('aria-pressed', String(themed));
-    }
-    if (unthemedBtn) {
-      unthemedBtn.classList.toggle('active', !themed);
-      unthemedBtn.setAttribute('aria-pressed', String(!themed));
-    }
   }
 
   keyboardMatchHintText() {
@@ -1456,34 +1377,20 @@ export class GameClient {
   }
 
   themedModeHintText() {
-    if (this.state.themeMode === THEME_MODE_THEMED) return 'Theme ON: Bread Empire vs Rice Empire.';
-    return 'Theme OFF: classic West vs East labels.';
+    return 'Theme: Bread Empire vs Rice Empire.';
   }
 
-  controllerSideIdentity(side = this.state.side, themeMode = this.state.themeMode) {
+  controllerSideIdentity(side = this.state.side) {
     const sideName = side === 'right' ? 'right' : 'left';
-    const mode = normalizeThemeMode(themeMode);
-    if (mode === THEME_MODE_THEMED) {
-      if (sideName === 'left') {
-        return {
-          pill: 'WEST • BREAD',
-          flavor: 'European style Bread Empire controller',
-        };
-      }
-      return {
-        pill: 'EAST • RICE',
-        flavor: 'Asian style Rice Empire controller',
-      };
-    }
     if (sideName === 'left') {
       return {
-        pill: 'WEST',
-        flavor: 'Classic West Kingdom controller',
+        pill: 'WEST • BREAD',
+        flavor: 'European style Bread Empire controller',
       };
     }
     return {
-      pill: 'EAST',
-      flavor: 'Classic East Kingdom controller',
+      pill: 'EAST • RICE',
+      flavor: 'Asian style Rice Empire controller',
     };
   }
 
@@ -1494,13 +1401,12 @@ export class GameClient {
     if (this.controllerPanel) {
       this.controllerPanel.classList.toggle('controller-side-left', joined && side === 'left');
       this.controllerPanel.classList.toggle('controller-side-right', joined && side === 'right');
-      this.controllerPanel.classList.toggle('controller-side-themed', this.state.themeMode === THEME_MODE_THEMED);
-      this.controllerPanel.classList.toggle('controller-side-unthemed', this.state.themeMode === THEME_MODE_UNTHEMED);
+      this.controllerPanel.classList.toggle('controller-side-themed', joined);
     }
     if (!this.controllerSideBadge) return;
     this.controllerSideBadge.classList.toggle('hidden', !joined);
     if (!joined) return;
-    const identity = this.controllerSideIdentity(side, this.state.themeMode);
+    const identity = this.controllerSideIdentity(side);
     if (this.controllerSidePill) this.controllerSidePill.textContent = identity.pill;
     if (this.controllerSideFlavor) this.controllerSideFlavor.textContent = identity.flavor;
   }
@@ -1524,31 +1430,21 @@ export class GameClient {
   applyThemeMode(themeMode, options = {}) {
     const normalized = normalizeThemeMode(themeMode);
     const {
-      persist = true,
-      requestServer = false,
       updateRoom = true,
       rerenderHud = true,
     } = options;
     this.state.themeMode = normalized;
-    if (persist) this.saveThemeModeToStorage(normalized);
-    this.applyTeamColors(normalized);
+    this.applyTeamColors();
     this.renderer?.setThemeMode(normalized);
     if (document.documentElement) {
-      document.documentElement.classList.toggle('theme-themed', normalized === THEME_MODE_THEMED);
-      document.documentElement.classList.toggle('theme-unthemed', normalized === THEME_MODE_UNTHEMED);
+      document.documentElement.classList.toggle('theme-themed', true);
     }
     if (document.body) {
-      document.body.classList.toggle('theme-themed', normalized === THEME_MODE_THEMED);
-      document.body.classList.toggle('theme-unthemed', normalized === THEME_MODE_UNTHEMED);
+      document.body.classList.toggle('theme-themed', true);
     }
-    this.syncThemeToggleButtons(this.themeThemedBtn, this.themeUnthemedBtn, normalized);
-    this.syncThemeToggleButtons(this.lobbyThemeThemedBtn, this.lobbyThemeUnthemedBtn, normalized);
     this.refreshThemeCopy();
     if (updateRoom && this.localRoom && typeof this.localRoom.setThemeMode === 'function') {
       this.localRoom.setThemeMode(normalized);
-    }
-    if (requestServer && !this.isController && this.state.roomId) {
-      this.requestRoomThemeChange(normalized);
     }
     if (rerenderHud && this.state.snapshot && !this.isController) this.updateHud(this.state.snapshot);
     if (rerenderHud && this.state.snapshot?.gameOver && !this.postGamePanel?.classList.contains('hidden')) {
@@ -1556,20 +1452,6 @@ export class GameClient {
     }
     this.renderLobbyPhonePreviews();
     this.refreshControllerSideBadge();
-  }
-
-  handleThemeSelection(themeMode) {
-    const normalized = normalizeThemeMode(themeMode);
-    if (normalized === this.state.themeMode) return;
-    this.applyThemeMode(normalized, {
-      persist: true,
-      requestServer: Boolean(this.state.roomId),
-      updateRoom: true,
-      rerenderHud: true,
-    });
-    if (!this.state.roomId && this.menuMsg) {
-      this.menuMsg.textContent = `Theme set to ${normalized === THEME_MODE_THEMED ? 'Bread vs Rice' : 'classic West vs East'}.`;
-    }
   }
 
   defaultLobbyPull(side = 'left') {
@@ -3468,8 +3350,6 @@ export class GameClient {
     if (!this.state.side) return;
     if (snapshot?.themeMode) {
       this.applyThemeMode(snapshot.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: false,
         rerenderHud: false,
       });
@@ -3520,8 +3400,6 @@ export class GameClient {
 
     if (payload.themeMode) {
       this.applyThemeMode(payload.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: false,
         rerenderHud: false,
       });
@@ -3714,8 +3592,6 @@ export class GameClient {
   handleDisplayState(snapshot) {
     if (snapshot?.themeMode) {
       this.applyThemeMode(snapshot.themeMode, {
-        persist: true,
-        requestServer: false,
         updateRoom: false,
         rerenderHud: false,
       });
