@@ -368,6 +368,8 @@ export class GameClient {
     this.remoteDisplayCount = 0;
     this.localKeyboardTestActive = false;
     this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+    this.localKeyboardVsCpuSide = 'left';
+    this.localKeyboardVsCpuHoverSide = null;
     this.localKeyboardControlSides = { left: true, right: true };
     this.localPressedKeys = new Set();
     this.displayMode = 'menu';
@@ -563,7 +565,9 @@ export class GameClient {
       this.restartMatchBtn?.addEventListener('click', () => this.requestRoomRestart());
       this.postGameTitle?.addEventListener('click', () => this.speakPostGameTitle({ force: true, userInitiated: true }));
       this.localKeyboardTestBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_HVH));
-      this.localKeyboardVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_VS_CPU));
+      this.localKeyboardVsCpuBtn?.addEventListener('click', (event) => this.handleLocalKeyboardVsCpuButtonClick(event));
+      this.localKeyboardVsCpuBtn?.addEventListener('pointermove', (event) => this.handleLocalKeyboardVsCpuHover(event));
+      this.localKeyboardVsCpuBtn?.addEventListener('pointerleave', () => this.handleLocalKeyboardVsCpuHover(null));
       this.localCpuVsCpuBtn?.addEventListener('click', () => this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_CPU_VS_CPU));
       this.hostStartBtn?.addEventListener('click', () => this.requestHostStartMatch());
       for (const entry of this.lobbyPhoneSlots) {
@@ -574,6 +578,7 @@ export class GameClient {
       }
       this.initTestSettingsUi();
       this.setCreateMode(this.state.createMode);
+      this.setLocalKeyboardButtonsForActiveMode(this.localKeyboardMode);
       window.addEventListener('keydown', (event) => this.handleLocalKeyboardKey(event, true));
       window.addEventListener('keyup', (event) => this.handleLocalKeyboardKey(event, false));
       window.addEventListener('blur', () => {
@@ -610,6 +615,8 @@ export class GameClient {
     this.socket.on('room_created', ({ roomId, joinUrl, qrDataUrl, mode, requiredPlayers, hostAuthoritative, themeMode }) => {
       this.localKeyboardTestActive = false;
       this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+      this.localKeyboardVsCpuSide = 'left';
+      this.localKeyboardVsCpuHoverSide = null;
       this.localKeyboardControlSides = { left: true, right: true };
       this.localPressedKeys.clear();
       this.state.roomId = roomId;
@@ -800,6 +807,8 @@ export class GameClient {
       this.stopHostAuthorityLoop();
       this.localKeyboardTestActive = false;
       this.localKeyboardMode = LOCAL_KEYBOARD_MODE_HVH;
+      this.localKeyboardVsCpuSide = 'left';
+      this.localKeyboardVsCpuHoverSide = null;
       this.localKeyboardControlSides = { left: true, right: true };
       this.localPressedKeys.clear();
       this.hostAuthoritative = false;
@@ -1003,6 +1012,50 @@ export class GameClient {
     this.hostTickTimer = null;
   }
 
+  normalizedLocalKeyboardVsCpuSide(side = this.localKeyboardVsCpuSide) {
+    return side === 'right' ? 'right' : 'left';
+  }
+
+  localKeyboardVsCpuSides() {
+    const humanSide = this.normalizedLocalKeyboardVsCpuSide(this.localKeyboardVsCpuSide);
+    return {
+      humanSide,
+      cpuSide: humanSide === 'left' ? 'right' : 'left',
+    };
+  }
+
+  localKeyboardVsCpuSideFromEvent(event, button = this.localKeyboardVsCpuBtn) {
+    if (!button) return this.normalizedLocalKeyboardVsCpuSide(this.localKeyboardVsCpuSide);
+    if (event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+      const rect = button.getBoundingClientRect();
+      if (rect?.width > 0) {
+        const insideButton = event.clientX >= rect.left
+          && event.clientX <= rect.right
+          && event.clientY >= rect.top
+          && event.clientY <= rect.bottom;
+        if (insideButton) {
+          const relX = event.clientX - rect.left;
+          return relX >= rect.width / 2 ? 'right' : 'left';
+        }
+      }
+    }
+    return this.normalizedLocalKeyboardVsCpuSide(this.localKeyboardVsCpuHoverSide || this.localKeyboardVsCpuSide);
+  }
+
+  handleLocalKeyboardVsCpuHover(event) {
+    const hoverSide = event ? this.localKeyboardVsCpuSideFromEvent(event) : null;
+    if (this.localKeyboardVsCpuHoverSide === hoverSide) return;
+    this.localKeyboardVsCpuHoverSide = hoverSide;
+    this.setLocalKeyboardButtonsForActiveMode(this.localKeyboardMode);
+  }
+
+  handleLocalKeyboardVsCpuButtonClick(event) {
+    this.localKeyboardVsCpuSide = this.localKeyboardVsCpuSideFromEvent(event);
+    this.localKeyboardVsCpuHoverSide = null;
+    this.setLocalKeyboardButtonsForActiveMode(this.localKeyboardMode);
+    this.startLocalKeyboardTest(LOCAL_KEYBOARD_MODE_VS_CPU);
+  }
+
   startLocalKeyboardTest(mode = LOCAL_KEYBOARD_MODE_HVH) {
     if (this.isController) return;
     if (!this.hostAuthoritative) return;
@@ -1022,10 +1075,11 @@ export class GameClient {
       themeMode: this.state.themeMode,
       debugConfig: this.readSettingsFromTestDom(),
     });
-    const leftHuman = localMode === LOCAL_KEYBOARD_MODE_HVH || localMode === LOCAL_KEYBOARD_MODE_VS_CPU;
-    const rightHuman = localMode === LOCAL_KEYBOARD_MODE_HVH;
-    const leftCpu = localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
-    const rightCpu = localMode === LOCAL_KEYBOARD_MODE_VS_CPU || localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU;
+    const vsCpuSide = this.normalizedLocalKeyboardVsCpuSide(this.localKeyboardVsCpuSide);
+    const leftHuman = localMode === LOCAL_KEYBOARD_MODE_HVH || (localMode === LOCAL_KEYBOARD_MODE_VS_CPU && vsCpuSide === 'left');
+    const rightHuman = localMode === LOCAL_KEYBOARD_MODE_HVH || (localMode === LOCAL_KEYBOARD_MODE_VS_CPU && vsCpuSide === 'right');
+    const leftCpu = localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU || (localMode === LOCAL_KEYBOARD_MODE_VS_CPU && vsCpuSide === 'right');
+    const rightCpu = localMode === LOCAL_KEYBOARD_MODE_CPU_VS_CPU || (localMode === LOCAL_KEYBOARD_MODE_VS_CPU && vsCpuSide === 'left');
 
     this.localKeyboardControlSides = {
       left: leftHuman,
@@ -1303,9 +1357,23 @@ export class GameClient {
         : 'Play On This Computer (Keyboard)';
     }
     if (this.localKeyboardVsCpuBtn) {
+      const selectedSide = this.normalizedLocalKeyboardVsCpuSide(this.localKeyboardVsCpuSide);
+      const hoverSide = this.localKeyboardVsCpuHoverSide === 'right'
+        ? 'right'
+        : (this.localKeyboardVsCpuHoverSide === 'left' ? 'left' : null);
+      const displaySide = hoverSide || selectedSide;
+      const sideText = selectedSide === 'right' ? 'Right Team' : 'Left Team';
+      this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-left', displaySide === 'left');
+      this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-right', displaySide === 'right');
+      this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-hover-left', hoverSide === 'left');
+      this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-hover-right', hoverSide === 'right');
+      this.localKeyboardVsCpuBtn.classList.toggle('cpu-side-active', isVsCpuActive);
+      this.localKeyboardVsCpuBtn.dataset.side = displaySide;
+      this.localKeyboardVsCpuBtn.dataset.selectedSide = selectedSide;
+      this.localKeyboardVsCpuBtn.setAttribute('aria-label', `Play Vs CPU. Click left side for Left Team or right side for Right Team. Selected: ${sideText}.`);
       this.localKeyboardVsCpuBtn.textContent = isVsCpuActive
-        ? 'Restart Vs CPU'
-        : 'Play Vs CPU';
+        ? `Restart Vs CPU (${sideText})`
+        : `Play Vs CPU (${sideText})`;
     }
     if (this.localCpuVsCpuBtn) {
       this.localCpuVsCpuBtn.textContent = isCpuVsCpuActive
@@ -1340,13 +1408,15 @@ export class GameClient {
   }
 
   keyboardMatchHintText() {
-    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU, 3) CPU Vs CPU. Upgrade hotkeys: ${sideShortName('left', this.state.themeMode)} 1=left card, 2=right card | ${sideShortName('right', this.state.themeMode)} 9=left card, 0=right card (plus A/D and Left/Right in CPU vs CPU).`;
+    return `Keyboard quick modes: 1) Keyboard 1v1 (${sideDisplayName('left', this.state.themeMode)} W/A/S/D, ${sideDisplayName('right', this.state.themeMode)} Arrows), 2) Play Vs CPU (click left half for blue team or right half for red team), 3) CPU Vs CPU. Upgrade hotkeys: ${sideShortName('left', this.state.themeMode)} 1=left card, 2=right card | ${sideShortName('right', this.state.themeMode)} 9=left card, 0=right card (plus A/D and Left/Right in CPU vs CPU).`;
   }
 
   keyboardActiveHintText(mode = this.localKeyboardMode) {
     const normalized = this.normalizedLocalKeyboardMode(mode);
     if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
-      return `${sideDisplayName('left', this.state.themeMode)} keyboard vs ${sideDisplayName('right', this.state.themeMode)} CPU. Use W/A/S/D to aim.`;
+      const { humanSide, cpuSide } = this.localKeyboardVsCpuSides();
+      const controls = humanSide === 'left' ? 'W/A/S/D' : 'Arrow keys';
+      return `${sideDisplayName(humanSide, this.state.themeMode)} keyboard vs ${sideDisplayName(cpuSide, this.state.themeMode)} CPU. Use ${controls} to aim.`;
     }
     if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
       return 'CPU vs CPU active. Both sides use AI aiming and rubberband behavior.';
@@ -1357,7 +1427,9 @@ export class GameClient {
   keyboardStartMessageText(mode = this.localKeyboardMode) {
     const normalized = this.normalizedLocalKeyboardMode(mode);
     if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
-      return `Keyboard Vs CPU started. ${sideShortName('left', this.state.themeMode)}: W/A/S/D | ${sideShortName('right', this.state.themeMode)}: CPU AI.`;
+      const { humanSide, cpuSide } = this.localKeyboardVsCpuSides();
+      const controls = humanSide === 'left' ? 'W/A/S/D' : 'Arrow keys';
+      return `Keyboard Vs CPU started. ${sideShortName(humanSide, this.state.themeMode)}: ${controls} | ${sideShortName(cpuSide, this.state.themeMode)}: CPU AI.`;
     }
     if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
       return `CPU Vs CPU started. ${sideShortName('left', this.state.themeMode)} and ${sideShortName('right', this.state.themeMode)} are both AI controlled.`;
@@ -1368,7 +1440,9 @@ export class GameClient {
   keyboardControlsLegendText(mode = this.localKeyboardMode) {
     const normalized = this.normalizedLocalKeyboardMode(mode);
     if (normalized === LOCAL_KEYBOARD_MODE_VS_CPU) {
-      return `Controls: ${sideShortName('left', this.state.themeMode)} W/A/S/D / ${sideShortName('right', this.state.themeMode)} CPU`;
+      const { humanSide, cpuSide } = this.localKeyboardVsCpuSides();
+      const controls = humanSide === 'left' ? 'W/A/S/D' : 'Arrows';
+      return `Controls: ${sideShortName(humanSide, this.state.themeMode)} ${controls} / ${sideShortName(cpuSide, this.state.themeMode)} CPU`;
     }
     if (normalized === LOCAL_KEYBOARD_MODE_CPU_VS_CPU) {
       return 'Controls: CPU vs CPU';

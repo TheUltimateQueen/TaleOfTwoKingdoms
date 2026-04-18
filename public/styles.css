@@ -543,9 +543,94 @@ button:hover {
 }
 
 #localKeyboardVsCpuBtn {
-  background: linear-gradient(180deg, #5eb8ff 0%, #2e77b5 100%);
-  border-color: #74c4ff;
-  color: #041c30;
+  --cpu-btn-top: #5eb8ff;
+  --cpu-btn-mid: #2e77b5;
+  --cpu-btn-bottom: #1f5079;
+  --cpu-btn-edge: #74c4ff;
+  --cpu-btn-text: #041c30;
+  --cpu-left-tint: #6ebfff8c;
+  --cpu-right-tint: #ff7e8f66;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding-left: 44px;
+  padding-right: 44px;
+  border-color: var(--cpu-btn-edge);
+  color: var(--cpu-btn-text);
+  text-shadow: 0 1px 0 #ffffff4d;
+  background:
+    linear-gradient(90deg, var(--cpu-left-tint) 0 49.4%, transparent 49.4% 50.6%, var(--cpu-right-tint) 50.6% 100%),
+    linear-gradient(180deg, var(--cpu-btn-top) 0%, var(--cpu-btn-mid) 58%, var(--cpu-btn-bottom) 100%);
+  box-shadow: 0 0 0 1px #7ec6ff4d, 0 4px 16px #1024388f;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+
+#localKeyboardVsCpuBtn::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 8px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, #ffffff00 0 47.5%, #ffffff7d 49.7%, #ffffff00 52.5%),
+    linear-gradient(90deg, #ffffff00 0%, #ffffff54 50%, #ffffff00 100%);
+  opacity: 0.72;
+  animation: cpuSelectSweep 1.8s linear infinite;
+}
+
+#localKeyboardVsCpuBtn::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 9px);
+  left: 14px;
+  width: 24px;
+  height: 18px;
+  pointer-events: none;
+  border-radius: 2px 2px 4px 4px;
+  background:
+    linear-gradient(#fef6de, #f0dca8) 7px 10px / 10px 8px no-repeat,
+    linear-gradient(#f4e3bb, #dbc289) 2px 2px / 4px 8px no-repeat,
+    linear-gradient(#f4e3bb, #dbc289) 10px 1px / 4px 9px no-repeat,
+    linear-gradient(#f4e3bb, #dbc289) 18px 2px / 4px 8px no-repeat,
+    linear-gradient(#d7bc84, #b69353) 0 10px / 24px 8px no-repeat;
+  box-shadow: 0 0 0 1px #4f3a1873, 0 2px 4px #0000004d;
+  transition: left 190ms ease;
+  animation: cpuCastleBounce 930ms ease-in-out infinite;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-left {
+  --cpu-btn-top: #63beff;
+  --cpu-btn-mid: #2f7fbf;
+  --cpu-btn-bottom: #1e537d;
+  --cpu-btn-edge: #86d0ff;
+  --cpu-btn-text: #041c30;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-right {
+  --cpu-btn-top: #ff8a9b;
+  --cpu-btn-mid: #ca4f66;
+  --cpu-btn-bottom: #842437;
+  --cpu-btn-edge: #ff9cae;
+  --cpu-btn-text: #350712;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-right::after {
+  left: calc(100% - 38px);
+}
+
+#localKeyboardVsCpuBtn.cpu-side-hover-left,
+#localKeyboardVsCpuBtn.cpu-side-hover-right,
+#localKeyboardVsCpuBtn.cpu-side-active {
+  box-shadow: 0 0 0 1px #a6d7ff99, 0 0 22px #6fb8ff66;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-hover-right,
+#localKeyboardVsCpuBtn.cpu-side-right.cpu-side-active {
+  box-shadow: 0 0 0 1px #ffbac699, 0 0 22px #ff7f9680;
+}
+
+#localKeyboardVsCpuBtn.cpu-side-active {
+  animation: cpuSidePulse 1.2s ease-in-out infinite;
 }
 
 #localCpuVsCpuBtn {
@@ -1864,6 +1949,36 @@ kbd {
   100% {
     transform: translateX(355%) skewX(-18deg);
     opacity: 0;
+  }
+}
+
+@keyframes cpuSelectSweep {
+  0% {
+    background-position: -32% 0, 0 0;
+  }
+  100% {
+    background-position: 140% 0, 0 0;
+  }
+}
+
+@keyframes cpuCastleBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  45% {
+    transform: translateY(-2px);
+  }
+  70% {
+    transform: translateY(1px);
+  }
+}
+
+@keyframes cpuSidePulse {
+  0%, 100% {
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    filter: saturate(1.12) brightness(1.08);
   }
 }
 
