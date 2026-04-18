@@ -145,12 +145,20 @@ const SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE = Object.freeze(
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const BASIC_SPECIAL_TYPE_SET = new Set(BASIC_SPECIAL_SPAWN_TYPES);
+const TIER2_SPECIAL_SPAWN_TYPES = Object.freeze(['dragon', 'shield', 'super', 'balloon']);
+const TIER2_SPECIAL_TYPE_SET = new Set(TIER2_SPECIAL_SPAWN_TYPES);
 const SPECIAL_CADENCE_MATCH_MULT_MIN = 0.5;
 const SPECIAL_CADENCE_MATCH_MULT_MAX = 1.5;
 const SPECIAL_CADENCE_JITTER_MAX = 0.3;
 const SPECIAL_CADENCE_JITTER_BELL_SAMPLES = 6;
 const BASIC_SPECIAL_SHARED_BASE_CENTER = 30;
 const BASIC_SPECIAL_SHARED_BASE_VARIANCE = 15;
+const TIER2_SPECIAL_BASE_EVERY_MIN = 75;
+const TIER2_SPECIAL_BASE_EVERY_MAX = 140;
+const BASIC_SPECIAL_BASE_CHANCE_MIN = 0.4;
+const BASIC_SPECIAL_BASE_CHANCE_MAX = 0.6;
+const TIER2_SPECIAL_BASE_CHANCE_MIN = 0.1;
+const TIER2_SPECIAL_BASE_CHANCE_MAX = 0.3;
 const SPECIAL_CADENCE_TRACKED_TYPES = Object.freeze([
   ...SPECIAL_SPAWN_QUEUE_ORDER,
   'candle',
@@ -538,6 +546,40 @@ function randomBasicSpecialBaseEveryByType() {
   );
 }
 
+function randomTier2SpecialBaseEvery() {
+  const min = Math.max(1, Number(TIER2_SPECIAL_BASE_EVERY_MIN) || 1);
+  const max = Math.max(min, Number(TIER2_SPECIAL_BASE_EVERY_MAX) || min);
+  return min + Math.random() * (max - min);
+}
+
+function randomTier2SpecialBaseEveryByType() {
+  return Object.fromEntries(
+    TIER2_SPECIAL_SPAWN_TYPES.map((type) => [type, roundTo(randomTier2SpecialBaseEvery(), 3)])
+  );
+}
+
+function randomSpecialBaseChanceByType() {
+  const values = {};
+  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+    if (BASIC_SPECIAL_TYPE_SET.has(type)) {
+      values[type] = roundTo(
+        BASIC_SPECIAL_BASE_CHANCE_MIN + Math.random() * (BASIC_SPECIAL_BASE_CHANCE_MAX - BASIC_SPECIAL_BASE_CHANCE_MIN),
+        3
+      );
+      continue;
+    }
+    if (TIER2_SPECIAL_TYPE_SET.has(type)) {
+      values[type] = roundTo(
+        TIER2_SPECIAL_BASE_CHANCE_MIN + Math.random() * (TIER2_SPECIAL_BASE_CHANCE_MAX - TIER2_SPECIAL_BASE_CHANCE_MIN),
+        3
+      );
+      continue;
+    }
+    values[type] = roundTo(Number(specialSpawnBaseChanceForType(type)) || 0, 3);
+  }
+  return values;
+}
+
 function finiteOrNull(value, places = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -569,11 +611,11 @@ function normalizeDebugConfig(raw = null) {
     : {};
   const specialChanceOverrides = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
-    const fallback = clamp(specialSpawnBaseChanceForType(type) ?? 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
-    const raw = Number(specialChanceOverridesSource[type]);
+    const rawValue = specialChanceOverridesSource[type];
+    const raw = rawValue == null ? NaN : Number(rawValue);
     specialChanceOverrides[type] = Number.isFinite(raw)
       ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
-      : fallback;
+      : null;
   }
 
   const upgrades = {};
@@ -618,10 +660,18 @@ function serializeSideState(side) {
   const specialBasicBaseEveryByTypeRaw = state.specialBasicBaseEveryByType && typeof state.specialBasicBaseEveryByType === 'object'
     ? state.specialBasicBaseEveryByType
     : {};
+  const specialBaseChanceByTypeRaw = state.specialBaseChanceByType && typeof state.specialBaseChanceByType === 'object'
+    ? state.specialBaseChanceByType
+    : {};
+  const specialTier2BaseEveryByTypeRaw = state.specialTier2BaseEveryByType && typeof state.specialTier2BaseEveryByType === 'object'
+    ? state.specialTier2BaseEveryByType
+    : {};
   const specialRollByType = {};
   const specialSpawnProgressByType = {};
   const specialSpawnCadenceByType = {};
   const specialBasicBaseEveryByType = {};
+  const specialBaseChanceByType = {};
+  const specialTier2BaseEveryByType = {};
   for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
     const entry = specialRollByTypeRaw[type];
     specialRollByType[type] = {
@@ -648,6 +698,12 @@ function serializeSideState(side) {
   }
   for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
     specialBasicBaseEveryByType[type] = finiteOrNull(specialBasicBaseEveryByTypeRaw[type], 3);
+  }
+  for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
+    specialBaseChanceByType[type] = finiteOrNull(specialBaseChanceByTypeRaw[type], 3);
+  }
+  for (const type of TIER2_SPECIAL_SPAWN_TYPES) {
+    specialTier2BaseEveryByType[type] = finiteOrNull(specialTier2BaseEveryByTypeRaw[type], 3);
   }
   return {
     towerHp: roundTo(state.towerHp, 1),
@@ -724,6 +780,8 @@ function serializeSideState(side) {
     specialSpawnProgressByType,
     specialSpawnCadenceByType,
     specialBasicBaseEveryByType,
+    specialBaseChanceByType,
+    specialTier2BaseEveryByType,
     specialBasicSharedBaseEvery: finiteOrNull(state.specialBasicSharedBaseEvery, 3),
     towerDamagedOnce: Boolean(state.towerDamagedOnce),
     towerHeroRescueUsed: Boolean(state.towerHeroRescueUsed),
@@ -847,6 +905,8 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     specialRollTtl: 0,
     specialRollByType: {},
     specialBasicBaseEveryByType: {},
+    specialBaseChanceByType: {},
+    specialTier2BaseEveryByType: {},
     specialBasicSharedBaseEvery: null,
     towerDamagedOnce: false,
     towerHeroRescueUsed: false,
@@ -901,8 +961,14 @@ class GameRoom {
     this.left = left;
     this.right = right;
     this.basicSpecialBaseEveryByType = randomBasicSpecialBaseEveryByType();
+    this.specialBaseChanceByType = randomSpecialBaseChanceByType();
+    this.tier2SpecialBaseEveryByType = randomTier2SpecialBaseEveryByType();
     this.left.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
     this.right.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.left.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+    this.right.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+    this.left.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+    this.right.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
     this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
@@ -1549,8 +1615,9 @@ class GameRoom {
       side.debugSpecialSpawnRateMultiplier = clamp(Number(cfg.specialSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
       side.debugSpecialChanceOverrides = {};
       for (const type of SPECIAL_SPAWN_QUEUE_ORDER) {
-        const fallback = clamp(specialSpawnBaseChanceForType(type) ?? 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
-        const raw = Number(cfg?.specialChanceOverrides?.[type]);
+        const fallback = clamp(this.specialBaseChanceForType(type) ?? 0, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX);
+        const rawValue = cfg?.specialChanceOverrides?.[type];
+        const raw = rawValue == null ? NaN : Number(rawValue);
         side.debugSpecialChanceOverrides[type] = Number.isFinite(raw)
           ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
           : fallback;
@@ -2077,8 +2144,14 @@ class GameRoom {
     this.left = makeSideState('left', this.archersPerSide);
     this.right = makeSideState('right', this.archersPerSide);
     this.basicSpecialBaseEveryByType = randomBasicSpecialBaseEveryByType();
+    this.specialBaseChanceByType = randomSpecialBaseChanceByType();
+    this.tier2SpecialBaseEveryByType = randomTier2SpecialBaseEveryByType();
     this.left.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
     this.right.specialBasicBaseEveryByType = { ...this.basicSpecialBaseEveryByType };
+    this.left.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+    this.right.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+    this.left.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+    this.right.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
     this.basicSpecialSharedBaseEvery = this.basicSpecialBaseEveryByType[BASIC_SPECIAL_SPAWN_TYPES[0]] || null;
     this.left.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
     this.right.specialBasicSharedBaseEvery = this.basicSpecialSharedBaseEvery;
@@ -5793,6 +5866,36 @@ class GameRoom {
     return this.scaleSpecialCooldownEvery(baseEvery * repeatMul, side);
   }
 
+  specialBaseChanceForType(type = null) {
+    const key = typeof type === 'string' ? type : '';
+    if (!this.specialBaseChanceByType || typeof this.specialBaseChanceByType !== 'object') {
+      this.specialBaseChanceByType = randomSpecialBaseChanceByType();
+      if (this.left && typeof this.left === 'object') this.left.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+      if (this.right && typeof this.right === 'object') this.right.specialBaseChanceByType = { ...this.specialBaseChanceByType };
+    }
+    const value = Number(this.specialBaseChanceByType[key]);
+    if (Number.isFinite(value)) return value;
+    const fallback = Number(specialSpawnBaseChanceForType(key));
+    return Number.isFinite(fallback) ? fallback : 0;
+  }
+
+  tier2SpecialBaseEveryForType(type = null) {
+    const key = typeof type === 'string' ? type : '';
+    if (!TIER2_SPECIAL_TYPE_SET.has(key)) return Infinity;
+    if (!this.tier2SpecialBaseEveryByType || typeof this.tier2SpecialBaseEveryByType !== 'object') {
+      this.tier2SpecialBaseEveryByType = randomTier2SpecialBaseEveryByType();
+      if (this.left && typeof this.left === 'object') this.left.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+      if (this.right && typeof this.right === 'object') this.right.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+    }
+    const value = Number(this.tier2SpecialBaseEveryByType[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+    const next = roundTo(randomTier2SpecialBaseEvery(), 3);
+    this.tier2SpecialBaseEveryByType[key] = next;
+    if (this.left && typeof this.left === 'object') this.left.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+    if (this.right && typeof this.right === 'object') this.right.specialTier2BaseEveryByType = { ...this.tier2SpecialBaseEveryByType };
+    return next;
+  }
+
   statSpecialCooldownMultiplier(matchTimeSec = null) {
     const t = Number.isFinite(matchTimeSec) ? matchTimeSec : this.t;
     const safeT = Math.max(0, Number(t) || 0);
@@ -5821,9 +5924,8 @@ class GameRoom {
 
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
-    const mythicPressure = Math.floor((side.powerLevel + side.economyLevel) / 6);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'dragon');
-    const baseEvery = Math.max(34, 68 - side.dragonLevel * 5 - mythicPressure * 2) * repeatMul;
+    const baseEvery = this.tier2SpecialBaseEveryForType('dragon') * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -5844,9 +5946,9 @@ class GameRoom {
   }
 
   statShieldEvery(side) {
-    const wallTech = Math.floor((side.unitHpLevel + side.powerLevel + side.spawnLevel) / 6);
-    const baseEvery = Math.max(17, 26 - wallTech) * this.specialRepeatSpawnEveryMultiplier(side, 'shield');
-    return this.scaleSpecialCooldownEvery(baseEvery * 4, side);
+    const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'shield');
+    const baseEvery = this.tier2SpecialBaseEveryForType('shield') * repeatMul;
+    return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
   statHeroEvery(side) {
@@ -5862,10 +5964,8 @@ class GameRoom {
 
   statBalloonEvery(side) {
     if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
-    const level = Math.max(1, Number(side?.balloonLevel) || 1);
-    const airTech = Math.floor((side.spawnLevel + side.powerLevel + level + side.economyLevel) / 8);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'balloon');
-    const baseEvery = Math.max(8, 18 - level * 2 - airTech) * repeatMul;
+    const baseEvery = this.tier2SpecialBaseEveryForType('balloon') * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -5876,7 +5976,7 @@ class GameRoom {
   statSuperEvery(side) {
     if (side.superMinionLevel <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'super');
-    const baseEvery = Math.max(28, 58 - side.superMinionLevel * 4) * repeatMul;
+    const baseEvery = this.tier2SpecialBaseEveryForType('super') * repeatMul;
     return this.scaleSpecialCooldownEvery(baseEvery, side);
   }
 
@@ -6239,7 +6339,7 @@ class GameRoom {
     const overrideBase = rawOverride == null ? NaN : Number(rawOverride);
     const base = Number.isFinite(overrideBase)
       ? overrideBase
-      : specialSpawnBaseChanceForType(type);
+      : this.specialBaseChanceForType(type);
     if (!Number.isFinite(base)) return 0;
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
     let chance = base;
