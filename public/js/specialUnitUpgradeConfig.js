@@ -128,7 +128,7 @@ const SPECIAL_UNIT_UPGRADE_ENTRIES = [
     },
     unlockLabel: 'Dark Shield',
     repeatLabel: '+Shield',
-    unlockHint: '10s cycle: 5s at 95% damage reduction, shield chance x2',
+    unlockHint: '10s cycle: 5s at 95% damage reduction',
     repeatHint: 'increases shield hp and push strength',
   },
   {

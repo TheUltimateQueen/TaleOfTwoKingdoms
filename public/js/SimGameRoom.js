@@ -6344,7 +6344,6 @@ class GameRoom {
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
     let chance = base;
     chance += this.specialRepeatSpawnChanceBonus(side, type);
-    if (type === 'shield' && (Number(side?.shieldDarkMetalLevel) || 0) > 0) chance *= 2;
     return clamp(chance, 0, 0.99);
   }
 

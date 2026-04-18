@@ -7847,9 +7847,6 @@ export class GameRenderer {
     if (specialType === 'stonegolem' && !this.stoneGolemSpawnUnlocked(sideState)) return 0;
     let chance = base;
     chance += this.specialRepeatSpawnChanceBonus(sideState, specialType);
-    if (specialType === 'shield' && (Number(sideState?.shieldDarkMetalLevel) || 0) > 0) {
-      chance *= 2;
-    }
     return Math.max(0, Math.min(0.99, chance));
   }
 

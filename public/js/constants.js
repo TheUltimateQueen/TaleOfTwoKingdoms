@@ -36,7 +36,7 @@ export const UPGRADE_HINTS = {
   dragonSuperBreathLevel: 'unlocks dragon cone breath burst (5s cycle)',
   stoneGolemAncientCoreLevel: 'summons a stone golem and upgrades golem scaling',
   heroDestinedChampionLevel: 'summons the hero and upgrades hero scaling',
-  shieldDarkMetalLevel: '10s cycle: 5s at 95% damage reduction and shield chance x2',
+  shieldDarkMetalLevel: '10s cycle: 5s at 95% damage reduction',
   monkHealCircleLevel: 'unlocks monk healing pulse (every 10s)',
   necroExpertSummonerLevel: 'nearby deaths revive as allied minions at 1/8 hp',
   riderSuperHorseLevel: 'rider hp x4 with stronger charge impact',
