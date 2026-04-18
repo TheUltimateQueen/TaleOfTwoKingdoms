@@ -10624,12 +10624,12 @@ export class GameRenderer {
     const cardW = UPGRADE_SELECTION_CARD_W;
     const cardH = UPGRADE_SELECTION_CARD_H;
     const cardLevel = Math.max(0, Number(level) || 0);
-    const panelColor = selected ? this.mixColor(style.panel, '#604b16', 0.2) : style.panel;
-    const glowColor = selected ? this.withAlpha('#ffd26f', 0.32) : style.glow;
-    const borderColor = selected ? '#ffe4a0' : style.border;
-    const tagColor = selected ? '#ffe2a8' : style.hint;
-    const titleColor = selected ? '#fff4d4' : style.title;
-    const subColor = selected ? '#f7d89f' : style.hint;
+    const panelColor = style.panel;
+    const glowColor = style.glow;
+    const borderColor = style.border;
+    const tagColor = style.hint;
+    const titleColor = style.title;
+    const subColor = style.hint;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -10640,8 +10640,14 @@ export class GameRenderer {
     ctx.fillStyle = glowColor;
     ctx.fillRect(-cardW / 2 + 1, -cardH / 2 + 1, cardW - 2, cardH - 2);
     ctx.strokeStyle = borderColor;
-    ctx.lineWidth = selected ? 2.3 : 1.8;
+    ctx.lineWidth = 1.8;
     ctx.strokeRect(-cardW / 2, -cardH / 2, cardW, cardH);
+    if (selected) {
+      // Keep original card palette; use a ring to show selection.
+      ctx.strokeStyle = this.withAlpha('#ffe4a0', 0.95);
+      ctx.lineWidth = 2.1;
+      ctx.strokeRect(-cardW / 2 - 3, -cardH / 2 - 3, cardW + 6, cardH + 6);
+    }
 
     const iconX = -cardW / 2 + 11;
     const iconY = -cardH / 2 + 10.5;
@@ -10649,11 +10655,11 @@ export class GameRenderer {
     ctx.beginPath();
     ctx.arc(iconX, iconY, 10.8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = this.mixColor(style.badge, '#ffffff', selected ? 0.9 : 0.82);
+    ctx.fillStyle = this.mixColor(style.badge, '#ffffff', 0.82);
     ctx.beginPath();
     ctx.arc(iconX, iconY, 9.1, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = selected ? this.withAlpha('#ffe4a0', 0.95) : this.withAlpha(style.border, 0.95);
+    ctx.strokeStyle = this.withAlpha(style.border, 0.95);
     ctx.lineWidth = 1.1;
     ctx.stroke();
     this.drawUpgradeGlyph(type, iconX, iconY, 8, '#1f2230');
@@ -10662,7 +10668,7 @@ export class GameRenderer {
     ctx.textAlign = 'center';
     ctx.fillStyle = tagColor;
     ctx.font = 'bold 7px sans-serif';
-    ctx.fillText(selected ? 'SELECTED' : style.tag, textX, -15);
+    ctx.fillText(style.tag, textX, -15);
     ctx.fillStyle = titleColor;
     ctx.font = '10px sans-serif';
     const title = this.fitUpgradeCardText(
@@ -10673,7 +10679,7 @@ export class GameRenderer {
     ctx.fillText(title, textX, -5);
     ctx.fillStyle = subColor;
     ctx.font = '8px sans-serif';
-    const subText = selected ? 'locked in' : 'not chosen';
+    const subText = selected ? 'selected' : 'not chosen';
     ctx.fillText(subText, textX, 4);
     ctx.font = 'bold 8px sans-serif';
     ctx.fillText(`L${cardLevel}`, 0, 20);

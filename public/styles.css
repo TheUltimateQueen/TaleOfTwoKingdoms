@@ -1638,8 +1638,10 @@ kbd {
 }
 
 .committee-vote-option.selected {
-  border-color: #f3b66c;
-  box-shadow: inset 0 0 0 1px #f3b66c55, 0 5px 14px #101c307d;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--vote-accent), #fff 30%),
+    0 0 0 2px #f3b66c99,
+    0 5px 14px #101c307d;
 }
 
 .committee-vote-option.vote-category-arrow {
@@ -1736,9 +1738,7 @@ kbd {
 }
 
 .committee-vote-option.selected .committee-vote-option-badge {
-  border-color: #f3b66c;
-  background: #68411c;
-  color: #ffe5ba;
+  box-shadow: 0 0 0 1px #f3b66c99;
 }
 
 .committee-vote-option.vote-result-winner .committee-vote-option-badge {
@@ -1772,7 +1772,7 @@ kbd {
 }
 
 .committee-vote-option.selected .committee-vote-option-meter-fill {
-  background: linear-gradient(90deg, #f0bb68 0%, #ffd292 100%);
+  box-shadow: 0 0 0 1px #f3b66c66 inset;
 }
 
 .committee-vote-option.vote-result-winner .committee-vote-option-meter-fill {
