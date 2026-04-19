@@ -6148,49 +6148,53 @@ class GameRoom {
     const progressMap = this.ensureSpecialSpawnProgressMap(side);
     const existing = cadenceMap[type];
     if (existing && typeof existing === 'object') {
-      const baseEvery = Number(existing.baseEvery);
-      const currentEvery = Number(existing.currentEvery);
-      const progress = Math.max(0, Number(existing.progress) || 0);
-      if (Number.isFinite(baseEvery) && Number.isFinite(currentEvery) && currentEvery > 0) {
-        existing.baseEvery = roundTo(baseEvery, 3);
-        existing.currentEvery = roundTo(currentEvery, 3);
-        const matchMultiplier = Number(existing.matchMultiplier);
-        const jitterRatio = Number(existing.jitterRatio);
-        if (Number.isFinite(matchMultiplier) && Number.isFinite(jitterRatio)) {
-          existing.matchMultiplier = roundTo(clamp(matchMultiplier, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
-          existing.jitterRatio = roundTo(clamp(jitterRatio, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX), 3);
-        } else if (Number.isFinite(matchMultiplier)) {
-          existing.matchMultiplier = roundTo(clamp(matchMultiplier, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
-          existing.jitterRatio = roundTo(clamp(
-            (currentEvery / Math.max(0.0001, baseEvery * existing.matchMultiplier)) - 1,
-            -SPECIAL_CADENCE_JITTER_MAX,
-            SPECIAL_CADENCE_JITTER_MAX
-          ), 3);
-        } else if (Number.isFinite(jitterRatio)) {
-          existing.jitterRatio = roundTo(clamp(jitterRatio, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX), 3);
-          existing.matchMultiplier = roundTo(clamp(currentEvery / Math.max(0.0001, baseEvery * (1 + existing.jitterRatio)), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
-        } else {
-          existing.matchMultiplier = roundTo(clamp(currentEvery / Math.max(0.0001, baseEvery), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3);
-          existing.jitterRatio = roundTo(clamp(
-            (currentEvery / Math.max(0.0001, baseEvery * existing.matchMultiplier)) - 1,
-            -SPECIAL_CADENCE_JITTER_MAX,
-            SPECIAL_CADENCE_JITTER_MAX
-          ), 3);
+      const priorBaseEvery = Number(existing.baseEvery);
+      const priorCurrentEvery = Number(existing.currentEvery);
+      const priorProgress = Math.max(0, Number(existing.progress) || 0);
+      const liveBaseEvery = this.specialSpawnBaseEveryForType(side, type, matchTimeSec);
+      if (Number.isFinite(liveBaseEvery) && liveBaseEvery > 0) {
+        const sharedRoll = this.specialCadenceSharedRollForType(type);
+        let matchMultiplier = Number(existing.matchMultiplier);
+        if (!Number.isFinite(matchMultiplier)) matchMultiplier = Number(sharedRoll.matchMultiplier);
+        matchMultiplier = clamp(
+          Number.isFinite(matchMultiplier) ? matchMultiplier : 1,
+          SPECIAL_CADENCE_MATCH_MULT_MIN,
+          SPECIAL_CADENCE_MATCH_MULT_MAX
+        );
+        let jitterRatio = Number(existing.jitterRatio);
+        if (!Number.isFinite(jitterRatio)) {
+          if (Number.isFinite(priorBaseEvery) && priorBaseEvery > 0 && Number.isFinite(priorCurrentEvery) && priorCurrentEvery > 0) {
+            jitterRatio = (priorCurrentEvery / Math.max(0.0001, priorBaseEvery * matchMultiplier)) - 1;
+          } else {
+            jitterRatio = 0;
+          }
         }
-        existing.deltaRatio = roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3);
+        jitterRatio = clamp(jitterRatio, -SPECIAL_CADENCE_JITTER_MAX, SPECIAL_CADENCE_JITTER_MAX);
+        const currentEvery = Math.max(1, liveBaseEvery * matchMultiplier * (1 + jitterRatio));
+        const priorCycleForProgress = (Number.isFinite(priorCurrentEvery) && priorCurrentEvery > 0)
+          ? priorCurrentEvery
+          : currentEvery;
+        const progressRatio = clamp(priorProgress / Math.max(0.0001, priorCycleForProgress), 0, 1);
+        const progress = progressRatio * currentEvery;
+        existing.baseEvery = roundTo(liveBaseEvery, 3);
+        existing.currentEvery = roundTo(currentEvery, 3);
+        existing.matchMultiplier = roundTo(matchMultiplier, 3);
+        existing.jitterRatio = roundTo(jitterRatio, 3);
+        existing.deltaRatio = roundTo((currentEvery / Math.max(0.0001, liveBaseEvery)) - 1, 3);
         existing.progress = roundTo(progress, 3);
         existing.remainingSpawns = roundTo(Math.max(0, currentEvery - progress), 3);
         progressMap[type] = existing.progress;
         return existing;
       }
-      existing.matchMultiplier = Number.isFinite(existing.matchMultiplier)
-        ? roundTo(clamp(Number(existing.matchMultiplier), SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3)
+      const fallbackMatch = Number(existing.matchMultiplier);
+      existing.matchMultiplier = Number.isFinite(fallbackMatch)
+        ? roundTo(clamp(fallbackMatch, SPECIAL_CADENCE_MATCH_MULT_MIN, SPECIAL_CADENCE_MATCH_MULT_MAX), 3)
         : this.specialCadenceSharedRollForType(type).matchMultiplier;
       existing.baseEvery = null;
       existing.currentEvery = null;
       existing.jitterRatio = null;
       existing.deltaRatio = null;
-      existing.progress = roundTo(progress, 3);
+      existing.progress = roundTo(priorProgress, 3);
       existing.remainingSpawns = null;
       progressMap[type] = existing.progress;
       return existing;
@@ -10942,6 +10946,8 @@ class GameRoom {
     const nextDebt = Math.max(1, Math.round(Number(card.cost) || this.upgradeCost(side, card.type)));
 
     this.awardUpgrade(side, card.type, card.value);
+    this.primeSpecialSpawnCadenceState(sideName, this.t);
+    side.candleSpawnInSpawns = this.statCandleEvery(side);
     this.triggerUpgradeActivation(sideName, card.type, card.value, card.x, card.y);
     this.setUpgradeSelectionFx(sideName, { ...card, id: selectedOptionId }, fxOptions);
     this.clearCardsForSide(sideName);
