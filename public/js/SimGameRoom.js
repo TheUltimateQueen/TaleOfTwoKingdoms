@@ -356,6 +356,12 @@ const SPECIAL_COOLDOWN_END_MULT = 1;
 const SPECIAL_TIER2_COOLDOWN_END_MULT = 0.4;
 const SPECIAL_COOLDOWN_RAMP_SECONDS = 300;
 const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
+const BASIC_SPECIAL_MIN_CADENCE_SECONDS = 10;
+const TIER2_SPECIAL_MIN_CADENCE_SECONDS = 15;
+const TIER2_SPECIAL_CHANCE_CAP = 0.99;
+const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.15;
+const TIER2_REPEAT_EVERY_CURVE_RATE = 0.26;
+const TIER2_REPEAT_EVERY_MIN_MULT = 0.18;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -2836,7 +2842,8 @@ class GameRoom {
 
   statCandleEvery(side) {
     const baseEvery = this.tier2SpecialBaseEveryForType('candle');
-    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    const every = this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    return this.clampTier2CadenceInSpawns(every, side);
   }
 
   statCandleSpawnChance(side) {
@@ -5869,7 +5876,8 @@ class GameRoom {
   statBasicSpecialEvery(side, specialType) {
     const baseEvery = this.basicSpecialBaseEveryForSideType(side, specialType);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, specialType);
-    return this.scaleSpecialCooldownEvery(baseEvery * repeatMul, side);
+    const every = this.scaleSpecialCooldownEvery(baseEvery * repeatMul, side);
+    return this.clampBasicCadenceInSpawns(every, side);
   }
 
   specialBaseChanceForType(type = null) {
@@ -5935,11 +5943,34 @@ class GameRoom {
     return this.scaleSpecialCooldownEvery(baseEvery, side, 1, SPECIAL_TIER2_COOLDOWN_END_MULT);
   }
 
+  basicMinCadenceInSpawns(side = null) {
+    const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side || {}));
+    return Math.max(1, Math.ceil(BASIC_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+  }
+
+  clampBasicCadenceInSpawns(every, side = null) {
+    if (!Number.isFinite(every)) return every;
+    const floorInSpawns = this.basicMinCadenceInSpawns(side);
+    return Math.max(floorInSpawns, Math.max(1, Math.round(every)));
+  }
+
+  tier2MinCadenceInSpawns(side = null) {
+    const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side || {}));
+    return Math.max(1, Math.ceil(TIER2_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+  }
+
+  clampTier2CadenceInSpawns(every, side = null) {
+    if (!Number.isFinite(every)) return every;
+    const floorInSpawns = this.tier2MinCadenceInSpawns(side);
+    return Math.max(floorInSpawns, Math.max(1, Math.round(every)));
+  }
+
   statDragonEvery(side) {
     if (side.dragonLevel <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'dragon');
     const baseEvery = this.tier2SpecialBaseEveryForType('dragon') * repeatMul;
-    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    const every = this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    return this.clampTier2CadenceInSpawns(every, side);
   }
 
   statGunnerEvery(side) {
@@ -5961,7 +5992,8 @@ class GameRoom {
   statShieldEvery(side) {
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'shield');
     const baseEvery = this.tier2SpecialBaseEveryForType('shield') * repeatMul;
-    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    const every = this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    return this.clampTier2CadenceInSpawns(every, side);
   }
 
   statHeroEvery(side) {
@@ -5979,7 +6011,8 @@ class GameRoom {
     if ((Number(side?.balloonLevel) || 0) <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'balloon');
     const baseEvery = this.tier2SpecialBaseEveryForType('balloon') * repeatMul;
-    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    const every = this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    return this.clampTier2CadenceInSpawns(every, side);
   }
 
   statNecroEvery(side = null) {
@@ -5990,7 +6023,8 @@ class GameRoom {
     if (side.superMinionLevel <= 0) return Infinity;
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(side, 'super');
     const baseEvery = this.tier2SpecialBaseEveryForType('super') * repeatMul;
-    return this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    const every = this.scaleTier2SpecialCooldownEvery(baseEvery, side);
+    return this.clampTier2CadenceInSpawns(every, side);
   }
 
   specialRepeatLevel(side, specialType) {
@@ -6006,18 +6040,35 @@ class GameRoom {
     return Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
   }
 
-  specialRepeatSpawnChanceBonus(side, specialType) {
+  specialRepeatSpawnChanceBonus(side, specialType, baseChance = null) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     const repeatLevel = this.specialRepeatLevel(side, specialType);
     if (repeatLevel <= 0) return 0;
+    if (TIER2_SPECIAL_TYPE_SET.has(specialType)) {
+      const fromArg = baseChance == null ? NaN : Number(baseChance);
+      const baseRaw = Number.isFinite(fromArg)
+        ? fromArg
+        : Number(this.specialBaseChanceForType(specialType));
+      const base = clamp(baseRaw, 0, TIER2_SPECIAL_CHANCE_CAP);
+      const progress = 1 - Math.exp(-TIER2_REPEAT_CHANCE_CURVE_RATE * repeatLevel);
+      const bonus = (TIER2_SPECIAL_CHANCE_CAP - base) * progress;
+      return clamp(bonus, 0, TIER2_SPECIAL_CHANCE_CAP - base);
+    }
     const perLevel = this.specialRepeatChanceBonusPerLevel(specialType, rule);
     return Math.min(SPECIAL_REPEAT_CHANCE_BONUS_MAX, repeatLevel * perLevel);
   }
 
   specialRepeatSpawnEveryMultiplier(side, specialType) {
-    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
     const repeatLevel = this.specialRepeatLevel(side, specialType);
     if (repeatLevel <= 0) return 1;
+    if (TIER2_SPECIAL_TYPE_SET.has(specialType)) {
+      return clamp(
+        TIER2_REPEAT_EVERY_MIN_MULT + (1 - TIER2_REPEAT_EVERY_MIN_MULT) * Math.exp(-TIER2_REPEAT_EVERY_CURVE_RATE * repeatLevel),
+        TIER2_REPEAT_EVERY_MIN_MULT,
+        1
+      );
+    }
+    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
     const override = Number(SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE[specialType]);
     const perLevel = Number.isFinite(override)
       ? Math.max(0, override)
@@ -6356,7 +6407,7 @@ class GameRoom {
     if (!Number.isFinite(base)) return 0;
     if (type === 'stonegolem' && !this.stoneGolemSpawnUnlocked(side)) return 0;
     let chance = base;
-    chance += this.specialRepeatSpawnChanceBonus(side, type);
+    chance += this.specialRepeatSpawnChanceBonus(side, type, base);
     return clamp(chance, 0, 0.99);
   }
 

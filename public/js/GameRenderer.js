@@ -251,6 +251,12 @@ const SPECIAL_TYPE_TO_ROW_TYPE = Object.freeze(
 );
 const SUPPORT_SPECIAL_TYPE_SET = new Set(SUPPORT_SPECIAL_TYPES);
 const TIER2_SPECIAL_TYPE_SET = new Set(['dragon', 'shield', 'super', 'balloon', 'candle']);
+const BASIC_SPECIAL_MIN_CADENCE_SECONDS = 10;
+const TIER2_SPECIAL_MIN_CADENCE_SECONDS = 15;
+const TIER2_SPECIAL_CHANCE_CAP = 0.99;
+const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.15;
+const TIER2_REPEAT_EVERY_CURVE_RATE = 0.26;
+const TIER2_REPEAT_EVERY_MIN_MULT = 0.18;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -7758,6 +7764,28 @@ export class GameRenderer {
     return Math.max(0.65, 2.2 - level * 0.09);
   }
 
+  basicMinCadenceInSpawnsForUi(sideState) {
+    const spawnEverySeconds = Math.max(0.0001, this.spawnEveryForSide(sideState));
+    return Math.max(1, Math.ceil(BASIC_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+  }
+
+  clampBasicCadenceInSpawnsForUi(every, sideState) {
+    if (!Number.isFinite(every)) return every;
+    const floorInSpawns = this.basicMinCadenceInSpawnsForUi(sideState);
+    return Math.max(floorInSpawns, Math.max(1, Math.round(every)));
+  }
+
+  tier2MinCadenceInSpawnsForUi(sideState) {
+    const spawnEverySeconds = Math.max(0.0001, this.spawnEveryForSide(sideState));
+    return Math.max(1, Math.ceil(TIER2_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+  }
+
+  clampTier2CadenceInSpawnsForUi(every, sideState) {
+    if (!Number.isFinite(every)) return every;
+    const floorInSpawns = this.tier2MinCadenceInSpawnsForUi(sideState);
+    return Math.max(floorInSpawns, Math.max(1, Math.round(every)));
+  }
+
   specialRepeatLevelForType(sideState, specialType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     if (!rule?.upgradeType) return 0;
@@ -7771,18 +7799,37 @@ export class GameRenderer {
     return Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
   }
 
-  specialRepeatSpawnChanceBonus(sideState, specialType) {
+  specialRepeatSpawnChanceBonus(sideState, specialType, baseChance = null) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     const repeatLevel = this.specialRepeatLevelForType(sideState, specialType);
     if (repeatLevel <= 0) return 0;
+    if (TIER2_SPECIAL_TYPE_SET.has(specialType)) {
+      const fromArg = baseChance == null ? NaN : Number(baseChance);
+      const baseRaw = Number.isFinite(fromArg)
+        ? fromArg
+        : Number(sideState?.specialBaseChanceByType?.[specialType]);
+      const base = Math.max(0, Math.min(TIER2_SPECIAL_CHANCE_CAP, Number.isFinite(baseRaw) ? baseRaw : 0));
+      const progress = 1 - Math.exp(-TIER2_REPEAT_CHANCE_CURVE_RATE * repeatLevel);
+      const bonus = (TIER2_SPECIAL_CHANCE_CAP - base) * progress;
+      return Math.max(0, Math.min(TIER2_SPECIAL_CHANCE_CAP - base, bonus));
+    }
     const perLevel = this.specialRepeatChanceBonusPerLevelForType(specialType, rule);
     return Math.min(SPECIAL_REPEAT_CHANCE_BONUS_MAX, repeatLevel * perLevel);
   }
 
   specialRepeatSpawnEveryMultiplier(sideState, specialType) {
-    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
     const repeatLevel = this.specialRepeatLevelForType(sideState, specialType);
     if (repeatLevel <= 0) return 1;
+    if (TIER2_SPECIAL_TYPE_SET.has(specialType)) {
+      return Math.max(
+        TIER2_REPEAT_EVERY_MIN_MULT,
+        Math.min(
+          1,
+          TIER2_REPEAT_EVERY_MIN_MULT + (1 - TIER2_REPEAT_EVERY_MIN_MULT) * Math.exp(-TIER2_REPEAT_EVERY_CURVE_RATE * repeatLevel)
+        )
+      );
+    }
+    if (!SPECIAL_REPEAT_EVERY_TYPE_SET.has(specialType)) return 1;
     const override = Number(SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL_BY_TYPE[specialType]);
     const perLevel = Number.isFinite(override)
       ? Math.max(0, override)
@@ -7793,7 +7840,8 @@ export class GameRenderer {
 
   candleEveryForSide(sideState, matchTimeSec = 0) {
     const baseEvery = this.tier2SpecialBaseEveryForType(sideState, 'candle');
-    return this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
+    const every = this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
+    return this.clampTier2CadenceInSpawnsForUi(every, sideState);
   }
 
   stoneGolemEveryForSide(sideState, matchTimeSec = 0) {
@@ -7832,7 +7880,8 @@ export class GameRenderer {
   basicSpecialTrainingEvery(sideState, specialType, matchTimeSec = 0) {
     const baseEvery = this.basicSpecialBaseEveryForType(sideState, specialType);
     const repeatMul = this.specialRepeatSpawnEveryMultiplier(sideState, specialType);
-    return this.scaledSpecialEveryForUi(baseEvery * repeatMul, matchTimeSec);
+    const every = this.scaledSpecialEveryForUi(baseEvery * repeatMul, matchTimeSec);
+    return this.clampBasicCadenceInSpawnsForUi(every, sideState);
   }
 
   specialSpawnChanceForType(sideState, specialType) {
@@ -7845,7 +7894,7 @@ export class GameRenderer {
     if (!Number.isFinite(base)) return null;
     if (specialType === 'stonegolem' && !this.stoneGolemSpawnUnlocked(sideState)) return 0;
     let chance = base;
-    chance += this.specialRepeatSpawnChanceBonus(sideState, specialType);
+    chance += this.specialRepeatSpawnChanceBonus(sideState, specialType, base);
     return Math.max(0, Math.min(0.99, chance));
   }
 
@@ -7945,7 +7994,8 @@ export class GameRenderer {
     if (type === 'shield') {
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'shield');
       const baseEvery = this.tier2SpecialBaseEveryForType(s, 'shield') * repeatMul;
-      return this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
+      const every = this.scaledTier2SpecialEveryForUi(baseEvery, matchTimeSec);
+      return this.clampTier2CadenceInSpawnsForUi(every, s);
     }
     if (type === 'hero') {
       if (!s.towerDamagedOnce) return Infinity;
@@ -7958,17 +8008,20 @@ export class GameRenderer {
     if (type === 'balloon') {
       if (balloon <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'balloon');
-      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'balloon') * repeatMul, matchTimeSec);
+      const every = this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'balloon') * repeatMul, matchTimeSec);
+      return this.clampTier2CadenceInSpawnsForUi(every, s);
     }
     if (type === 'dragon') {
       if (dragon <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'dragon');
-      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'dragon') * repeatMul, matchTimeSec);
+      const every = this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'dragon') * repeatMul, matchTimeSec);
+      return this.clampTier2CadenceInSpawnsForUi(every, s);
     }
     if (type === 'super') {
       if (sup <= 0) return Infinity;
       const repeatMul = this.specialRepeatSpawnEveryMultiplier(s, 'super');
-      return this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'super') * repeatMul, matchTimeSec);
+      const every = this.scaledTier2SpecialEveryForUi(this.tier2SpecialBaseEveryForType(s, 'super') * repeatMul, matchTimeSec);
+      return this.clampTier2CadenceInSpawnsForUi(every, s);
     }
     return Infinity;
   }
