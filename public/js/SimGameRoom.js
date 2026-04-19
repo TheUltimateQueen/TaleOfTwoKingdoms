@@ -447,6 +447,7 @@ const COMMITTEE_VOTE_DURATION_SECONDS = 5;
 const UPGRADE_SELECTION_FX_DURATION = 2.2;
 const REGULAR_SPECIAL_PAIR_PICK_CHANCE = 0.62;
 const COMMITTEE_SPECIAL_BUCKET_WEIGHT_MULT = 1.75;
+const ECONOMY_UPGRADE_CARD_WEIGHT_MULT = 0.25;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -10377,7 +10378,7 @@ class GameRoom {
         type,
         source: 'random',
         path: this.upgradePathForType(type),
-        weight: regularWeight,
+        weight: regularWeight * (type === 'resourceLevel' ? ECONOMY_UPGRADE_CARD_WEIGHT_MULT : 1),
       });
     }
 
