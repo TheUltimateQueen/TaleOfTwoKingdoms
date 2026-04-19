@@ -362,6 +362,7 @@ const TIER2_SPECIAL_CHANCE_CAP = 0.99;
 const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.15;
 const TIER2_REPEAT_EVERY_CURVE_RATE = 0.26;
 const TIER2_REPEAT_EVERY_MIN_MULT = 0.18;
+const SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV = 0.85;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -444,6 +445,8 @@ const MAX_COMMITTEE_PLAYERS_PER_SIDE = 12;
 const COMMITTEE_VOTE_OPTION_COUNT = 4;
 const COMMITTEE_VOTE_DURATION_SECONDS = 5;
 const UPGRADE_SELECTION_FX_DURATION = 2.2;
+const REGULAR_SPECIAL_PAIR_PICK_CHANCE = 0.62;
+const COMMITTEE_SPECIAL_BUCKET_WEIGHT_MULT = 1.75;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -6030,7 +6033,10 @@ class GameRoom {
   specialRepeatLevel(side, specialType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     if (!rule?.upgradeType) return 0;
-    return Math.max(0, (Number(side?.[rule.upgradeType]) || 0) - 1);
+    const level = Math.max(0, Number(side?.[rule.upgradeType]) || 0);
+    if (level <= 0) return 0;
+    const repeatLevels = Math.max(0, level - 1);
+    return repeatLevels + SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV;
   }
 
   specialRepeatChanceBonusPerLevel(specialType, rule = null) {
@@ -10359,9 +10365,10 @@ class GameRoom {
     }
   }
 
-  buildUpgradeCardCandidates(side, excludedTypes = new Set()) {
+  buildUpgradeCardCandidates(side, excludedTypes = new Set(), options = null) {
     const candidates = [];
     const regularWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.regularUpgradeWeight) || 0);
+    const specialBucketWeightMultiplier = Math.max(0, Number(options?.specialBucketWeightMultiplier) || 1);
     for (const type of UPGRADE_TYPES) {
       if (this.isRepeatSpecialUpgradeType(type)) continue;
       if (excludedTypes.has(type)) continue;
@@ -10377,7 +10384,7 @@ class GameRoom {
     const repeatRules = this.repeatSpecialEligibleRules(side, excludedTypes);
     const specialRules = this.specialBucketEligibleRules(side, excludedTypes);
     if (specialRules.length) {
-      const bucketWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.bucketWeight) || 0);
+      const bucketWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.bucketWeight) || 0) * specialBucketWeightMultiplier;
       const weightedRules = specialRules.map((rule) => {
         const base = Math.max(0.05, Number(rule.baseOfferWeight) || 1);
         const level = Number(side?.[rule.upgradeType]) || 0;
@@ -10583,9 +10590,10 @@ class GameRoom {
     const targetCount = Math.max(2, Math.floor(Number(optionCount) || COMMITTEE_VOTE_OPTION_COUNT));
     const options = [];
     const usedTypes = new Set();
+    const candidateOptions = { specialBucketWeightMultiplier: COMMITTEE_SPECIAL_BUCKET_WEIGHT_MULT };
 
     for (let i = 0; i < targetCount; i += 1) {
-      const candidates = this.buildUpgradeCardCandidates(sideState, usedTypes);
+      const candidates = this.buildUpgradeCardCandidates(sideState, usedTypes, candidateOptions);
       if (!candidates.length) break;
       const choice = weightedRandomFrom(candidates);
       const type = choice?.type;
@@ -10599,13 +10607,15 @@ class GameRoom {
     }
 
     if (options.length < targetCount) {
-      const fallback = this.buildUpgradeCardCandidates(sideState, new Set());
       let guard = 0;
-      while (options.length < targetCount && fallback.length && guard < targetCount * 12) {
+      while (options.length < targetCount && guard < targetCount * 12) {
         guard += 1;
+        const fallback = this.buildUpgradeCardCandidates(sideState, usedTypes, candidateOptions);
+        if (!fallback.length) break;
         const choice = weightedRandomFrom(fallback);
         const type = choice?.type;
-        if (!type) continue;
+        if (!type || usedTypes.has(type)) continue;
+        usedTypes.add(type);
         options.push({
           id: `${side}-${this.committeeVoteSeq++}`,
           type,
@@ -10859,11 +10869,19 @@ class GameRoom {
     return UPGRADE_PATH_BY_TYPE[type] || 'misc';
   }
 
-  pickUpgradeCardChoice(side, excludedTypes = new Set(), excludedPaths = new Set()) {
-    const allCandidates = this.buildUpgradeCardCandidates(side, excludedTypes);
-    const withPathSpread = allCandidates.filter((candidate) => !excludedPaths.has(candidate.path));
-    if (withPathSpread.length) return weightedRandomFrom(withPathSpread);
-    if (allCandidates.length) return weightedRandomFrom(allCandidates);
+  pickUpgradeCardChoice(side, excludedTypes = new Set(), excludedPaths = new Set(), options = null) {
+    const allCandidates = this.buildUpgradeCardCandidates(side, excludedTypes, options?.candidateOptions || null);
+    const blockedPaths = new Set(excludedPaths);
+    if (options?.allowSpecialPathDuplicate) blockedPaths.delete('special');
+    const withPathSpread = allCandidates.filter((candidate) => !blockedPaths.has(candidate.path));
+    const pool = withPathSpread.length ? withPathSpread : allCandidates;
+    if (!pool.length) return null;
+    const preferSpecialChance = Math.max(0, Math.min(1, Number(options?.preferSpecialChance) || 0));
+    if (preferSpecialChance > 0 && Math.random() < preferSpecialChance) {
+      const specialPool = pool.filter((candidate) => candidate?.path === 'special');
+      if (specialPool.length) return weightedRandomFrom(specialPool);
+    }
+    if (pool.length) return weightedRandomFrom(pool);
     return null;
   }
 
@@ -10876,7 +10894,11 @@ class GameRoom {
 
     for (let slot = 0; slot < 2; slot += 1) {
       if (!this.hasCardInSlot(sideName, slot)) {
-        const choice = this.pickUpgradeCardChoice(side, usedTypes, usedPaths);
+        const allowSpecialPair = usedPaths.has('special');
+        const choice = this.pickUpgradeCardChoice(side, usedTypes, usedPaths, {
+          allowSpecialPathDuplicate: allowSpecialPair,
+          preferSpecialChance: allowSpecialPair ? REGULAR_SPECIAL_PAIR_PICK_CHANCE : 0,
+        });
         if (!choice?.type) continue;
         this.addUpgradeCard(sideName, slot, choice.type, choice.source || 'random');
         usedTypes.add(choice.type);

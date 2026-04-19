@@ -257,6 +257,7 @@ const TIER2_SPECIAL_CHANCE_CAP = 0.99;
 const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.15;
 const TIER2_REPEAT_EVERY_CURVE_RATE = 0.26;
 const TIER2_REPEAT_EVERY_MIN_MULT = 0.18;
+const SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV = 0.85;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
@@ -7789,7 +7790,10 @@ export class GameRenderer {
   specialRepeatLevelForType(sideState, specialType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[specialType] || null;
     if (!rule?.upgradeType) return 0;
-    return Math.max(0, (Number(sideState?.[rule.upgradeType]) || 0) - 1);
+    const level = Math.max(0, Number(sideState?.[rule.upgradeType]) || 0);
+    if (level <= 0) return 0;
+    const repeatLevels = Math.max(0, level - 1);
+    return repeatLevels + SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV;
   }
 
   specialRepeatChanceBonusPerLevelForType(specialType, rule = null) {
