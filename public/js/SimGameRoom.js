@@ -359,16 +359,17 @@ const SPECIAL_COOLDOWN_STEP_SECONDS = 10;
 const BASIC_SPECIAL_MIN_CADENCE_SECONDS = 10;
 const TIER2_SPECIAL_MIN_CADENCE_SECONDS = 15;
 const TIER2_SPECIAL_CHANCE_CAP = 0.99;
-const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.15;
+const TIER2_REPEAT_CHANCE_CURVE_RATE = 0.18;
 const TIER2_REPEAT_EVERY_CURVE_RATE = 0.26;
 const TIER2_REPEAT_EVERY_MIN_MULT = 0.18;
-const SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV = 0.85;
-const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.01;
+const SPECIAL_UNLOCK_BONUS_LEVEL_EQUIV = 1;
+const BASIC_SPECIAL_REPEAT_CHANCE_MIN_PER_LEVEL = 0.05;
+const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL = 0.0125;
 const SPECIAL_REPEAT_CHANCE_BONUS_MAX = 0.2;
 const SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE = Object.freeze({
-  dragon: 0.014,
-  super: 0.018,
-  shield: 0.004,
+  dragon: 0.0175,
+  super: 0.0225,
+  shield: 0.005,
 });
 const SPECIAL_REPEAT_EVERY_BONUS_PER_LEVEL = 0.03;
 const SPECIAL_REPEAT_EVERY_BONUS_MAX = 0.24;
@@ -6044,7 +6045,11 @@ class GameRoom {
     const configured = Math.max(0, Number(rule?.repeatChancePerLevel) || 0);
     if (configured > 0) return configured;
     const override = Number(SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL_BY_TYPE[specialType]);
-    return Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
+    let perLevel = Number.isFinite(override) ? Math.max(0, override) : SPECIAL_REPEAT_CHANCE_BONUS_PER_LEVEL;
+    if (BASIC_SPECIAL_TYPE_SET.has(specialType)) {
+      perLevel = Math.max(perLevel, BASIC_SPECIAL_REPEAT_CHANCE_MIN_PER_LEVEL);
+    }
+    return perLevel;
   }
 
   specialRepeatSpawnChanceBonus(side, specialType, baseChance = null) {
