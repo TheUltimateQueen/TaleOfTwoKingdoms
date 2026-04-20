@@ -101,6 +101,9 @@ const TOTAL_FEEDING_GRAIN_THROW_TTL = 0.52;
 const TOTAL_FEEDING_GRAIN_ARC_MIN = 34;
 const TOTAL_FEEDING_GRAIN_ARC_MAX = 62;
 const TOTAL_FEEDING_GRAIN_TOWER_Y = TOWER_Y - 18;
+const TOTAL_FEEDING_GRAIN_JUMP_TTL = 0.58;
+const TOTAL_FEEDING_GRAIN_JUMP_ARC_MIN = 62;
+const TOTAL_FEEDING_GRAIN_JUMP_ARC_MAX = 96;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
@@ -4712,6 +4715,15 @@ class GameRoom {
       if (m.totalFeedingGrainFoodType !== 'rice' && m.totalFeedingGrainFoodType !== 'bread') {
         m.totalFeedingGrainFoodType = m.side === 'right' ? 'rice' : 'bread';
       }
+      if (!Number.isFinite(m.totalFeedingGrainJumpTtl)) m.totalFeedingGrainJumpTtl = 0;
+      if (!Number.isFinite(m.totalFeedingGrainJumpMaxTtl) || m.totalFeedingGrainJumpMaxTtl <= 0) {
+        m.totalFeedingGrainJumpMaxTtl = TOTAL_FEEDING_GRAIN_JUMP_TTL;
+      }
+      if (!Number.isFinite(m.totalFeedingGrainJumpFromX)) m.totalFeedingGrainJumpFromX = null;
+      if (!Number.isFinite(m.totalFeedingGrainJumpFromY)) m.totalFeedingGrainJumpFromY = null;
+      if (!Number.isFinite(m.totalFeedingGrainJumpToX)) m.totalFeedingGrainJumpToX = null;
+      if (!Number.isFinite(m.totalFeedingGrainJumpToY)) m.totalFeedingGrainJumpToY = null;
+      if (!Number.isFinite(m.totalFeedingGrainJumpArc)) m.totalFeedingGrainJumpArc = 0;
       if (typeof m.balloonBombImpactPending !== 'boolean') m.balloonBombImpactPending = false;
       m.balloonThrowTtl = Math.max(0, m.balloonThrowTtl - dt);
       const prevBombTtl = Math.max(0, Number(m.balloonBombTtl) || 0);
@@ -4978,6 +4990,10 @@ class GameRoom {
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
       this.processTotalFeedingGrainStateForMinion(m, enemySideName);
+      if (this.tickTotalFeedingGrainJumpForMinion(m, dt, enemyX)) {
+        m.atkCd = Math.max(m.atkCd, 0.08);
+        continue;
+      }
       if (m.rider) this.refreshRiderChargeState(m);
       const advanceSpeed = this.minionAdvanceSpeed(m);
       const mySideState = m.side === 'right' ? this.right : this.left;
@@ -5607,7 +5623,70 @@ class GameRoom {
     if (!reachedThrowPoint) return;
 
     this.launchTotalFeedingGrainProjectile(minion, enemySideName, enemyTowerFaceX);
+    this.beginTotalFeedingGrainJump(minion, enemyTowerFaceX);
     minion.totalFeedingGrainThrown = true;
+  }
+
+  beginTotalFeedingGrainJump(minion, enemyTowerFaceX) {
+    if (!minion) return;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const dir = sideName === 'left' ? 1 : -1;
+    const startX = Number(minion.x) || 0;
+    const startY = Number(minion.y) || TOWER_Y;
+    const anchorX = Number.isFinite(enemyTowerFaceX)
+      ? enemyTowerFaceX
+      : (sideName === 'left' ? (TOWER_X_RIGHT - 46) : (TOWER_X_LEFT + 46));
+    const landingX = clamp(
+      anchorX - dir * Math.max(5, (Number(minion.r) || 12) * 0.2),
+      TOWER_X_LEFT + 40,
+      TOWER_X_RIGHT - 40
+    );
+    minion.totalFeedingGrainJumpTtl = TOTAL_FEEDING_GRAIN_JUMP_TTL;
+    minion.totalFeedingGrainJumpMaxTtl = TOTAL_FEEDING_GRAIN_JUMP_TTL;
+    minion.totalFeedingGrainJumpFromX = startX;
+    minion.totalFeedingGrainJumpFromY = startY;
+    minion.totalFeedingGrainJumpToX = landingX;
+    minion.totalFeedingGrainJumpToY = startY;
+    minion.totalFeedingGrainJumpArc = TOTAL_FEEDING_GRAIN_JUMP_ARC_MIN
+      + Math.random() * (TOTAL_FEEDING_GRAIN_JUMP_ARC_MAX - TOTAL_FEEDING_GRAIN_JUMP_ARC_MIN);
+  }
+
+  tickTotalFeedingGrainJumpForMinion(minion, dt, enemyX) {
+    if (!minion) return false;
+    const ttl = Math.max(0, Number(minion.totalFeedingGrainJumpTtl) || 0);
+    if (ttl <= 0) return false;
+
+    const nextTtl = Math.max(0, ttl - dt);
+    minion.totalFeedingGrainJumpTtl = nextTtl;
+    const maxTtl = Math.max(0.0001, Number(minion.totalFeedingGrainJumpMaxTtl) || TOTAL_FEEDING_GRAIN_JUMP_TTL);
+    const p = 1 - (nextTtl / maxTtl);
+    const t = clamp(p, 0, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    const fromX = Number(minion.totalFeedingGrainJumpFromX);
+    const fromY = Number(minion.totalFeedingGrainJumpFromY);
+    const toXRaw = Number(minion.totalFeedingGrainJumpToX);
+    const toYRaw = Number(minion.totalFeedingGrainJumpToY);
+    const toX = Number.isFinite(toXRaw)
+      ? toXRaw
+      : (Number.isFinite(enemyX) ? enemyX : (Number(minion.x) || 0));
+    const toY = Number.isFinite(toYRaw)
+      ? toYRaw
+      : (Number(minion.y) || TOWER_Y);
+    const arc = Math.max(0, Number(minion.totalFeedingGrainJumpArc) || TOTAL_FEEDING_GRAIN_JUMP_ARC_MIN);
+    const x0 = Number.isFinite(fromX) ? fromX : (Number(minion.x) || 0);
+    const y0 = Number.isFinite(fromY) ? fromY : (Number(minion.y) || TOWER_Y);
+    minion.x = x0 + (toX - x0) * ease;
+    minion.y = y0 + (toY - y0) * ease - Math.sin(Math.PI * ease) * arc;
+
+    if (nextTtl > 0) return true;
+    minion.x = toX;
+    minion.y = toY;
+    minion.totalFeedingGrainJumpFromX = null;
+    minion.totalFeedingGrainJumpFromY = null;
+    minion.totalFeedingGrainJumpToX = null;
+    minion.totalFeedingGrainJumpToY = null;
+    minion.totalFeedingGrainJumpArc = 0;
+    return false;
   }
 
   launchTotalFeedingGrainProjectile(minion, enemySideName, enemyTowerFaceX) {
@@ -10337,6 +10416,13 @@ class GameRoom {
       totalFeedingGrainPicked: false,
       totalFeedingGrainThrown: false,
       totalFeedingGrainFoodType: sideName === 'right' ? 'rice' : 'bread',
+      totalFeedingGrainJumpTtl: 0,
+      totalFeedingGrainJumpMaxTtl: TOTAL_FEEDING_GRAIN_JUMP_TTL,
+      totalFeedingGrainJumpFromX: null,
+      totalFeedingGrainJumpFromY: null,
+      totalFeedingGrainJumpToX: null,
+      totalFeedingGrainJumpToY: null,
+      totalFeedingGrainJumpArc: 0,
     };
     this.minions.push(created);
     return created;

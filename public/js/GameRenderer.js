@@ -10526,6 +10526,7 @@ export class GameRenderer {
     this.drawHeroBalloonPayloadProjectile('balloonRiceBomb', rightPileX - 16, pileY + 1.2, 0.58, 84.2);
 
     const elapsed = Math.max(0, matchTime - TOTAL_FEEDING_TRIGGER_SECONDS);
+    const slowElapsed = elapsed * 0.2;
     const fallTop = 24;
     const fallBottom = pileY - 4;
     const fallSpan = Math.max(20, fallBottom - fallTop);
@@ -10536,9 +10537,9 @@ export class GameRenderer {
     for (let i = 0; i < perSideCount; i += 1) {
       const leftSeed = 310.7 + i * 7.13;
       const leftRate = 0.72 + stableHash(leftSeed + 1.2) * 0.9;
-      const leftPhase = (elapsed * leftRate + stableHash(leftSeed + 2.8)) % 1;
+      const leftPhase = (slowElapsed * leftRate + stableHash(leftSeed + 2.8)) % 1;
       const leftX = midX - (28 + stableHash(leftSeed + 4.1) * 118)
-        + Math.sin(elapsed * 2.2 + i * 0.74) * 1.8;
+        + Math.sin(slowElapsed * 2.2 + i * 0.74) * 1.8;
       const leftY = fallTop + leftPhase * fallSpan;
       const leftSize = 0.9 + stableHash(leftSeed + 5.6) * 1.4;
       const leftA = 0.38 + Math.sin(leftPhase * Math.PI) * 0.34;
@@ -10549,9 +10550,9 @@ export class GameRenderer {
 
       const rightSeed = 510.3 + i * 6.41;
       const rightRate = 0.74 + stableHash(rightSeed + 1.6) * 0.88;
-      const rightPhase = (elapsed * rightRate + stableHash(rightSeed + 2.2)) % 1;
+      const rightPhase = (slowElapsed * rightRate + stableHash(rightSeed + 2.2)) % 1;
       const rightX = midX + (28 + stableHash(rightSeed + 3.4) * 118)
-        + Math.sin(elapsed * 2 + i * 0.61) * 1.8;
+        + Math.sin(slowElapsed * 2 + i * 0.61) * 1.8;
       const rightY = fallTop + rightPhase * fallSpan;
       const rightSize = 0.86 + stableHash(rightSeed + 5.2) * 1.24;
       const rightA = 0.4 + Math.sin(rightPhase * Math.PI) * 0.36;
@@ -10583,13 +10584,21 @@ export class GameRenderer {
       const arc = Math.max(12, Number(p.arcHeight) || 42);
       const x = lerp(fromX, toX, eased);
       const y = lerp(fromY, toY, eased) - Math.sin(Math.PI * eased) * arc;
-      const trailA = 0.18 + (1 - t) * 0.22;
+      const trailA = 0.28 + (1 - t) * 0.34;
       const sideFood = p.foodType === 'rice' ? 'balloonRiceBomb' : 'balloonBreadBomb';
-      const scale = 0.24 + Math.sin(Math.PI * t) * 0.05;
+      const scale = 0.68 + Math.sin(Math.PI * t) * 0.1;
 
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 24 * scale);
+      glow.addColorStop(0, this.withAlpha('#fff4da', 0.78));
+      glow.addColorStop(0.5, this.withAlpha(p.foodType === 'rice' ? '#e0f5ff' : '#ffd59b', 0.5));
+      glow.addColorStop(1, this.withAlpha('#000000', 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, 24 * scale, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = this.withAlpha('#000000', trailA);
       ctx.beginPath();
-      ctx.ellipse(x, y + 6, 5.4, 2.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(x, y + 9, 8.8, 3.4, 0, 0, Math.PI * 2);
       ctx.fill();
       this.drawHeroBalloonPayloadProjectile(sideFood, x, y, scale, Number(p.id) || i);
     }
