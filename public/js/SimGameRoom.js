@@ -89,6 +89,11 @@ const COMBO_SPECIAL_TIMER_BOOST_MIN_STREAK = 5;
 const COMBO_SPECIAL_TIMER_BOOST_MAX_STREAK = COMBO_MAX_STREAK;
 const COMBO_SPECIAL_TIMER_BOOST_MID_SECONDS = 0.5;
 const COMBO_SPECIAL_TIMER_BOOST_MAX_SECONDS = 1;
+const TOTAL_FEEDING_TRIGGER_SECONDS = 180;
+const TOTAL_FEEDING_SPAWN_EVERY_MULT = 0.5;
+const TOTAL_FEEDING_SPEED_MULT = 1.5;
+const TOTAL_FEEDING_HP_MULT = 2;
+const TOTAL_FEEDING_DAMAGE_MULT = 2;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
@@ -968,6 +973,7 @@ class GameRoom {
     this.nextBalancedJoinSide = 'left';
     this.nextCommitteeJoinSide = 'left';
     this.t = 0;
+    this.totalFeedingActive = false;
     this.cpuAimState = new Map();
     this.committeeVoteSeq = 1;
     this.committeeVotes = {
@@ -2185,6 +2191,7 @@ class GameRoom {
     this.gameOver = false;
     this.winner = null;
     this.t = 0;
+    this.totalFeedingActive = false;
     this.cpuAimState.clear();
     this.sharedShotCd = SHOT_INTERVAL;
     this.left.shotCd = this.sharedShotCd;
@@ -2507,6 +2514,9 @@ class GameRoom {
   tick(dt) {
     if (!this.started || this.gameOver) return;
     this.t += dt;
+    if (!this.totalFeedingActive && this.t >= TOTAL_FEEDING_TRIGGER_SECONDS) {
+      this.activateTotalFeeding();
+    }
 
     // In 2v2, all archers fire together on the shared side-wide cadence.
     // Result: both teammates shoot once per second at the same moment.
@@ -5457,7 +5467,9 @@ class GameRoom {
       : (sideName === 'right' ? this.left : null);
     const referenceHp = Math.max(
       1,
-      enemySide ? this.statMinionHp(enemySide) : NORMAL_MINION_HP_REFERENCE
+      enemySide
+        ? this.statMinionHp(enemySide)
+        : NORMAL_MINION_HP_REFERENCE
     );
     const ratio = clamp(
       ARROW_DAMAGE_BASE_UNIT_HP_FRACTION + progress * ARROW_DAMAGE_PER_UPGRADE_FRACTION,
@@ -5500,6 +5512,80 @@ class GameRoom {
   comboOverdriveStacks(side) {
     const streak = Math.max(0, Math.floor(Number(side?.comboHitStreak) || 0));
     return Math.max(0, streak - COMBO_MAX_STREAK);
+  }
+
+  isTotalFeedingActive() {
+    return Boolean(this.totalFeedingActive) || this.t >= TOTAL_FEEDING_TRIGGER_SECONDS;
+  }
+
+  totalFeedingSpawnEveryMultiplier() {
+    return this.isTotalFeedingActive() ? TOTAL_FEEDING_SPAWN_EVERY_MULT : 1;
+  }
+
+  totalFeedingMinionSpeedMultiplier() {
+    return this.isTotalFeedingActive() ? TOTAL_FEEDING_SPEED_MULT : 1;
+  }
+
+  totalFeedingMinionHpMultiplier() {
+    return this.isTotalFeedingActive() ? TOTAL_FEEDING_HP_MULT : 1;
+  }
+
+  totalFeedingMinionDamageMultiplier() {
+    return this.isTotalFeedingActive() ? TOTAL_FEEDING_DAMAGE_MULT : 1;
+  }
+
+  unitHpUpgradeContribution(side) {
+    return Math.max(0, Number(side?.unitHpLevel) || 0) * 30;
+  }
+
+  totalFeedingAdjustedHp(totalHp, hpFromUnitHpUpgrade = 0) {
+    const hp = Math.max(0, Number(totalHp) || 0);
+    if (!(hp > 0) || !this.isTotalFeedingActive()) return hp;
+    const hpUpgrade = clamp(Number(hpFromUnitHpUpgrade) || 0, 0, hp);
+    const nonUpgradeHp = Math.max(0, hp - hpUpgrade);
+    return nonUpgradeHp * this.totalFeedingMinionHpMultiplier() + hpUpgrade;
+  }
+
+  activateTotalFeeding() {
+    if (this.totalFeedingActive) return;
+    this.totalFeedingActive = true;
+
+    const spawnMul = this.totalFeedingSpawnEveryMultiplier();
+    this.left.minionCd = Math.max(0, (Number(this.left.minionCd) || 0) * spawnMul);
+    this.right.minionCd = Math.max(0, (Number(this.right.minionCd) || 0) * spawnMul);
+    this.left.candleCd = this.candleSpawnEtaSeconds('left');
+    this.right.candleCd = this.candleSpawnEtaSeconds('right');
+
+    for (const minion of this.minions) {
+      if (!minion || minion.removed) continue;
+      if ((Number(minion.hp) || 0) <= 0) continue;
+      const sideState = minion.side === 'right' ? this.right : this.left;
+      const maxHpBefore = Math.max(1, Number(minion.maxHp) || 1);
+      const hpBefore = clamp(Number(minion.hp) || 0, 0, maxHpBefore);
+      const fallbackBaseHp = Math.max(1, this.statMinionHp(sideState));
+      const fallbackUpgradeRatio = clamp(this.unitHpUpgradeContribution(sideState) / fallbackBaseHp, 0, 1);
+      const maxHpUpgradeBeforeRaw = Number(minion.hpFromUnitHpUpgrade);
+      const maxHpUpgradeBefore = clamp(
+        Number.isFinite(maxHpUpgradeBeforeRaw) ? maxHpUpgradeBeforeRaw : (maxHpBefore * fallbackUpgradeRatio),
+        0,
+        maxHpBefore
+      );
+      const currentUpgradeRatio = clamp(maxHpUpgradeBefore / Math.max(1, maxHpBefore), 0, 1);
+      const hpUpgradeBefore = clamp(hpBefore * currentUpgradeRatio, 0, hpBefore);
+
+      minion.maxHp = Math.max(1, this.totalFeedingAdjustedHp(maxHpBefore, maxHpUpgradeBefore));
+      minion.hp = clamp(this.totalFeedingAdjustedHp(hpBefore, hpUpgradeBefore), 0, minion.maxHp);
+      minion.hpFromUnitHpUpgrade = Math.max(0, Math.min(minion.maxHp, maxHpUpgradeBefore));
+      minion.dmg = Math.max(0, (Number(minion.dmg) || 0) * TOTAL_FEEDING_DAMAGE_MULT);
+      minion.speed = Math.max(0, (Number(minion.speed) || 0) * TOTAL_FEEDING_SPEED_MULT);
+    }
+
+    const midX = (TOWER_X_LEFT + TOWER_X_RIGHT) * 0.5;
+    const topY = TOWER_Y - 210;
+    this.queueLine('Total Feeding!', midX, topY, 'left');
+    this.queueLine('Total Feeding!', midX, topY + 24, 'right');
+    this.queueHitSfx('explosion', midX, TOWER_Y - 80, 'left');
+    this.queueHitSfx('explosion', midX, TOWER_Y - 80, 'right');
   }
 
   comboSpecialTimerBoostSeconds(side) {
@@ -5851,7 +5937,8 @@ class GameRoom {
   statSpawnEvery(side) {
     const base = this.baseSpawnEveryForLevel(side.spawnLevel);
     const mul = clamp(Number(side?.debugSpawnRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX);
-    return Math.max(0.18, base / mul);
+    const totalFeedingMul = this.totalFeedingSpawnEveryMultiplier();
+    return Math.max(0.18 * totalFeedingMul, (base / mul) * totalFeedingMul);
   }
 
   basicSpecialBaseEveryByTypeForSide(side = null) {
@@ -5981,7 +6068,8 @@ class GameRoom {
 
   basicMinCadenceInSpawns(side = null) {
     const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side || {}));
-    return Math.max(1, Math.ceil(BASIC_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+    const minCadenceSeconds = BASIC_SPECIAL_MIN_CADENCE_SECONDS * this.totalFeedingSpawnEveryMultiplier();
+    return Math.max(1, Math.ceil(minCadenceSeconds / spawnEverySeconds));
   }
 
   clampBasicCadenceInSpawns(every, side = null) {
@@ -5992,7 +6080,8 @@ class GameRoom {
 
   tier2MinCadenceInSpawns(side = null) {
     const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side || {}));
-    return Math.max(1, Math.ceil(TIER2_SPECIAL_MIN_CADENCE_SECONDS / spawnEverySeconds));
+    const minCadenceSeconds = TIER2_SPECIAL_MIN_CADENCE_SECONDS * this.totalFeedingSpawnEveryMultiplier();
+    return Math.max(1, Math.ceil(minCadenceSeconds / spawnEverySeconds));
   }
 
   clampTier2CadenceInSpawns(every, side = null) {
@@ -8068,6 +8157,7 @@ class GameRoom {
       y,
       hp,
       maxHp: hp,
+      hpFromUnitHpUpgrade: 0,
       dmg: 0,
       speed: HERO_COOKER_MOVE_SPEED,
       atkCd: 0,
@@ -8772,6 +8862,12 @@ class GameRoom {
     const dir = sideName === 'left' ? 1 : -1;
     const originalMaxHp = Math.max(1, Number(minion.maxHp) || 1);
     const revivedMaxHp = Math.max(1, Math.round(Math.max(1, Number(minion.maxHp) || 1) * NECRO_EXPERT_REVIVE_HP_FRACTION));
+    const originalHpFromUnitHpUpgrade = clamp(Number(minion.hpFromUnitHpUpgrade) || 0, 0, originalMaxHp);
+    const revivedHpFromUnitHpUpgrade = clamp(
+      originalHpFromUnitHpUpgrade * NECRO_EXPERT_REVIVE_HP_FRACTION,
+      0,
+      revivedMaxHp
+    );
     const x = clamp((Number(minion.x) || 0) + dir * 8 + (Math.random() * 10 - 5), TOWER_X_LEFT + 40, TOWER_X_RIGHT - 40);
     const y = clamp((Number(minion.y) || 0) + (Math.random() * 8 - 4), TOWER_Y - 190, TOWER_Y + 190);
     const revived = {
@@ -8782,6 +8878,7 @@ class GameRoom {
       y,
       hp: revivedMaxHp,
       maxHp: revivedMaxHp,
+      hpFromUnitHpUpgrade: revivedHpFromUnitHpUpgrade,
       atkCd: Math.max(0.18, Number(minion.atkCd) || 0),
       removed: false,
       summoned: true,
@@ -9629,7 +9726,9 @@ class GameRoom {
     if (!Array.isArray(side.pendingSpecialSpawns)) side.pendingSpecialSpawns = [];
     if (!side.specialRollByType || typeof side.specialRollByType !== 'object') side.specialRollByType = {};
     const x = sideName === 'left' ? TOWER_X_LEFT + 56 : TOWER_X_RIGHT - 56;
-    let hp = this.statMinionHp(side);
+    const baseHp = this.statMinionHp(side);
+    let hp = baseHp;
+    const baseHpFromUnitHpUpgrade = this.unitHpUpgradeContribution(side);
     let dmg = this.statMinionDamage(side);
     let speed = 54 + side.unitLevel * 1.5 + side.economyLevel * 0.6;
     const power = side.unitLevel + side.unitHpLevel + side.economyLevel;
@@ -9877,6 +9976,12 @@ class GameRoom {
       visualPower += repeatScaling.repeatLevels * 2;
     }
 
+    const hpUpgradeRatio = clamp(baseHpFromUnitHpUpgrade / Math.max(1, baseHp), 0, 1);
+    const hpFromUnitHpUpgrade = clamp(hp * hpUpgradeRatio, 0, hp);
+    hp = this.totalFeedingAdjustedHp(hp, hpFromUnitHpUpgrade);
+    dmg *= this.totalFeedingMinionDamageMultiplier();
+    speed *= this.totalFeedingMinionSpeedMultiplier();
+
     const created = {
       id: this.seq++,
       side: sideName,
@@ -9884,6 +9989,7 @@ class GameRoom {
       y: spawnY,
       hp,
       maxHp: hp,
+      hpFromUnitHpUpgrade: Math.max(0, Math.min(hp, hpFromUnitHpUpgrade)),
       dmg,
       speed,
       atkCd: 0,
