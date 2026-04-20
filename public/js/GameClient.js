@@ -1152,7 +1152,7 @@ export class GameClient {
     if (binding.requiresNoKeyboardPlayers && this.localKeyboardTestActive && !cpuVsCpuMode) return false;
     const side = binding.side === 'right' ? 'right' : 'left';
     const slot = Math.max(0, Math.floor(Number(binding.slot) || 0));
-    const selected = this.localRoom.selectUpgradeCardBySlot(side, slot);
+    const selected = this.localRoom.selectUpgradeCardBySlot(side, slot, { selectionSource: 'keyboard' });
     event.preventDefault();
     if (!selected) return true;
     const sideLabelText = sideShortName(side, this.state.themeMode);

@@ -908,6 +908,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: 100,
+    lastUpgradeSelectionSource: null,
     arrowDamageGoldRemainder: 0,
     upgradeAutoPickAt: null,
     archerAimY: archerPulls[0].archerAimY,
@@ -9500,19 +9501,23 @@ class GameRoom {
     };
   }
 
-  cpuUpgradeTarget(sideName = 'left') {
+  cpuUpgradeTarget(sideName = 'left', slot = 0) {
     if (this.committeeVotingRequiredForSide(sideName)) return null;
     const side = sideName === 'right' ? this.right : this.left;
     if ((Number(side?.upgradeCharge) || 0) < (Number(side?.upgradeChargeMax) || 0)) return null;
-    for (const card of this.upgradeCards) {
-      if (!card || card.side !== sideName) continue;
-      return {
-        type: 'upgrade',
-        x: Number(card.x) || 0,
-        y: Number(card.y) || 0,
-      };
-    }
-    return null;
+    const cards = this.upgradeCards.filter((card) => card
+      && card.side === sideName
+      && !Boolean(card.committeeLocked)
+      && !Boolean(card.committeeVoteActive));
+    if (!cards.length) return null;
+    const preferredSlot = Math.max(0, Math.min(1, Math.floor(Number(slot) || 0)));
+    const preferred = cards.find((card) => Math.floor(Number(card?.slot) || 0) === preferredSlot) || cards[0];
+    if (!preferred) return null;
+    return {
+      type: 'upgrade',
+      x: Number(preferred.x) || 0,
+      y: Number(preferred.y) || 0,
+    };
   }
 
   cpuResourceTarget(sideName = 'left', slot = 0, profile = null) {
@@ -9531,7 +9536,7 @@ class GameRoom {
       const dxForward = (rx - sx) * dir;
       if (dxForward < CPU_MIN_SOLUTION_DX) continue;
       const dist = Math.hypot(rx - sx, ry - sy);
-      // Gold/resource is intentionally top priority for CPU behavior.
+      // Gold/resource is high priority once there is no targetable upgrade card.
       const score = 160 + behindBias * 100 - dist * 0.22 + Math.random() * 8;
       if (score > bestScore) {
         bestScore = score;
@@ -9578,11 +9583,14 @@ class GameRoom {
   }
 
   cpuTargetForSlot(sideName = 'left', slot = 0, profile = null) {
+    const upgradeTarget = this.cpuUpgradeTarget(sideName, slot);
+    const side = sideName === 'right' ? this.right : this.left;
+    const lastSelectionByKeyboard = side?.lastUpgradeSelectionSource === 'keyboard';
+    if (upgradeTarget && !lastSelectionByKeyboard) return upgradeTarget;
     const resourceTarget = this.cpuResourceTarget(sideName, slot, profile);
     if (resourceTarget) return resourceTarget;
     const minionTarget = this.cpuMinionTarget(sideName, slot, profile);
     if (minionTarget) return minionTarget;
-    const upgradeTarget = this.cpuUpgradeTarget(sideName);
     if (upgradeTarget) return upgradeTarget;
     const enemyTowerX = sideName === 'left' ? TOWER_X_RIGHT - 48 : TOWER_X_LEFT + 48;
     return { type: 'tower', x: enemyTowerX, y: TOWER_Y - 24 };
@@ -11365,6 +11373,9 @@ class GameRoom {
     const nextDebt = Math.max(1, Math.round(Number(card.cost) || this.upgradeCost(side, card.type)));
 
     this.awardUpgrade(side, card.type, card.value);
+    side.lastUpgradeSelectionSource = (typeof options?.selectionSource === 'string' && options.selectionSource)
+      ? options.selectionSource
+      : 'shot';
     this.primeSpecialSpawnCadenceState(sideName, this.t);
     side.candleSpawnInSpawns = this.statCandleEvery(side);
     this.triggerUpgradeActivation(sideName, card.type, card.value, card.x, card.y);
@@ -11384,7 +11395,7 @@ class GameRoom {
     if (this.committeeVotingRequiredForSide(side) && !Boolean(options?.ignoreCommittee)) return false;
     const card = this.upgradeCards.find((entry) => entry?.side === side && Number(entry?.slot) === lane);
     if (!card) return false;
-    return this.selectUpgradeCard(side, card);
+    return this.selectUpgradeCard(side, card, options);
   }
 
   syncUpgradeCards(sideName) {
