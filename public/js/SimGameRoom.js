@@ -101,6 +101,8 @@ const TOTAL_FEEDING_SPAWN_EVERY_MULT = 0.5;
 const TOTAL_FEEDING_SPEED_MULT = 1.5;
 const TOTAL_FEEDING_HP_MULT = 2;
 const TOTAL_FEEDING_DAMAGE_MULT = 3;
+const TOTAL_FEEDING_SPECIAL_HP_MULT = 3;
+const TOTAL_FEEDING_SPECIAL_DAMAGE_MULT = 3.25;
 const TOTAL_FEEDING_GOLD_MULT = 2;
 const TOTAL_FEEDING_GRAIN_PICKUP_RADIUS = 26;
 const TOTAL_FEEDING_GRAIN_THROW_TTL = 0.52;
@@ -5568,12 +5570,14 @@ class GameRoom {
     return this.isTotalFeedingActive() ? TOTAL_FEEDING_SPEED_MULT : 1;
   }
 
-  totalFeedingMinionHpMultiplier() {
-    return this.isTotalFeedingActive() ? TOTAL_FEEDING_HP_MULT : 1;
+  totalFeedingMinionHpMultiplier(isBasicUnit = true) {
+    if (!this.isTotalFeedingActive()) return 1;
+    return isBasicUnit ? TOTAL_FEEDING_HP_MULT : TOTAL_FEEDING_SPECIAL_HP_MULT;
   }
 
-  totalFeedingMinionDamageMultiplier() {
-    return this.isTotalFeedingActive() ? TOTAL_FEEDING_DAMAGE_MULT : 1;
+  totalFeedingMinionDamageMultiplier(isBasicUnit = true) {
+    if (!this.isTotalFeedingActive()) return 1;
+    return isBasicUnit ? TOTAL_FEEDING_DAMAGE_MULT : TOTAL_FEEDING_SPECIAL_DAMAGE_MULT;
   }
 
   totalFeedingGoldMultiplier() {
@@ -5760,12 +5764,13 @@ class GameRoom {
     return Math.max(0, Number(side?.unitHpLevel) || 0) * 30;
   }
 
-  totalFeedingAdjustedHp(totalHp, hpFromUnitHpUpgrade = 0) {
+  totalFeedingAdjustedHp(totalHp, hpFromUnitHpUpgrade = 0, hpMultiplier = 1) {
     const hp = Math.max(0, Number(totalHp) || 0);
     if (!(hp > 0) || !this.isTotalFeedingActive()) return hp;
     const hpUpgrade = clamp(Number(hpFromUnitHpUpgrade) || 0, 0, hp);
     const nonUpgradeHp = Math.max(0, hp - hpUpgrade);
-    return nonUpgradeHp * this.totalFeedingMinionHpMultiplier() + hpUpgrade;
+    const mul = Math.max(0, Number(hpMultiplier) || 1);
+    return nonUpgradeHp * mul + hpUpgrade;
   }
 
   activateTotalFeeding() {
@@ -5781,6 +5786,9 @@ class GameRoom {
     for (const minion of this.minions) {
       if (!minion || minion.removed) continue;
       if ((Number(minion.hp) || 0) <= 0) continue;
+      const isBasicUnit = this.isTotalFeedingBasicUnit(minion);
+      const hpMul = this.totalFeedingMinionHpMultiplier(isBasicUnit);
+      const dmgMul = this.totalFeedingMinionDamageMultiplier(isBasicUnit);
       const sideState = minion.side === 'right' ? this.right : this.left;
       const maxHpBefore = Math.max(1, Number(minion.maxHp) || 1);
       const hpBefore = clamp(Number(minion.hp) || 0, 0, maxHpBefore);
@@ -5795,10 +5803,10 @@ class GameRoom {
       const currentUpgradeRatio = clamp(maxHpUpgradeBefore / Math.max(1, maxHpBefore), 0, 1);
       const hpUpgradeBefore = clamp(hpBefore * currentUpgradeRatio, 0, hpBefore);
 
-      minion.maxHp = Math.max(1, this.totalFeedingAdjustedHp(maxHpBefore, maxHpUpgradeBefore));
-      minion.hp = clamp(this.totalFeedingAdjustedHp(hpBefore, hpUpgradeBefore), 0, minion.maxHp);
+      minion.maxHp = Math.max(1, this.totalFeedingAdjustedHp(maxHpBefore, maxHpUpgradeBefore, hpMul));
+      minion.hp = clamp(this.totalFeedingAdjustedHp(hpBefore, hpUpgradeBefore, hpMul), 0, minion.maxHp);
       minion.hpFromUnitHpUpgrade = Math.max(0, Math.min(minion.maxHp, maxHpUpgradeBefore));
-      minion.dmg = Math.max(0, (Number(minion.dmg) || 0) * TOTAL_FEEDING_DAMAGE_MULT);
+      minion.dmg = Math.max(0, (Number(minion.dmg) || 0) * dmgMul);
       minion.speed = Math.max(0, (Number(minion.speed) || 0) * TOTAL_FEEDING_SPEED_MULT);
     }
 
@@ -10252,10 +10260,26 @@ class GameRoom {
       visualPower += repeatScaling.repeatLevels * 2;
     }
 
+    const totalFeedingBasicUnit = !(
+      isSuper
+      || isNecrominion
+      || isDragon
+      || isBalloon
+      || isGunner
+      || isRider
+      || isDigger
+      || isShieldBearer
+      || isMonk
+      || isStoneGolem
+      || isHero
+      || isPresident
+    );
     const hpUpgradeRatio = clamp(baseHpFromUnitHpUpgrade / Math.max(1, baseHp), 0, 1);
     const hpFromUnitHpUpgrade = clamp(hp * hpUpgradeRatio, 0, hp);
-    hp = this.totalFeedingAdjustedHp(hp, hpFromUnitHpUpgrade);
-    dmg *= this.totalFeedingMinionDamageMultiplier();
+    const totalFeedingHpMul = this.totalFeedingMinionHpMultiplier(totalFeedingBasicUnit);
+    const totalFeedingDmgMul = this.totalFeedingMinionDamageMultiplier(totalFeedingBasicUnit);
+    hp = this.totalFeedingAdjustedHp(hp, hpFromUnitHpUpgrade, totalFeedingHpMul);
+    dmg *= totalFeedingDmgMul;
     speed *= this.totalFeedingMinionSpeedMultiplier();
 
     const created = {
@@ -10459,20 +10483,7 @@ class GameRoom {
       candleBurnTtl: 0,
       candleBurnTick: 0,
       failedSpecialType,
-      totalFeedingBasicUnit: !(
-        isSuper
-        || isNecrominion
-        || isDragon
-        || isBalloon
-        || isGunner
-        || isRider
-        || isDigger
-        || isShieldBearer
-        || isMonk
-        || isStoneGolem
-        || isHero
-        || isPresident
-      ),
+      totalFeedingBasicUnit,
       totalFeedingGrainPicked: false,
       totalFeedingGrainThrown: false,
       totalFeedingGrainFoodType: sideName === 'right' ? 'rice' : 'bread',
