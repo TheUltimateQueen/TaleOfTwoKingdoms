@@ -53,6 +53,12 @@ const CPU_CLOSE_TARGET_DX = 90;
 const CPU_CLOSE_TARGET_PULL_Y = 0.72;
 const CPU_MAX_SOLUTION_TTL = 5.6;
 const CPU_GOLD_GAP_NORMALIZE = 1000;
+const CPU_MINION_LEAD_TIME_MAX = 1.1;
+const CPU_MINION_LEAD_TIME_SCALE = 0.72;
+const CPU_MINION_CLOSE_LEAD_TIME_SCALE = 0.9;
+const CPU_MINION_CLOSE_NOISE_SCALE = 0.2;
+const CPU_MINION_CLOSE_MISS_NOISE_SCALE = 0.45;
+const CPU_MINION_CLOSE_ACCURACY_BOOST = 0.34;
 
 // Shot power drop frequency (seconds)
 const SHOT_POWER_SPAWN_MIN_INTERVAL = 10;
@@ -9573,10 +9579,20 @@ class GameRoom {
       if (m.balloon) threat += 66;
       if (m.super) threat += 42;
       if (m.president || m.monk || m.necrominion) threat += 24;
+      const moveDir = m.side === 'left' ? 1 : -1;
+      const rawSpeed = Math.max(0, Number(m.speed) || 0);
+      const likelyStationary = distToOurTower <= Math.max(26, (Number(m.r) || 16) + 30);
+      const vxEstimate = likelyStationary ? 0 : moveDir * rawSpeed * (m.flying ? 0.58 : 0.68);
       const score = threat + behindBias * 22 + (420 - distToOurTower * 0.32) - dist * 0.16 + Math.random() * 7;
       if (score > bestScore) {
         bestScore = score;
-        best = { type: 'minion', id: m.id, x: mx, y: my };
+        best = {
+          type: 'minion',
+          id: m.id,
+          x: mx,
+          y: my,
+          vxEstimate,
+        };
       }
     }
     return best;
@@ -9715,17 +9731,52 @@ class GameRoom {
           const target = this.cpuTargetForSlot(sideName, slot, profile);
           let aimX = Number(target?.x) || 0;
           let aimY = Number(target?.y) || 0;
-          const miss = Math.random() > profile.accuracy;
+          const sideDir = sideName === 'left' ? 1 : -1;
+          const sx = sideName === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
+          const targetDx = target?.type === 'minion'
+            ? Math.max(0, (aimX - sx) * sideDir)
+            : 0;
+          const minionCloseBias = target?.type === 'minion'
+            ? clamp(
+              1 - ((targetDx - CPU_MIN_CLOSE_SOLUTION_DX) / Math.max(1, CPU_CLOSE_TARGET_DX - CPU_MIN_CLOSE_SOLUTION_DX)),
+              0,
+              1
+            )
+            : 0;
+          const effectiveAccuracy = target?.type === 'minion'
+            ? clamp(profile.accuracy + minionCloseBias * CPU_MINION_CLOSE_ACCURACY_BOOST, 0, 0.995)
+            : profile.accuracy;
+          const miss = Math.random() > effectiveAccuracy;
           if (miss) {
-            const dir = sideName === 'left' ? 1 : -1;
-            aimX += dir * (12 + Math.random() * 56);
-            aimY += (Math.random() * 2 - 1) * profile.missNoisePx;
+            const missNoiseScale = target?.type === 'minion'
+              ? lerp(1, CPU_MINION_CLOSE_MISS_NOISE_SCALE, minionCloseBias)
+              : 1;
+            const missNoise = profile.missNoisePx * missNoiseScale;
+            aimX += sideDir * (12 + Math.random() * 56) * missNoiseScale;
+            aimY += (Math.random() * 2 - 1) * missNoise;
           } else {
-            aimY += (Math.random() * 2 - 1) * profile.hitNoisePx;
-            aimX += (Math.random() * 2 - 1) * profile.hitNoisePx * 0.32;
+            const hitNoiseScale = target?.type === 'minion'
+              ? lerp(1, CPU_MINION_CLOSE_NOISE_SCALE, minionCloseBias)
+              : 1;
+            const hitNoise = profile.hitNoisePx * hitNoiseScale;
+            aimY += (Math.random() * 2 - 1) * hitNoise;
+            aimX += (Math.random() * 2 - 1) * hitNoise * 0.32;
           }
 
-          const solved = this.solveCpuPullForTarget(sideName, slot, aimX, aimY);
+          let solved = this.solveCpuPullForTarget(sideName, slot, aimX, aimY);
+          if (solved && target?.type === 'minion' && Number.isFinite(target?.vxEstimate)) {
+            const forwardMinX = sx + sideDir * CPU_MIN_CLOSE_SOLUTION_DX;
+            const leadScale = lerp(CPU_MINION_LEAD_TIME_SCALE, CPU_MINION_CLOSE_LEAD_TIME_SCALE, minionCloseBias);
+            const leadTime = clamp(Number(solved.ttl) * leadScale, 0, CPU_MINION_LEAD_TIME_MAX);
+            if (leadTime > 0.02) {
+              const predictedRawX = aimX + Number(target.vxEstimate) * leadTime;
+              const predictedX = sideName === 'left'
+                ? Math.max(forwardMinX, predictedRawX)
+                : Math.min(forwardMinX, predictedRawX);
+              const leadSolved = this.solveCpuPullForTarget(sideName, slot, predictedX, aimY);
+              if (leadSolved) solved = leadSolved;
+            }
+          }
           if (solved) {
             state.pullX = solved.pullX;
             state.pullY = solved.pullY;
