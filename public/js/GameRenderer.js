@@ -7569,6 +7569,7 @@ export class GameRenderer {
     const cadenceMatchMultiplier = Number(cadenceEntry?.matchMultiplier);
     const cadenceDeltaRatio = Number(cadenceEntry?.deltaRatio);
     const cadenceRemainingSpawns = Number(cadenceEntry?.remainingSpawns);
+    const cadenceComboBoostSecondsCurrentCycle = Number(cadenceEntry?.comboBoostSecondsCurrentCycle);
     const baseCycleValue = Number.isFinite(cadenceBaseEvery)
       ? cadenceBaseEvery
       : this.barracksTypedValueForTypes(sideState, typeKeys, [
@@ -7650,6 +7651,9 @@ export class GameRenderer {
       currentCycleSeconds,
       cycleSpawns: Number.isFinite(cadenceCurrentEvery) && cadenceCurrentEvery > 0 ? cadenceCurrentEvery : null,
       remainingSpawns: Number.isFinite(cadenceRemainingSpawns) ? Math.max(0, cadenceRemainingSpawns) : null,
+      comboBoostSecondsCurrentCycle: Number.isFinite(cadenceComboBoostSecondsCurrentCycle)
+        ? Math.max(0, cadenceComboBoostSecondsCurrentCycle)
+        : 0,
       baseExpectedSeconds: resolvedBaseExpectedSeconds,
       nextExpectedSeconds: resolvedNextExpectedSeconds,
       speedDeltaRatio,
@@ -9163,6 +9167,18 @@ export class GameRenderer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(fittedSpawnText, barX + barW * 0.5, barY + barH * 0.5 + 0.2);
+
+      const comboBoostSecondsCurrentCycle = Math.max(0, Number(row?.comboBoostSecondsCurrentCycle) || 0);
+      if (comboBoostSecondsCurrentCycle > 0 && row.unlocked && row.type !== 'militia') {
+        const comboLabel = `Combo -${comboBoostSecondsCurrentCycle.toFixed(1)}s`;
+        ctx.save();
+        ctx.fillStyle = '#7fdff8';
+        ctx.font = 'bold 6px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(comboLabel, barX + 2, barY + barH * 0.5 + 0.2);
+        ctx.restore();
+      }
 
       const baseSpeedSeconds = Number(row.baseCycleSeconds);
       const baseSpeedText = Number.isFinite(baseSpeedSeconds) && baseSpeedSeconds > 0

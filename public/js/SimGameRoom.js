@@ -85,6 +85,10 @@ const ARROW_DAMAGE_GOLD_SHOT_CAP_RATIO = 1 / 5;
 const COMBO_MAX_STREAK = 10;
 const COMBO_OVERDRIVE_DAMAGE_PER_STACK = 2;
 const COMBO_OVERDRIVE_AOE_DAMAGE_PER_STACK = 1;
+const COMBO_SPECIAL_TIMER_BOOST_MIN_STREAK = 5;
+const COMBO_SPECIAL_TIMER_BOOST_MAX_STREAK = COMBO_MAX_STREAK;
+const COMBO_SPECIAL_TIMER_BOOST_MID_SECONDS = 0.5;
+const COMBO_SPECIAL_TIMER_BOOST_MAX_SECONDS = 1;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
@@ -714,6 +718,7 @@ function serializeSideState(side) {
       deltaRatio: finiteOrNull(entry?.deltaRatio, 3),
       progress: finiteOrNull(entry?.progress, 3),
       remainingSpawns: finiteOrNull(entry?.remainingSpawns, 3),
+      comboBoostSecondsCurrentCycle: finiteOrNull(entry?.comboBoostSecondsCurrentCycle, 3),
     };
   }
   for (const type of BASIC_SPECIAL_SPAWN_TYPES) {
@@ -5497,13 +5502,39 @@ class GameRoom {
     return Math.max(0, streak - COMBO_MAX_STREAK);
   }
 
+  comboSpecialTimerBoostSeconds(side) {
+    const streak = Math.max(0, Math.floor(Number(side?.comboHitStreak) || 0));
+    if (streak >= COMBO_SPECIAL_TIMER_BOOST_MAX_STREAK) return COMBO_SPECIAL_TIMER_BOOST_MAX_SECONDS;
+    if (streak >= COMBO_SPECIAL_TIMER_BOOST_MIN_STREAK) return COMBO_SPECIAL_TIMER_BOOST_MID_SECONDS;
+    return 0;
+  }
+
+  applyComboSpecialTimerBoost(sideName, side) {
+    if (!side || (sideName !== 'left' && sideName !== 'right')) return;
+    const boostSeconds = this.comboSpecialTimerBoostSeconds(side);
+    if (!(Number.isFinite(boostSeconds) && boostSeconds > 0)) return;
+    const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side));
+    const deltaSpawns = boostSeconds / spawnEverySeconds;
+    if (!(Number.isFinite(deltaSpawns) && deltaSpawns > 0)) return;
+
+    for (const type of SPECIAL_CADENCE_TRACKED_TYPES) {
+      const every = this.specialSpawnBaseEveryForType(side, type, this.t);
+      const dueCount = this.advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns, this.t, boostSeconds);
+      if (dueCount <= 0) continue;
+      if (!this.specialSpawnQueueGateOpen(side, type)) continue;
+      this.enqueuePendingSpecialSpawns(sideName, type, dueCount);
+    }
+  }
+
   markArrowHit(arrow) {
     this.activateArrowShotGoldTracker(arrow);
     if (!arrow || !arrow.mainArrow || arrow.comboCounted) return;
     arrow.comboCounted = true;
-    const side = arrow.side === 'left' ? this.left : this.right;
+    const sideName = arrow.side === 'right' ? 'right' : 'left';
+    const side = sideName === 'right' ? this.right : this.left;
     side.arrowHits = (side.arrowHits || 0) + 1;
     side.comboHitStreak = Math.max(0, Number(side.comboHitStreak) || 0) + 1;
+    this.applyComboSpecialTimerBoost(sideName, side);
   }
 
   markArrowMiss(arrow) {
@@ -6188,6 +6219,7 @@ class GameRoom {
         existing.deltaRatio = roundTo((currentEvery / Math.max(0.0001, liveBaseEvery)) - 1, 3);
         existing.progress = roundTo(progress, 3);
         existing.remainingSpawns = roundTo(Math.max(0, currentEvery - progress), 3);
+        existing.comboBoostSecondsCurrentCycle = roundTo(Math.max(0, Number(existing.comboBoostSecondsCurrentCycle) || 0), 3);
         progressMap[type] = existing.progress;
         return existing;
       }
@@ -6201,6 +6233,7 @@ class GameRoom {
       existing.deltaRatio = null;
       existing.progress = roundTo(priorProgress, 3);
       existing.remainingSpawns = null;
+      existing.comboBoostSecondsCurrentCycle = roundTo(Math.max(0, Number(existing.comboBoostSecondsCurrentCycle) || 0), 3);
       progressMap[type] = existing.progress;
       return existing;
     }
@@ -6217,6 +6250,7 @@ class GameRoom {
         deltaRatio: null,
         progress: roundTo(Math.max(0, Number(progressMap[type]) || 0), 3),
         remainingSpawns: null,
+        comboBoostSecondsCurrentCycle: 0,
       };
       cadenceMap[type] = entry;
       progressMap[type] = entry.progress;
@@ -6234,6 +6268,7 @@ class GameRoom {
       deltaRatio: roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3),
       progress: roundTo(progress, 3),
       remainingSpawns: roundTo(Math.max(0, currentEvery - progress), 3),
+      comboBoostSecondsCurrentCycle: 0,
     };
     cadenceMap[type] = entry;
     progressMap[type] = entry.progress;
@@ -6261,6 +6296,7 @@ class GameRoom {
         deltaRatio: null,
         progress: roundTo(progress, 3),
         remainingSpawns: null,
+        comboBoostSecondsCurrentCycle: 0,
       };
       cadenceMap[type] = entry;
       progressMap[type] = entry.progress;
@@ -6275,6 +6311,7 @@ class GameRoom {
       deltaRatio: roundTo((currentEvery / Math.max(0.0001, baseEvery)) - 1, 3),
       progress: roundTo(progress, 3),
       remainingSpawns: roundTo(Math.max(0, currentEvery - progress), 3),
+      comboBoostSecondsCurrentCycle: 0,
     };
     cadenceMap[type] = entry;
     progressMap[type] = entry.progress;
@@ -6318,7 +6355,7 @@ class GameRoom {
     return ((Math.max(0, spawnCount - 1)) % every);
   }
 
-  advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns = 0, matchTimeSec = this.t) {
+  advanceSpecialSpawnProgress(sideName, type, every, deltaSpawns = 0, matchTimeSec = this.t, comboBoostSeconds = 0) {
     const side = this[sideName];
     if (!side) return 0;
     const cadenceMap = this.ensureSpecialSpawnCadenceMap(side);
@@ -6328,33 +6365,62 @@ class GameRoom {
       entry = this.specialSpawnCadenceStateForType(side, type, matchTimeSec);
     }
     const increment = Math.max(0, Number(deltaSpawns) || 0);
+    const spawnEverySeconds = Math.max(0.0001, this.statSpawnEvery(side));
+    let comboRemainingSpawns = Math.max(0, Number(comboBoostSeconds) || 0) / spawnEverySeconds;
+    if (Number.isFinite(increment) && increment > 0) {
+      comboRemainingSpawns = Math.min(increment, comboRemainingSpawns);
+    } else {
+      comboRemainingSpawns = 0;
+    }
     if (increment <= 0) {
       if (entry && typeof entry === 'object') {
         entry.progress = roundTo(Math.max(0, Number(entry.progress) || 0), 3);
         if (Number.isFinite(entry.currentEvery) && Number(entry.currentEvery) > 0) {
           entry.remainingSpawns = roundTo(Math.max(0, Number(entry.currentEvery) - Number(entry.progress || 0)), 3);
         }
+        entry.comboBoostSecondsCurrentCycle = roundTo(Math.max(0, Number(entry.comboBoostSecondsCurrentCycle) || 0), 3);
         progressMap[type] = entry.progress;
       }
       return 0;
     }
-    if (!Number.isFinite(Number(entry?.currentEvery)) || Number(entry.currentEvery) <= 0) {
-      const carry = Math.max(0, Number(entry?.progress) || 0) + increment;
-      if (Number.isFinite(every) && every > 0) {
-        entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, carry);
-      } else {
-        entry.progress = roundTo(carry, 3);
-        progressMap[type] = entry.progress;
-        return 0;
-      }
-    }
-    entry.progress = Math.max(0, Number(entry.progress) || 0) + increment;
+    let remaining = increment;
     let dueCount = 0;
     let guard = 0;
-    while (Number.isFinite(entry.currentEvery) && entry.currentEvery > 0 && entry.progress >= entry.currentEvery && guard < 64) {
-      entry.progress -= entry.currentEvery;
-      dueCount += 1;
-      entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, entry.progress);
+    while (remaining > 0 && guard < 64) {
+      if (!Number.isFinite(Number(entry?.currentEvery)) || Number(entry.currentEvery) <= 0) {
+        const carry = Math.max(0, Number(entry?.progress) || 0);
+        if (Number.isFinite(every) && every > 0) {
+          entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, carry);
+        } else {
+          entry.progress = carry + remaining;
+          if (comboRemainingSpawns > 0) {
+            const comboStep = Math.min(comboRemainingSpawns, remaining);
+            entry.comboBoostSecondsCurrentCycle = Math.max(0, Number(entry.comboBoostSecondsCurrentCycle) || 0) + comboStep * spawnEverySeconds;
+            comboRemainingSpawns -= comboStep;
+          }
+          remaining = 0;
+          break;
+        }
+      }
+      const cycleEvery = Math.max(0.0001, Number(entry.currentEvery) || 0.0001);
+      const progressNow = Math.max(0, Number(entry.progress) || 0);
+      const toBoundary = Math.max(0, cycleEvery - progressNow);
+      const step = toBoundary > 0
+        ? Math.min(remaining, toBoundary)
+        : remaining;
+      if (!(step > 0)) break;
+      entry.progress = progressNow + step;
+      if (comboRemainingSpawns > 0) {
+        const comboStep = Math.min(comboRemainingSpawns, step);
+        entry.comboBoostSecondsCurrentCycle = Math.max(0, Number(entry.comboBoostSecondsCurrentCycle) || 0) + comboStep * spawnEverySeconds;
+        comboRemainingSpawns -= comboStep;
+      }
+      remaining -= step;
+      if (entry.progress + 1e-9 >= cycleEvery) {
+        const carry = Math.max(0, entry.progress - cycleEvery);
+        dueCount += 1;
+        entry = this.refreshSpecialSpawnCadenceCycle(sideName, type, matchTimeSec, carry);
+      }
       guard += 1;
     }
     entry.progress = roundTo(Math.max(0, Number(entry.progress) || 0), 3);
@@ -6363,6 +6429,7 @@ class GameRoom {
     } else {
       entry.remainingSpawns = null;
     }
+    entry.comboBoostSecondsCurrentCycle = roundTo(Math.max(0, Number(entry.comboBoostSecondsCurrentCycle) || 0), 3);
     progressMap[type] = entry.progress;
     cadenceMap[type] = entry;
     return Math.max(0, dueCount);
