@@ -140,6 +140,7 @@ const UPGRADE_COST_RULES = {
   presidentExecutiveOrderLevel: { base: 306, growth: 20, start: 0 },
   superMinionLevel: { base: 214, growth: 24, start: 0 },
 };
+const UPGRADE_DEBT_MULT = 0.75;
 const UPGRADE_PATH_BY_TYPE = {
   volleyLevel: 'arrow',
   unitLevel: 'unit',
@@ -913,7 +914,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     presidentExecutiveOrderLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
-    upgradeChargeMax: 100,
+    upgradeChargeMax: Math.max(1, Math.round(100 * UPGRADE_DEBT_MULT)),
     lastUpgradeSelectionSource: null,
     arrowDamageGoldRemainder: 0,
     upgradeAutoPickAt: null,
@@ -10609,7 +10610,9 @@ class GameRoom {
     const rule = UPGRADE_COST_RULES[type] || { base: 140, growth: 18, start: 1 };
     const level = Math.max(0, Number(side?.[type]) || 0);
     const tier = Math.max(0, level - rule.start);
-    return Math.max(60, Math.round(rule.base + tier * rule.growth));
+    const scaled = Math.round((rule.base + tier * rule.growth) * UPGRADE_DEBT_MULT);
+    const minDebt = Math.max(1, Math.round(60 * UPGRADE_DEBT_MULT));
+    return Math.max(minDebt, scaled);
   }
 
   upgradeLevelCap(type) {
@@ -11421,7 +11424,7 @@ class GameRoom {
 
     const spentDebt = Math.max(1, side.upgradeChargeMax);
     const overflow = Math.max(0, side.upgradeCharge - spentDebt);
-    const nextDebt = Math.max(1, Math.round(Number(card.cost) || this.upgradeCost(side, card.type)));
+    const nextDebt = Math.max(1, this.upgradeCost(side, card.type));
 
     this.awardUpgrade(side, card.type, card.value);
     side.lastUpgradeSelectionSource = (typeof options?.selectionSource === 'string' && options.selectionSource)
@@ -11464,6 +11467,11 @@ class GameRoom {
       side.upgradeAutoPickAt = null;
       this.resetCommitteeVoteState(sideName);
       return;
+    }
+
+    for (const card of this.upgradeCards) {
+      if (!card || card.side !== sideName || !card.type) continue;
+      card.cost = this.upgradeCost(side, card.type);
     }
 
     const hadCards = this.upgradeCards.some((c) => c.side === sideName);
