@@ -56,6 +56,7 @@ function launchStrengthFromPull(sideName, pullX, pullY) {
 }
 
 const COMBO_MAX_STREAK = 10;
+const TOTAL_FEEDING_TRIGGER_SECONDS = 180;
 
 function comboTierFromStreak(streak) {
   const value = Math.max(0, Math.min(COMBO_MAX_STREAK, Number(streak) || 0));
@@ -5155,6 +5156,7 @@ export class GameRenderer {
       ctx.fillStyle = '#2d3b53';
       ctx.fillRect(0, world.groundY, w, 4);
     }
+    this.drawTotalFeedingCenterFoodRain(snapshot, world);
 
     const barracksCounts = this.buildBarracksActiveCounts(snapshot);
     const barracksUi = {
@@ -5216,19 +5218,21 @@ export class GameRenderer {
     for (const minion of balloonMinions) this.drawMinionSprite(minion);
     this.drawUpgradeChargeBar('left', 20, 30, 200, 16, snapshot.left.upgradeCharge, snapshot.left.upgradeChargeMax);
     this.drawUpgradeChargeBar('right', w - 220, 30, 200, 16, snapshot.right.upgradeCharge, snapshot.right.upgradeChargeMax);
+    this.drawTotalFeedingTimer(snapshot);
 
     this.drawUpgradePlaceholders(snapshot);
 
     const resources = Array.isArray(snapshot.resources) ? snapshot.resources : [];
     this.updateResourceAppearState(resources, dt);
     this.drawResourceTelegraphs();
-    for (const res of resources) this.drawResourceNode(res);
+    for (const res of resources) this.drawResourceNode(res, snapshot);
     this.drawGoldResourceTrails();
     this.drawPowerupTrails();
     for (const power of snapshot.shotPowers) this.drawShotPower(power);
     if (Array.isArray(snapshot.cannonBalls)) {
       for (const ball of snapshot.cannonBalls) this.drawCannonBall(ball);
     }
+    this.drawTotalFeedingGrainProjectiles(snapshot);
     const committeeVoteLeftActive = Boolean(snapshot?.committeeVotes?.left?.active && Array.isArray(snapshot?.committeeVotes?.left?.options) && snapshot.committeeVotes.left.options.length);
     const committeeVoteRightActive = Boolean(snapshot?.committeeVotes?.right?.active && Array.isArray(snapshot?.committeeVotes?.right?.options) && snapshot.committeeVotes.right.options.length);
     for (const card of snapshot.upgradeCards) {
@@ -5951,7 +5955,9 @@ export class GameRenderer {
     const opts = (options && typeof options === 'object') ? options : {};
     const scale = Math.max(0.8, Math.min(2.4, Number(opts.scale) || 1));
     const style = typeof opts.style === 'string' ? opts.style : null;
-    const life = style === 'ability' ? 2.45 : 1.8;
+    const life = style === 'ability'
+      ? 2.45
+      : (style === 'announcement' ? 2.9 : 1.8);
     this.pushHeroLine({
       text: String(text).slice(0, 56),
       side,
@@ -5959,7 +5965,7 @@ export class GameRenderer {
       y,
       life,
       maxLife: life,
-      vy: -24,
+      vy: style === 'announcement' ? -9 : -24,
       scale,
       style,
     });
@@ -6595,10 +6601,33 @@ export class GameRenderer {
       const alpha = Math.max(0, b.life / b.maxLife);
       const lineScale = Math.max(0.8, Math.min(2.4, Number(b.scale) || 1));
       const isAbility = b.style === 'ability';
+      const isAnnouncement = b.style === 'announcement';
       const w = Math.max(96 * lineScale, Math.min(540 * lineScale, b.text.length * 6.4 * lineScale + 22 * lineScale));
       const h = (isAbility ? 30 : 24) * lineScale;
       const x = b.x;
       const y = b.y;
+      if (isAnnouncement) {
+        const glowA = 0.18 + alpha * 0.4;
+        const textA = 0.3 + alpha * 0.7;
+        ctx.globalAlpha = textA;
+        ctx.textAlign = 'center';
+        ctx.font = `900 ${Math.round(26 * lineScale)}px sans-serif`;
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2.2, 5 * lineScale);
+        ctx.strokeStyle = this.withAlpha('#6b4217', Math.min(1, 0.7 + alpha * 0.3));
+        ctx.strokeText(b.text, x, y);
+        ctx.shadowColor = this.withAlpha('#ffd46a', glowA);
+        ctx.shadowBlur = 12 * lineScale;
+        const goldGrad = ctx.createLinearGradient(x, y - 24 * lineScale, x, y + 6 * lineScale);
+        goldGrad.addColorStop(0, '#fff8d8');
+        goldGrad.addColorStop(0.45, '#ffd973');
+        goldGrad.addColorStop(1, '#c9882d');
+        ctx.fillStyle = goldGrad;
+        ctx.fillText(b.text, x, y);
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+        continue;
+      }
       const bg = isAbility
         ? (b.side === 'right' ? '#672c248f' : '#22486a8f')
         : (b.side === 'right' ? '#54231fcc' : '#203d59cc');
@@ -10433,6 +10462,139 @@ export class GameRenderer {
     ctx.fillText('UPG', x + bw / 2, y - 8);
   }
 
+  formatHudClock(seconds) {
+    const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+    const mins = Math.floor(safe / 60);
+    const secs = safe % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  drawTotalFeedingTimer(snapshot) {
+    const { ctx, canvas } = this;
+    const matchTime = Math.max(0, Number(snapshot?.t) || 0);
+    const active = matchTime >= TOTAL_FEEDING_TRIGGER_SECONDS;
+    const timerSeconds = active
+      ? (matchTime - TOTAL_FEEDING_TRIGGER_SECONDS)
+      : (TOTAL_FEEDING_TRIGGER_SECONDS - matchTime);
+    const label = active
+      ? `Total Feeding ${this.formatHudClock(timerSeconds)}`
+      : `To Total Feeding ${this.formatHudClock(timerSeconds)}`;
+
+    const x = (Number(canvas?.width) || 1600) * 0.5;
+    const y = 16;
+    ctx.save();
+    ctx.font = 'bold 9px sans-serif';
+    const textW = Math.max(76, Math.ceil(ctx.measureText(label).width) + 12);
+    ctx.fillStyle = active ? '#3a1c26d9' : '#162235d9';
+    ctx.fillRect(x - textW * 0.5, y - 9, textW, 14);
+    ctx.strokeStyle = active ? '#ff9fbcaa' : '#8fbef7aa';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - textW * 0.5, y - 9, textW, 14);
+    ctx.fillStyle = active ? '#ffd8e7' : '#cfe3ff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, y - 1);
+    ctx.restore();
+  }
+
+  drawTotalFeedingCenterFoodRain(snapshot, world) {
+    const matchTime = Math.max(0, Number(snapshot?.t) || 0);
+    if (matchTime < TOTAL_FEEDING_TRIGGER_SECONDS) return;
+    const { ctx } = this;
+    const leftTowerX = Number(world?.towerLeftX) || 0;
+    const rightTowerX = Number(world?.towerRightX) || 1600;
+    const midX = (leftTowerX + rightTowerX) * 0.5;
+    const groundY = Number(world?.groundY) || 640;
+    const pileY = groundY - 10;
+    const leftPileX = midX - 52;
+    const rightPileX = midX + 52;
+
+    ctx.save();
+    const shadow = ctx.createRadialGradient(midX, pileY + 3, 8, midX, pileY + 4, 120);
+    shadow.addColorStop(0, 'rgba(0,0,0,0.22)');
+    shadow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.ellipse(midX, pileY + 4, 126, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    this.drawHeroBalloonPayloadProjectile('balloonBreadBomb', leftPileX - 14, pileY + 0.5, 0.86, 61.7);
+    this.drawHeroBalloonPayloadProjectile('balloonBreadBomb', leftPileX + 4, pileY - 0.8, 0.68, 63.1);
+    this.drawHeroBalloonPayloadProjectile('balloonBreadBomb', leftPileX + 16, pileY + 1.2, 0.58, 64.9);
+    this.drawHeroBalloonPayloadProjectile('balloonRiceBomb', rightPileX + 14, pileY + 0.5, 0.86, 81.3);
+    this.drawHeroBalloonPayloadProjectile('balloonRiceBomb', rightPileX - 4, pileY - 0.8, 0.68, 82.9);
+    this.drawHeroBalloonPayloadProjectile('balloonRiceBomb', rightPileX - 16, pileY + 1.2, 0.58, 84.2);
+
+    const elapsed = Math.max(0, matchTime - TOTAL_FEEDING_TRIGGER_SECONDS);
+    const fallTop = 24;
+    const fallBottom = pileY - 4;
+    const fallSpan = Math.max(20, fallBottom - fallTop);
+    const perSideCount = this.fxQuality === 'low'
+      ? 12
+      : (this.fxQuality === 'medium' ? 20 : 30);
+
+    for (let i = 0; i < perSideCount; i += 1) {
+      const leftSeed = 310.7 + i * 7.13;
+      const leftRate = 0.72 + stableHash(leftSeed + 1.2) * 0.9;
+      const leftPhase = (elapsed * leftRate + stableHash(leftSeed + 2.8)) % 1;
+      const leftX = midX - (28 + stableHash(leftSeed + 4.1) * 118)
+        + Math.sin(elapsed * 2.2 + i * 0.74) * 1.8;
+      const leftY = fallTop + leftPhase * fallSpan;
+      const leftSize = 0.9 + stableHash(leftSeed + 5.6) * 1.4;
+      const leftA = 0.38 + Math.sin(leftPhase * Math.PI) * 0.34;
+      ctx.fillStyle = this.withAlpha('#e1b47a', leftA);
+      ctx.beginPath();
+      ctx.ellipse(leftX, leftY, leftSize * 1.14, leftSize * 0.72, stableHash(leftSeed + 6.7) * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+
+      const rightSeed = 510.3 + i * 6.41;
+      const rightRate = 0.74 + stableHash(rightSeed + 1.6) * 0.88;
+      const rightPhase = (elapsed * rightRate + stableHash(rightSeed + 2.2)) % 1;
+      const rightX = midX + (28 + stableHash(rightSeed + 3.4) * 118)
+        + Math.sin(elapsed * 2 + i * 0.61) * 1.8;
+      const rightY = fallTop + rightPhase * fallSpan;
+      const rightSize = 0.86 + stableHash(rightSeed + 5.2) * 1.24;
+      const rightA = 0.4 + Math.sin(rightPhase * Math.PI) * 0.36;
+      ctx.fillStyle = this.withAlpha('#f4fdff', rightA);
+      ctx.beginPath();
+      ctx.ellipse(rightX, rightY, rightSize * 1.06, rightSize * 0.74, stableHash(rightSeed + 6.1) * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  drawTotalFeedingGrainProjectiles(snapshot) {
+    const list = Array.isArray(snapshot?.totalFeedingGrainProjectiles)
+      ? snapshot.totalFeedingGrainProjectiles
+      : [];
+    if (!list.length) return;
+    const { ctx } = this;
+    for (let i = 0; i < list.length; i += 1) {
+      const p = list[i];
+      if (!p) continue;
+      const maxTtl = Math.max(0.0001, Number(p.maxTtl) || 0.52);
+      const ttl = Math.max(0, Number(p.ttl) || 0);
+      const t = 1 - Math.max(0, Math.min(1, ttl / maxTtl));
+      const eased = easeOutCubic(t);
+      const fromX = Number(p.fromX) || 0;
+      const fromY = Number(p.fromY) || 0;
+      const toX = Number(p.toX) || fromX;
+      const toY = Number(p.toY) || fromY;
+      const arc = Math.max(12, Number(p.arcHeight) || 42);
+      const x = lerp(fromX, toX, eased);
+      const y = lerp(fromY, toY, eased) - Math.sin(Math.PI * eased) * arc;
+      const trailA = 0.18 + (1 - t) * 0.22;
+      const sideFood = p.foodType === 'rice' ? 'balloonRiceBomb' : 'balloonBreadBomb';
+      const scale = 0.24 + Math.sin(Math.PI * t) * 0.05;
+
+      ctx.fillStyle = this.withAlpha('#000000', trailA);
+      ctx.beginPath();
+      ctx.ellipse(x, y + 6, 5.4, 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      this.drawHeroBalloonPayloadProjectile(sideFood, x, y, scale, Number(p.id) || i);
+    }
+  }
+
   drawUpgradePlaceholders(snapshot) {
     const { ctx } = this;
     for (const sideName of ['left', 'right']) {
@@ -11089,12 +11251,16 @@ export class GameRenderer {
     ctx.fill();
   }
 
-  drawResourceNode(res) {
+  drawResourceNode(res, snapshot = null) {
     const { ctx } = this;
     const progress = this.resourceAppearProgress(res);
     const eased = easeOutCubic(progress);
     const scale = lerp(RESOURCE_APPEAR_START_SCALE, 1, eased);
     const alpha = lerp(RESOURCE_APPEAR_START_ALPHA, 1, eased);
+    const matchTime = Math.max(0, Number(snapshot?.t) || 0);
+    const totalFeedingActive = matchTime >= TOTAL_FEEDING_TRIGGER_SECONDS;
+    const baseValue = Math.max(0, Number(res?.value) || 0);
+    const shownValue = totalFeedingActive ? (baseValue * 2) : baseValue;
 
     ctx.save();
     ctx.translate(res.x, res.y);
@@ -11121,7 +11287,12 @@ export class GameRenderer {
     ctx.fillStyle = '#3b2b12';
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`+${res.value}`, 0, 4);
+    ctx.fillText(`+${shownValue}`, 0, 4);
+    if (totalFeedingActive) {
+      ctx.fillStyle = '#7b531d';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.fillText('x2', 0, -res.r - 4);
+    }
     ctx.restore();
   }
 

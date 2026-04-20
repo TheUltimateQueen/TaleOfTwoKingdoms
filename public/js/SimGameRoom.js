@@ -68,6 +68,7 @@ const RESOURCE_SPAWN_END_MAX_SECONDS = 25;
 const RESOURCE_SPAWN_RANGE_RAMP_SECONDS = 120;
 const RESOURCE_SPAWN_TELEGRAPH_DURATION = 1;
 const RESOURCE_VALUE_BASE = 22;
+const RESOURCE_VALUE_MIN = 10;
 const RESOURCE_VALUE_REFERENCE_WAIT_SECONDS = (RESOURCE_SPAWN_START_MIN_SECONDS + RESOURCE_SPAWN_START_MAX_SECONDS) * 0.5;
 const MINION_KILL_GOLD_BASE = 12;
 const ECONOMY_RESOURCE_GOLD_BONUS_PER_LEVEL = 0.11;
@@ -93,7 +94,13 @@ const TOTAL_FEEDING_TRIGGER_SECONDS = 180;
 const TOTAL_FEEDING_SPAWN_EVERY_MULT = 0.5;
 const TOTAL_FEEDING_SPEED_MULT = 1.5;
 const TOTAL_FEEDING_HP_MULT = 2;
-const TOTAL_FEEDING_DAMAGE_MULT = 2;
+const TOTAL_FEEDING_DAMAGE_MULT = 3;
+const TOTAL_FEEDING_GOLD_MULT = 2;
+const TOTAL_FEEDING_GRAIN_PICKUP_RADIUS = 26;
+const TOTAL_FEEDING_GRAIN_THROW_TTL = 0.52;
+const TOTAL_FEEDING_GRAIN_ARC_MIN = 34;
+const TOTAL_FEEDING_GRAIN_ARC_MAX = 62;
+const TOTAL_FEEDING_GRAIN_TOWER_Y = TOWER_Y - 18;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
 const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
@@ -1011,6 +1018,7 @@ class GameRoom {
     this.resources = [];
     this.shotPowers = [];
     this.cannonBalls = [];
+    this.totalFeedingGrainProjectiles = [];
     this.heroFoodRainImpacts = [];
     this.heroRumblePulses = [];
     this.upgradeCards = [];
@@ -1056,6 +1064,7 @@ class GameRoom {
       resources: this.resources,
       shotPowers: this.shotPowers,
       cannonBalls: this.cannonBalls,
+      totalFeedingGrainProjectiles: this.totalFeedingGrainProjectiles,
       upgradeCards: this.upgradeCards,
       players: this.players,
       committeePlayers: this.committeePlayers,
@@ -1126,6 +1135,7 @@ class GameRoom {
     snapshot.resources = this.resources;
     snapshot.shotPowers = this.shotPowers;
     snapshot.cannonBalls = this.cannonBalls;
+    snapshot.totalFeedingGrainProjectiles = this.totalFeedingGrainProjectiles;
     snapshot.upgradeCards = this.upgradeCards;
     snapshot.players = this.players;
     snapshot.committeePlayers = this.committeePlayers;
@@ -2221,6 +2231,7 @@ class GameRoom {
     this.resources = [];
     this.shotPowers = [];
     this.cannonBalls = [];
+    this.totalFeedingGrainProjectiles = [];
     this.heroFoodRainImpacts = [];
     this.heroRumblePulses = [];
     this.upgradeCards = [];
@@ -2612,6 +2623,7 @@ class GameRoom {
     this.tickHeroFoodRainImpacts(dt, preBuckets.minion, MINION_TARGET_BUCKET_W);
     this.tickHeroRumblePulses(dt, preBuckets.minion, MINION_TARGET_BUCKET_W);
     this.tickMinions(dt, preBuckets.minion, preBuckets.carrierCounts);
+    this.tickTotalFeedingGrainProjectiles(dt);
     const candleBuckets = this.buildMinionBuckets(MINION_TARGET_BUCKET_W);
     const candleHolders = this.collectAllCandleHolders();
     this.tickCandle(dt, candleBuckets, candleHolders);
@@ -4175,14 +4187,14 @@ class GameRoom {
           this.markArrowHit(a);
           if (a.side === 'left') {
             const gain = this.goldFromResource(this.left, res.value);
-            this.grantGold('left', gain, true);
-            this.recordResourceGoldCollected('left', gain, 'arrow', a);
-            this.addUpgradeCharge(this.left, gain);
+            const awarded = this.grantGold('left', gain, true);
+            this.recordResourceGoldCollected('left', awarded, 'arrow', a);
+            this.addUpgradeCharge(this.left, awarded);
           } else {
             const gain = this.goldFromResource(this.right, res.value);
-            this.grantGold('right', gain, true);
-            this.recordResourceGoldCollected('right', gain, 'arrow', a);
-            this.addUpgradeCharge(this.right, gain);
+            const awarded = this.grantGold('right', gain, true);
+            this.recordResourceGoldCollected('right', awarded, 'arrow', a);
+            this.addUpgradeCharge(this.right, awarded);
           }
           this.queueHitSfx('resource', res.x, res.y, a.side);
           this.resources.splice(r, 1);
@@ -4487,9 +4499,9 @@ class GameRoom {
 
     const side = minion.side === 'right' ? this.right : this.left;
     const gain = this.goldFromResource(side, Number(res.value) || 0);
-    this.grantGold(minion.side, gain, true);
-    this.recordResourceGoldCollected(minion.side, gain, 'digger');
-    this.addUpgradeCharge(side, gain);
+    const awarded = this.grantGold(minion.side, gain, true);
+    this.recordResourceGoldCollected(minion.side, awarded, 'digger');
+    this.addUpgradeCharge(side, awarded);
     this.queueHitSfx('resource', res.x, res.y, minion.side);
     this.queueHitSfx('powerup', minion.x, minion.y - Math.max(6, minion.r * 0.3), minion.side);
     this.resources.splice(resourceIndex, 1);
@@ -4694,6 +4706,11 @@ class GameRoom {
       if (!Number.isFinite(m.balloonBombTowerDamageMult)) m.balloonBombTowerDamageMult = BALLOON_BOMB_TOWER_DAMAGE_MULT;
       if (m.balloonBombEnemySideName !== 'left' && m.balloonBombEnemySideName !== 'right') {
         m.balloonBombEnemySideName = m.side === 'left' ? 'right' : 'left';
+      }
+      if (typeof m.totalFeedingGrainPicked !== 'boolean') m.totalFeedingGrainPicked = false;
+      if (typeof m.totalFeedingGrainThrown !== 'boolean') m.totalFeedingGrainThrown = false;
+      if (m.totalFeedingGrainFoodType !== 'rice' && m.totalFeedingGrainFoodType !== 'bread') {
+        m.totalFeedingGrainFoodType = m.side === 'right' ? 'rice' : 'bread';
       }
       if (typeof m.balloonBombImpactPending !== 'boolean') m.balloonBombImpactPending = false;
       m.balloonThrowTtl = Math.max(0, m.balloonThrowTtl - dt);
@@ -4960,6 +4977,7 @@ class GameRoom {
       const enemySideName = m.side === 'left' ? 'right' : 'left';
       const enemyX = m.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
       const dir = m.side === 'left' ? 1 : -1;
+      this.processTotalFeedingGrainStateForMinion(m, enemySideName);
       if (m.rider) this.refreshRiderChargeState(m);
       const advanceSpeed = this.minionAdvanceSpeed(m);
       const mySideState = m.side === 'right' ? this.right : this.left;
@@ -5534,6 +5552,123 @@ class GameRoom {
     return this.isTotalFeedingActive() ? TOTAL_FEEDING_DAMAGE_MULT : 1;
   }
 
+  totalFeedingGoldMultiplier() {
+    return this.isTotalFeedingActive() ? TOTAL_FEEDING_GOLD_MULT : 1;
+  }
+
+  isTotalFeedingBasicUnit(minion) {
+    if (!minion) return false;
+    if (typeof minion.totalFeedingBasicUnit === 'boolean') return minion.totalFeedingBasicUnit;
+    return !Boolean(
+      minion.super
+      || minion.necrominion
+      || minion.dragon
+      || minion.balloon
+      || minion.gunner
+      || minion.rider
+      || minion.digger
+      || minion.shieldBearer
+      || minion.monk
+      || minion.stoneGolem
+      || minion.hero
+      || minion.president
+      || minion.heroCooker
+    );
+  }
+
+  processTotalFeedingGrainStateForMinion(minion, enemySideName) {
+    if (!this.isTotalFeedingActive()) return;
+    if (!this.isTotalFeedingBasicUnit(minion)) return;
+    if (minion.candleCarrier) return;
+    if (minion.totalFeedingGrainThrown) return;
+
+    const midX = (TOWER_X_LEFT + TOWER_X_RIGHT) * 0.5;
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const foodType = sideName === 'right' ? 'rice' : 'bread';
+    if (!minion.totalFeedingGrainPicked) {
+      if (Math.abs((Number(minion.x) || 0) - midX) > TOTAL_FEEDING_GRAIN_PICKUP_RADIUS) return;
+      minion.totalFeedingGrainPicked = true;
+      minion.totalFeedingGrainFoodType = foodType;
+      const pickupY = (Number(minion.y) || TOWER_Y) - Math.max(6, (Number(minion.r) || 12) * 0.34);
+      this.queueHitSfx('foodburst', Number(minion.x) || 0, pickupY, sideName, {
+        foodType,
+        heavy: false,
+      });
+      return;
+    }
+
+    const enemyTowerFaceX = enemySideName === 'left'
+      ? (TOWER_X_LEFT + 54)
+      : (TOWER_X_RIGHT - 54);
+    const throwTriggerX = midX + (enemyTowerFaceX - midX) * 0.5;
+    const reachedThrowPoint = sideName === 'left'
+      ? (Number(minion.x) || 0) >= throwTriggerX
+      : (Number(minion.x) || 0) <= throwTriggerX;
+    if (!reachedThrowPoint) return;
+
+    this.launchTotalFeedingGrainProjectile(minion, enemySideName, enemyTowerFaceX);
+    minion.totalFeedingGrainThrown = true;
+  }
+
+  launchTotalFeedingGrainProjectile(minion, enemySideName, enemyTowerFaceX) {
+    if (!minion) return;
+    if (!Array.isArray(this.totalFeedingGrainProjectiles)) this.totalFeedingGrainProjectiles = [];
+    const sideName = minion.side === 'right' ? 'right' : 'left';
+    const foodType = minion.totalFeedingGrainFoodType === 'rice' ? 'rice' : 'bread';
+    const fromX = Number(minion.x) || 0;
+    const fromY = (Number(minion.y) || TOWER_Y) - Math.max(6, (Number(minion.r) || 12) * 0.56);
+    const toX = Number.isFinite(enemyTowerFaceX)
+      ? enemyTowerFaceX
+      : (enemySideName === 'left' ? (TOWER_X_LEFT + 54) : (TOWER_X_RIGHT - 54));
+    const toY = TOTAL_FEEDING_GRAIN_TOWER_Y + (Math.random() * 8 - 4);
+    const maxTtl = TOTAL_FEEDING_GRAIN_THROW_TTL;
+    this.totalFeedingGrainProjectiles.push({
+      id: this.seq++,
+      side: sideName,
+      enemySide: enemySideName === 'left' ? 'left' : 'right',
+      foodType,
+      fromX,
+      fromY,
+      toX,
+      toY,
+      arcHeight: TOTAL_FEEDING_GRAIN_ARC_MIN
+        + Math.random() * (TOTAL_FEEDING_GRAIN_ARC_MAX - TOTAL_FEEDING_GRAIN_ARC_MIN),
+      damage: Math.max(0, this.minionOutgoingDamage(minion, Number(minion.dmg) || 0)),
+      ttl: maxTtl,
+      maxTtl,
+    });
+    this.queueHitSfx('foodburst', fromX, fromY, sideName, { foodType, heavy: false });
+  }
+
+  tickTotalFeedingGrainProjectiles(dt) {
+    if (!Array.isArray(this.totalFeedingGrainProjectiles) || this.totalFeedingGrainProjectiles.length === 0) return;
+    let write = 0;
+    for (let i = 0; i < this.totalFeedingGrainProjectiles.length; i += 1) {
+      const p = this.totalFeedingGrainProjectiles[i];
+      if (!p) continue;
+      const prevTtl = Math.max(0, Number(p.ttl) || 0);
+      p.ttl = Math.max(0, prevTtl - dt);
+      if (prevTtl > 0 && p.ttl === 0) {
+        const sourceSide = p.side === 'right' ? 'right' : 'left';
+        const enemySide = p.enemySide === 'left' ? 'left' : 'right';
+        const impactX = Number(p.toX) || (enemySide === 'left' ? (TOWER_X_LEFT + 54) : (TOWER_X_RIGHT - 54));
+        const impactY = Number(p.toY) || TOTAL_FEEDING_GRAIN_TOWER_Y;
+        const dmg = this.dealDamageToTower(enemySide, Number(p.damage) || 0, impactX, impactY, 'unit', sourceSide);
+        if (dmg > 0) {
+          this.queueHitSfx('foodburst', impactX, impactY, sourceSide, {
+            foodType: p.foodType === 'rice' ? 'rice' : 'bread',
+            heavy: false,
+          });
+        }
+        continue;
+      }
+      if (p.ttl <= 0) continue;
+      this.totalFeedingGrainProjectiles[write] = p;
+      write += 1;
+    }
+    this.totalFeedingGrainProjectiles.length = write;
+  }
+
   unitHpUpgradeContribution(side) {
     return Math.max(0, Number(side?.unitHpLevel) || 0) * 30;
   }
@@ -5581,9 +5716,11 @@ class GameRoom {
     }
 
     const midX = (TOWER_X_LEFT + TOWER_X_RIGHT) * 0.5;
-    const topY = TOWER_Y - 210;
-    this.queueLine('Total Feeding!', midX, topY, 'left');
-    this.queueLine('Total Feeding!', midX, topY + 24, 'right');
+    const topY = TOWER_Y - 198;
+    this.queueLine('TOTAL FEEDING!', midX, topY, null, {
+      scale: 2.28,
+      style: 'announcement',
+    });
     this.queueHitSfx('explosion', midX, TOWER_Y - 80, 'left');
     this.queueHitSfx('explosion', midX, TOWER_Y - 80, 'right');
   }
@@ -8666,13 +8803,13 @@ class GameRoom {
     if (capped) gain = maxWhole;
     side.arrowDamageGoldRemainder = capped ? 0 : (total - gain);
     if (gain <= 0) return 0;
-    this.grantGold(sideName, gain, true);
-    this.recordMinionDamageGoldCollected(sideName, gain);
-    this.recordArrowShotGold(sideName, gain, arrow);
+    const awarded = this.grantGold(sideName, gain, true);
+    this.recordMinionDamageGoldCollected(sideName, awarded);
+    this.recordArrowShotGold(sideName, awarded, arrow);
     if (arrow && typeof arrow === 'object') arrow.arrowDamageGoldAwarded += gain;
-    const chargeGain = Math.max(1, Math.round(gain * ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT));
+    const chargeGain = Math.max(1, Math.round(awarded * ARROW_DAMAGE_GOLD_UPGRADE_CHARGE_MULT));
     this.addUpgradeCharge(side, chargeGain);
-    return gain;
+    return awarded;
   }
 
   buildMinionGhostSnapshot(minion) {
@@ -10183,6 +10320,23 @@ class GameRoom {
       candleBurnTtl: 0,
       candleBurnTick: 0,
       failedSpecialType,
+      totalFeedingBasicUnit: !(
+        isSuper
+        || isNecrominion
+        || isDragon
+        || isBalloon
+        || isGunner
+        || isRider
+        || isDigger
+        || isShieldBearer
+        || isMonk
+        || isStoneGolem
+        || isHero
+        || isPresident
+      ),
+      totalFeedingGrainPicked: false,
+      totalFeedingGrainThrown: false,
+      totalFeedingGrainFoodType: sideName === 'right' ? 'rice' : 'bread',
     };
     this.minions.push(created);
     return created;
@@ -10215,13 +10369,14 @@ class GameRoom {
   }
 
   goldFromResource(_side, value) {
-    return Math.max(0, Math.floor(Number(value) || 0));
+    return Math.max(RESOURCE_VALUE_MIN, Math.floor(Number(value) || 0));
   }
 
   grantGold(sideName, amount, countAsEarned = true) {
     const side = sideName === 'right' ? this.right : this.left;
     if (!side) return 0;
-    const gain = Math.max(0, Number(amount) || 0);
+    const gainBase = Math.max(0, Number(amount) || 0);
+    const gain = gainBase * this.totalFeedingGoldMultiplier();
     if (gain <= 0) return 0;
     side.gold += gain;
     if (countAsEarned) side.goldEarnedTotal = Math.max(0, (Number(side.goldEarnedTotal) || 0) + gain);
@@ -10612,14 +10767,14 @@ class GameRoom {
   resourceBaseValueForInterval(waitSeconds = RESOURCE_SPAWN_START_MIN_SECONDS) {
     const wait = Math.max(0.05, Number(waitSeconds) || RESOURCE_SPAWN_START_MIN_SECONDS);
     const ref = Math.max(0.05, RESOURCE_VALUE_REFERENCE_WAIT_SECONDS);
-    return Math.max(1, Math.round(RESOURCE_VALUE_BASE * (wait / ref)));
+    return Math.max(RESOURCE_VALUE_MIN, Math.round(RESOURCE_VALUE_BASE * (wait / ref)));
   }
 
   resourceValueForSide(sideName, waitSeconds = RESOURCE_SPAWN_START_MIN_SECONDS) {
     const side = sideName === 'right' ? this.right : this.left;
     const baseValue = this.resourceBaseValueForInterval(waitSeconds);
     const bonus = 1 + (Math.max(1, Number(side?.resourceLevel) || 1) - 1) * ECONOMY_RESOURCE_GOLD_BONUS_PER_LEVEL;
-    return Math.max(1, Math.floor(baseValue * bonus));
+    return Math.max(RESOURCE_VALUE_MIN, Math.floor(baseValue * bonus));
   }
 
   makeMirroredResourceSpawn(waitSeconds = this.pendingResourceInterval, time = this.nextResourceAt) {
