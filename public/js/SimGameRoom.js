@@ -51,6 +51,9 @@ const CPU_MIN_SOLUTION_DX = 10;
 const CPU_MIN_CLOSE_SOLUTION_DX = 1;
 const CPU_CLOSE_TARGET_DX = 90;
 const CPU_CLOSE_TARGET_PULL_Y = 0.72;
+const CPU_CLOSE_TARGET_MIN_VERTICAL = 0.56;
+const CPU_VERY_CLOSE_TARGET_MIN_VERTICAL = 0.78;
+const CPU_CLOSE_TARGET_TTL_SECONDS = 1.9;
 const CPU_MAX_SOLUTION_TTL = 5.6;
 const CPU_GOLD_GAP_NORMALIZE = 1000;
 const CPU_MINION_LEAD_TIME_MAX = 1.1;
@@ -9637,9 +9640,10 @@ class GameRoom {
     );
     const veryCloseBias = clamp(1 - (dx / 26), 0, 1);
     const minHorizontal = lerp(0.24, 0.006, closeBias);
-    const minVertical = lerp(0, 0.24, closeBias);
-    const ttlTarget = lerp(1.35, 0.62, closeBias);
-    const ttlPenaltyWeight = lerp(3.2, 0.9, closeBias);
+    const closeVerticalFloor = lerp(CPU_CLOSE_TARGET_PULL_Y, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
+    const minVertical = lerp(0.04, 0.48, closeBias);
+    const ttlTarget = lerp(1.35, CPU_CLOSE_TARGET_TTL_SECONDS, closeBias);
+    const ttlPenaltyWeight = lerp(3.2, 1.45, closeBias);
 
     let best = null;
     let bestErr = Infinity;
@@ -9659,7 +9663,7 @@ class GameRoom {
         const gravity = 980 - strength * 220;
         const yPred = sy - Math.sin(angle) * speed * ttl + 0.5 * gravity * ttl * ttl;
         const closeLiftPenalty = closeBias > 0
-          ? Math.max(0, (CPU_CLOSE_TARGET_PULL_Y - v)) * 40 * closeBias
+          ? Math.max(0, (closeVerticalFloor - v)) * 78 * closeBias
           : 0;
         const err = Math.abs(yPred - ty) + Math.abs(ttl - ttlTarget) * ttlPenaltyWeight + closeLiftPenalty;
         if (err < bestErr) {
@@ -9677,8 +9681,8 @@ class GameRoom {
     if (dx <= CPU_CLOSE_TARGET_DX) {
       const fineMinH = clamp(dx / 2000, 0.0005, 0.03);
       const fineMaxH = clamp(dx / 120 + 0.03, 0.04, 0.18);
-      const fineMinV = lerp(0.22, 0.6, 1 - veryCloseBias);
-      const fineTtlPenaltyWeight = ttlPenaltyWeight * (1 - veryCloseBias * 0.95);
+      const fineMinV = lerp(CPU_CLOSE_TARGET_MIN_VERTICAL, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
+      const fineTtlPenaltyWeight = ttlPenaltyWeight * lerp(1, 0.72, veryCloseBias);
       for (let h = fineMinH; h <= fineMaxH + 0.0001; h += 0.0012) {
         for (let v = fineMinV; v <= 0.995; v += 0.008) {
           const mag = Math.hypot(h, v);
@@ -9692,7 +9696,7 @@ class GameRoom {
           if (!(ttl > 0.06 && ttl < CPU_MAX_SOLUTION_TTL)) continue;
           const gravity = 980 - strength * 220;
           const yPred = sy - Math.sin(angle) * speed * ttl + 0.5 * gravity * ttl * ttl;
-          const closeLiftPenalty = Math.max(0, (CPU_CLOSE_TARGET_PULL_Y - v)) * 56 * closeBias * (1 - veryCloseBias * 0.85);
+          const closeLiftPenalty = Math.max(0, (closeVerticalFloor - v)) * 96 * closeBias * lerp(1, 1.85, veryCloseBias);
           const err = Math.abs(yPred - ty) + Math.abs(ttl - ttlTarget) * fineTtlPenaltyWeight + closeLiftPenalty;
           if (err < bestErr) {
             bestErr = err;
