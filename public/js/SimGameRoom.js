@@ -58,10 +58,13 @@ const CPU_MAX_SOLUTION_TTL = 5.6;
 const CPU_GOLD_GAP_NORMALIZE = 1000;
 const CPU_MINION_LEAD_TIME_MAX = 1.1;
 const CPU_MINION_LEAD_TIME_SCALE = 0.72;
-const CPU_MINION_CLOSE_LEAD_TIME_SCALE = 0.9;
+const CPU_MINION_CLOSE_LEAD_TIME_SCALE = 0.44;
 const CPU_MINION_CLOSE_NOISE_SCALE = 0.2;
 const CPU_MINION_CLOSE_MISS_NOISE_SCALE = 0.45;
 const CPU_MINION_CLOSE_ACCURACY_BOOST = 0.34;
+const UPGRADE_DEBT_PHASE_START_MULT = 0.5;
+const UPGRADE_DEBT_PHASE_FULL_MULT = 1;
+const UPGRADE_DEBT_PHASE_FULL_AT_SECONDS = 180;
 
 // Shot power drop frequency (seconds)
 const SHOT_POWER_SPAWN_MIN_INTERVAL = 10;
@@ -919,7 +922,8 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     presidentExecutiveOrderLevel: 0,
     superMinionLevel: 0,
     upgradeCharge: 0,
-    upgradeChargeMax: Math.max(1, Math.round(100 * UPGRADE_DEBT_MULT)),
+    upgradeChargeMax: Math.max(1, Math.round(100 * UPGRADE_DEBT_MULT * UPGRADE_DEBT_PHASE_START_MULT)),
+    upgradeDebtPhaseApplied: UPGRADE_DEBT_PHASE_START_MULT,
     lastUpgradeSelectionSource: null,
     arrowDamageGoldRemainder: 0,
     upgradeAutoPickAt: null,
@@ -2541,6 +2545,7 @@ class GameRoom {
   tick(dt) {
     if (!this.started || this.gameOver) return;
     this.t += dt;
+    this.syncUpgradeDebtPhase();
     if (!this.totalFeedingActive && this.t >= TOTAL_FEEDING_TRIGGER_SECONDS) {
       this.activateTotalFeeding();
     }
@@ -9782,12 +9787,19 @@ class GameRoom {
             const leadScale = lerp(CPU_MINION_LEAD_TIME_SCALE, CPU_MINION_CLOSE_LEAD_TIME_SCALE, minionCloseBias);
             const leadTime = clamp(Number(solved.ttl) * leadScale, 0, CPU_MINION_LEAD_TIME_MAX);
             if (leadTime > 0.02) {
+              const currentDx = Math.max(0, (aimX - sx) * sideDir);
               const predictedRawX = aimX + Number(target.vxEstimate) * leadTime;
               const predictedX = sideName === 'left'
                 ? Math.max(forwardMinX, predictedRawX)
                 : Math.min(forwardMinX, predictedRawX);
-              const leadSolved = this.solveCpuPullForTarget(sideName, slot, predictedX, aimY);
-              if (leadSolved) solved = leadSolved;
+              const predictedDx = Math.max(0, (predictedX - sx) * sideDir);
+              // For very close tower fights, inward lead (smaller dx) can force unnatural near-vertical shots.
+              // Keep close-range aim stable by only applying lead when it does not pull the target further inward.
+              const inwardLeadOnCloseTarget = minionCloseBias > 0.58 && predictedDx + 0.001 < currentDx;
+              if (!inwardLeadOnCloseTarget) {
+                const leadSolved = this.solveCpuPullForTarget(sideName, slot, predictedX, aimY);
+                if (leadSolved) solved = leadSolved;
+              }
             }
           }
           if (solved) {
@@ -10621,12 +10633,46 @@ class GameRoom {
     side.upgradeCharge = Math.min(99999, side.upgradeCharge + amount);
   }
 
+  upgradeDebtPhaseMultiplier(time = this.t) {
+    const t = Math.max(0, Number(time) || 0);
+    const progress = clamp(t / Math.max(0.0001, UPGRADE_DEBT_PHASE_FULL_AT_SECONDS), 0, 1);
+    return lerp(UPGRADE_DEBT_PHASE_START_MULT, UPGRADE_DEBT_PHASE_FULL_MULT, progress);
+  }
+
+  upgradeDebtMultiplier(time = this.t) {
+    return UPGRADE_DEBT_MULT * this.upgradeDebtPhaseMultiplier(time);
+  }
+
+  syncUpgradeDebtPhaseForSide(sideName = 'left') {
+    const side = sideName === 'right' ? this.right : this.left;
+    if (!side || typeof side !== 'object') return;
+    const targetPhase = this.upgradeDebtPhaseMultiplier(this.t);
+    const appliedRaw = Number(side.upgradeDebtPhaseApplied);
+    const appliedPhase = Number.isFinite(appliedRaw)
+      ? Math.max(0.0001, appliedRaw)
+      : targetPhase;
+    if (Math.abs(appliedPhase - targetPhase) < 0.0001) {
+      side.upgradeDebtPhaseApplied = targetPhase;
+      return;
+    }
+    const currentDebt = Math.max(1, Number(side.upgradeChargeMax) || 1);
+    const scale = targetPhase / appliedPhase;
+    side.upgradeChargeMax = Math.max(1, Math.round(currentDebt * scale));
+    side.upgradeDebtPhaseApplied = targetPhase;
+  }
+
+  syncUpgradeDebtPhase() {
+    this.syncUpgradeDebtPhaseForSide('left');
+    this.syncUpgradeDebtPhaseForSide('right');
+  }
+
   upgradeCost(side, type) {
     const rule = UPGRADE_COST_RULES[type] || { base: 140, growth: 18, start: 1 };
     const level = Math.max(0, Number(side?.[type]) || 0);
     const tier = Math.max(0, level - rule.start);
-    const scaled = Math.round((rule.base + tier * rule.growth) * UPGRADE_DEBT_MULT);
-    const minDebt = Math.max(1, Math.round(60 * UPGRADE_DEBT_MULT));
+    const debtMul = this.upgradeDebtMultiplier(this.t);
+    const scaled = Math.round((rule.base + tier * rule.growth) * debtMul);
+    const minDebt = Math.max(1, Math.round(60 * debtMul));
     return Math.max(minDebt, scaled);
   }
 
@@ -11413,6 +11459,7 @@ class GameRoom {
   }
 
   selectUpgradeCard(sideName, card, options = null) {
+    this.syncUpgradeDebtPhaseForSide(sideName);
     const side = this[sideName];
     if (!side || !card || card.side !== sideName) return false;
     if (side.upgradeCharge < side.upgradeChargeMax) return false;
@@ -11468,6 +11515,7 @@ class GameRoom {
   }
 
   syncUpgradeCards(sideName) {
+    this.syncUpgradeDebtPhaseForSide(sideName);
     const side = this[sideName];
     if (side.upgradeCharge < side.upgradeChargeMax) {
       this.clearCardsForSide(sideName);
