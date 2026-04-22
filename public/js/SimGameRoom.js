@@ -485,6 +485,7 @@ const COMMITTEE_SPECIAL_BUCKET_WEIGHT_MULT = 1.75;
 const ECONOMY_UPGRADE_CARD_WEIGHT_MULT = 0.25;
 const UNIT_DAMAGE_UPGRADE_CARD_WEIGHT_MULT = 0.25;
 const UNIT_HP_UPGRADE_CARD_WEIGHT_MULT = 0.25;
+const SPAWN_SPEED_UPGRADE_CARD_WEIGHT_MULT = 0.25;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -10907,7 +10908,11 @@ class GameRoom {
             : (
               type === 'unitLevel'
                 ? UNIT_DAMAGE_UPGRADE_CARD_WEIGHT_MULT
-                : (type === 'unitHpLevel' ? UNIT_HP_UPGRADE_CARD_WEIGHT_MULT : 1)
+                : (
+                  type === 'unitHpLevel'
+                    ? UNIT_HP_UPGRADE_CARD_WEIGHT_MULT
+                    : (type === 'spawnLevel' ? SPAWN_SPEED_UPGRADE_CARD_WEIGHT_MULT : 1)
+                )
             )
         ),
       });
