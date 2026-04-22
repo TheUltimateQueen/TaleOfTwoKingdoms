@@ -62,15 +62,15 @@ const CPU_MINION_CLOSE_LEAD_TIME_SCALE = 0.44;
 const CPU_MINION_CLOSE_NOISE_SCALE = 0.2;
 const CPU_MINION_CLOSE_MISS_NOISE_SCALE = 0.45;
 const CPU_MINION_CLOSE_ACCURACY_BOOST = 0.34;
-const UPGRADE_DEBT_PHASE_START_MULT = 0.5;
+const UPGRADE_DEBT_PHASE_START_MULT = 0.4;
 const UPGRADE_DEBT_PHASE_FULL_MULT = 1;
-const UPGRADE_DEBT_PHASE_FULL_AT_SECONDS = 180;
+const UPGRADE_DEBT_PHASE_FULL_AT_SECONDS = 300;
 
 // Shot power drop frequency (seconds)
 const SHOT_POWER_SPAWN_MIN_INTERVAL = 10;
 const SHOT_POWER_SPAWN_MAX_INTERVAL = 50;
-const SHOT_POWER_POWER_UPGRADE_MIN_INTERVAL = 5;
-const SHOT_POWER_POWER_UPGRADE_MAX_INTERVAL = 10;
+const SHOT_POWER_POWER_UPGRADE_MIN_INTERVAL = 2;
+const SHOT_POWER_POWER_UPGRADE_MAX_INTERVAL = 4;
 const SHOT_POWER_MULTI_SHOT_CHANCE_RATIO = 0.1;
 const SHOT_POWER_FLARE_SPAWN_CHANCE_MULT = 0.25;
 const RESOURCE_SPAWN_START_MIN_SECONDS = 2;
@@ -483,6 +483,8 @@ const UPGRADE_SELECTION_FX_DURATION = 2.2;
 const REGULAR_SPECIAL_PAIR_PICK_CHANCE = 0.62;
 const COMMITTEE_SPECIAL_BUCKET_WEIGHT_MULT = 1.75;
 const ECONOMY_UPGRADE_CARD_WEIGHT_MULT = 0.25;
+const UNIT_DAMAGE_UPGRADE_CARD_WEIGHT_MULT = 0.25;
+const UNIT_HP_UPGRADE_CARD_WEIGHT_MULT = 0.25;
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -923,7 +925,6 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     superMinionLevel: 0,
     upgradeCharge: 0,
     upgradeChargeMax: Math.max(1, Math.round(100 * UPGRADE_DEBT_MULT * UPGRADE_DEBT_PHASE_START_MULT)),
-    upgradeDebtPhaseApplied: UPGRADE_DEBT_PHASE_START_MULT,
     lastUpgradeSelectionSource: null,
     arrowDamageGoldRemainder: 0,
     upgradeAutoPickAt: null,
@@ -2545,7 +2546,6 @@ class GameRoom {
   tick(dt) {
     if (!this.started || this.gameOver) return;
     this.t += dt;
-    this.syncUpgradeDebtPhase();
     if (!this.totalFeedingActive && this.t >= TOTAL_FEEDING_TRIGGER_SECONDS) {
       this.activateTotalFeeding();
     }
@@ -10643,29 +10643,6 @@ class GameRoom {
     return UPGRADE_DEBT_MULT * this.upgradeDebtPhaseMultiplier(time);
   }
 
-  syncUpgradeDebtPhaseForSide(sideName = 'left') {
-    const side = sideName === 'right' ? this.right : this.left;
-    if (!side || typeof side !== 'object') return;
-    const targetPhase = this.upgradeDebtPhaseMultiplier(this.t);
-    const appliedRaw = Number(side.upgradeDebtPhaseApplied);
-    const appliedPhase = Number.isFinite(appliedRaw)
-      ? Math.max(0.0001, appliedRaw)
-      : targetPhase;
-    if (Math.abs(appliedPhase - targetPhase) < 0.0001) {
-      side.upgradeDebtPhaseApplied = targetPhase;
-      return;
-    }
-    const currentDebt = Math.max(1, Number(side.upgradeChargeMax) || 1);
-    const scale = targetPhase / appliedPhase;
-    side.upgradeChargeMax = Math.max(1, Math.round(currentDebt * scale));
-    side.upgradeDebtPhaseApplied = targetPhase;
-  }
-
-  syncUpgradeDebtPhase() {
-    this.syncUpgradeDebtPhaseForSide('left');
-    this.syncUpgradeDebtPhaseForSide('right');
-  }
-
   upgradeCost(side, type) {
     const rule = UPGRADE_COST_RULES[type] || { base: 140, growth: 18, start: 1 };
     const level = Math.max(0, Number(side?.[type]) || 0);
@@ -10924,7 +10901,15 @@ class GameRoom {
         type,
         source: 'random',
         path: this.upgradePathForType(type),
-        weight: regularWeight * (type === 'resourceLevel' ? ECONOMY_UPGRADE_CARD_WEIGHT_MULT : 1),
+        weight: regularWeight * (
+          type === 'resourceLevel'
+            ? ECONOMY_UPGRADE_CARD_WEIGHT_MULT
+            : (
+              type === 'unitLevel'
+                ? UNIT_DAMAGE_UPGRADE_CARD_WEIGHT_MULT
+                : (type === 'unitHpLevel' ? UNIT_HP_UPGRADE_CARD_WEIGHT_MULT : 1)
+            )
+        ),
       });
     }
 
@@ -11459,7 +11444,6 @@ class GameRoom {
   }
 
   selectUpgradeCard(sideName, card, options = null) {
-    this.syncUpgradeDebtPhaseForSide(sideName);
     const side = this[sideName];
     if (!side || !card || card.side !== sideName) return false;
     if (side.upgradeCharge < side.upgradeChargeMax) return false;
@@ -11515,7 +11499,6 @@ class GameRoom {
   }
 
   syncUpgradeCards(sideName) {
-    this.syncUpgradeDebtPhaseForSide(sideName);
     const side = this[sideName];
     if (side.upgradeCharge < side.upgradeChargeMax) {
       this.clearCardsForSide(sideName);
