@@ -8621,9 +8621,52 @@ class GameRoom {
     const dir = monk.side === 'left' ? 1 : -1;
     const homeX = monk.side === 'left' ? TOWER_X_LEFT + 78 : TOWER_X_RIGHT - 78;
     const enemyX = monk.side === 'left' ? TOWER_X_RIGHT - 46 : TOWER_X_LEFT + 46;
+    const forwardSort = monk.side === 'left'
+      ? ((a, b) => {
+        const xDiff = (Number(b?.x) || 0) - (Number(a?.x) || 0);
+        if (Math.abs(xDiff) > 0.001) return xDiff;
+        return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+      })
+      : ((a, b) => {
+        const xDiff = (Number(a?.x) || 0) - (Number(b?.x) || 0);
+        if (Math.abs(xDiff) > 0.001) return xDiff;
+        return (Number(a?.id) || 0) - (Number(b?.id) || 0);
+      });
+    const sideMonks = [monk];
+    const frontlineAllies = [];
+    for (const ally of this.minions) {
+      if (!ally || ally.side !== monk.side || ally.id === monk.id || ally.removed) continue;
+      if ((Number(ally.hp) || 0) <= 0) continue;
+      if (ally.monk) {
+        sideMonks.push(ally);
+        continue;
+      }
+      if (ally.president) continue;
+      frontlineAllies.push(ally);
+    }
+    sideMonks.sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
+    frontlineAllies.sort(forwardSort);
+    const myMonkSlot = Math.max(0, sideMonks.findIndex((ally) => ally.id === monk.id));
+    const anchorCount = frontlineAllies.length;
+    const anchor = anchorCount > 0
+      ? (frontlineAllies[myMonkSlot % anchorCount] || frontlineAllies[0])
+      : null;
+    const anchorX = Number(anchor?.x);
+    const anchorY = Number(anchor?.y);
     const allyFrontX = this.allyFrontX(monk.side, monk.id);
-    const frontRef = Number.isFinite(allyFrontX) ? allyFrontX : homeX + dir * 120;
-    const keepBehind = Math.max(90, Number(monk.monkKeepBehind) || 140);
+    const frontRef = Number.isFinite(anchorX)
+      ? anchorX
+      : (Number.isFinite(allyFrontX) ? allyFrontX : homeX + dir * 120);
+    const stackRow = anchorCount > 0 ? Math.floor(myMonkSlot / anchorCount) : myMonkSlot;
+    const stackSpacing = Math.max(18, (Number(monk.r) || 18) * 1.15);
+    const keepBehind = Math.max(90, Number(monk.monkKeepBehind) || 140) + stackRow * stackSpacing;
+    let laneIndex = 0;
+    if (myMonkSlot > 0) {
+      const laneRing = Math.ceil(myMonkSlot / 2);
+      laneIndex = myMonkSlot % 2 === 1 ? -laneRing : laneRing;
+    }
+    const laneSpacing = Math.max(14, Math.min(32, (Number(monk.r) || 18) * 0.92));
+    const formationY = (Number.isFinite(anchorY) ? anchorY : monk.y) + laneIndex * laneSpacing;
 
     let desiredX = frontRef - dir * keepBehind;
     desiredX = clamp(desiredX, TOWER_X_LEFT + 56, TOWER_X_RIGHT - 56);
@@ -8641,7 +8684,7 @@ class GameRoom {
     const healR2 = healRange * healRange;
     let target = null;
     let bestScore = -Infinity;
-    let desiredY = monk.y;
+    let desiredY = formationY;
 
     for (const ally of this.minions) {
       if (!ally || ally.side !== monk.side || ally.id === monk.id) continue;
@@ -8655,11 +8698,13 @@ class GameRoom {
       const dist = Math.sqrt(d2);
       const missingPct = missing / Math.max(1, ally.maxHp || 1);
       const frontBias = ally.side === 'left' ? (ally.x / WORLD_W) : ((WORLD_W - ally.x) / WORLD_W);
-      const score = missingPct * 1.5 + (1 - dist / healRange) * 0.7 + frontBias * 0.24;
+      const anchorBias = anchor && ally.id === anchor.id ? 0.22 : 0;
+      const monkPenalty = ally.monk ? 0.16 : 0;
+      const score = missingPct * 1.5 + (1 - dist / healRange) * 0.7 + frontBias * 0.24 + anchorBias - monkPenalty;
       if (score > bestScore) {
         bestScore = score;
         target = ally;
-        desiredY = ally.y;
+        desiredY = ally.y * 0.76 + formationY * 0.24;
       }
     }
 
