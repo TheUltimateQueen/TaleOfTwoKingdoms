@@ -62,6 +62,16 @@ const CPU_MINION_CLOSE_LEAD_TIME_SCALE = 0.44;
 const CPU_MINION_CLOSE_NOISE_SCALE = 0.2;
 const CPU_MINION_CLOSE_MISS_NOISE_SCALE = 0.45;
 const CPU_MINION_CLOSE_ACCURACY_BOOST = 0.34;
+const CPU_MINION_TOWER_DANGER_RADIUS = 152;
+const CPU_MINION_TOWER_CRITICAL_RADIUS = 84;
+const CPU_MINION_TOWER_HIGH_THREAT_FLOOR = 72;
+const CPU_MINION_CLOSE_OUTWARD_AIM_MIN = 9;
+const CPU_MINION_CLOSE_OUTWARD_AIM_MAX = 54;
+const CPU_MINION_CLOSE_TILT_START_BIAS = 0.4;
+const CPU_MINION_CLOSE_HORIZONTAL_TILT_MIN = 0.14;
+const CPU_MINION_VERY_CLOSE_HORIZONTAL_TILT_MIN = 0.26;
+const CPU_MINION_CLOSE_VERTICAL_CAP = 0.95;
+const CPU_MINION_VERY_CLOSE_VERTICAL_CAP = 0.86;
 const UPGRADE_DEBT_PHASE_START_MULT = 0.4;
 const UPGRADE_DEBT_PHASE_FULL_MULT = 1;
 const UPGRADE_DEBT_PHASE_FULL_AT_SECONDS = 300;
@@ -9540,6 +9550,90 @@ class GameRoom {
     };
   }
 
+  cpuMinionAttackCycleSeconds(minion = null) {
+    if (!minion) return 0.8;
+    if (minion.dragon) return 1.05;
+    if (minion.gunner) return 0.66;
+    if (minion.rider) return 0.72;
+    if (minion.hero) return HERO_SWING_ATTACK_INTERVAL;
+    if (minion.balloon) return 0.82;
+    if (minion.digger) return 1.18;
+    if (minion.stoneGolem) return STONE_GOLEM_SMASH_INTERVAL;
+    if (minion.shieldBearer) return 0.92;
+    return 0.8;
+  }
+
+  cpuMinionEstimatedReach(minion = null, target = null) {
+    const selfR = Math.max(8, Number(minion?.r) || 12);
+    const targetR = Math.max(8, Number(target?.r) || 12);
+    if (minion?.gunner) return Math.max(140, Number(minion.gunRange) || 220);
+    if (minion?.dragon) return 170;
+    if (minion?.balloon) return 220;
+    if (minion?.stoneGolem) return Math.max(74, selfR + targetR + 18);
+    if (minion?.shieldBearer) return Math.max(58, selfR + targetR + 18);
+    if (minion?.hero) return selfR + targetR + 42;
+    if (minion?.rider) return selfR + targetR + 26;
+    if (minion?.digger) return selfR + targetR + 18;
+    return selfR + targetR + 24;
+  }
+
+  cpuArrowEtaEstimate(dxForward = 0, closeTowerBias = 0, likelyStationary = false) {
+    const dx = Math.max(0, Number(dxForward) || 0);
+    const closeBias = clamp(Number(closeTowerBias) || 0, 0, 1);
+    const launchDelay = lerp(0.15, 0.38, closeBias) + (likelyStationary ? 0.05 : 0);
+    const horizontalSpeed = lerp(560, 300, closeBias);
+    return clamp((dx / Math.max(120, horizontalSpeed)) + launchDelay, 0.12, 2.2);
+  }
+
+  cpuEstimateIncomingDamageBeforeEta(sideName = 'left', target = null, eta = 0) {
+    if (!target || !Array.isArray(this.minions)) return 0;
+    const side = sideName === 'right' ? 'right' : 'left';
+    const timeWindow = Math.max(0, Number(eta) || 0);
+    if (timeWindow <= 0.01) return 0;
+
+    const tx = Number(target.x) || 0;
+    const ty = Number(target.y) || 0;
+    const targetR = Math.max(8, Number(target.r) || 12);
+    let dpsEstimate = 0;
+
+    for (const ally of this.minions) {
+      if (!ally || ally.removed || ally.side !== side) continue;
+      if ((Number(ally.hp) || 0) <= 0) continue;
+
+      const ax = Number(ally.x) || 0;
+      const ay = Number(ally.y) || 0;
+      const dx = Math.abs(tx - ax);
+      const dy = Math.abs(ty - ay);
+      const reach = this.cpuMinionEstimatedReach(ally, target);
+      const speed = Math.max(10, Number(ally.speed) || 0);
+      const travelTime = Math.max(0, dx - reach) / speed;
+      const actDelay = Math.max(0, Number(ally.atkCd) || 0);
+      const firstHitEta = travelTime + actDelay;
+      if (firstHitEta > timeWindow + 0.2) continue;
+
+      const verticalOver = Math.max(0, dy - (targetR + Math.max(8, Number(ally.r) || 12)));
+      const verticalFactor = clamp(1 - (verticalOver / 120), 0.2, 1);
+      const availability = clamp(
+        (timeWindow + 0.16 - firstHitEta) / Math.max(0.2, timeWindow + 0.16),
+        0,
+        1
+      );
+      if (availability <= 0.01) continue;
+
+      const allyDamage = Math.max(0, Number(ally.dmg) || 0);
+      if (allyDamage <= 0.01) continue;
+      const cycle = this.cpuMinionAttackCycleSeconds(ally);
+      const baseDps = allyDamage / Math.max(0.28, cycle);
+      let styleMul = 1;
+      if (ally.shieldBearer) styleMul *= 0.5;
+      if (ally.stoneGolem) styleMul *= 0.82;
+      if (ally.hero || ally.dragon || ally.gunner || ally.rider || ally.balloon) styleMul *= 1.12;
+      dpsEstimate += baseDps * styleMul * verticalFactor * availability;
+    }
+
+    return Math.max(0, dpsEstimate * timeWindow * 0.72);
+  }
+
   cpuUpgradeTarget(sideName = 'left', slot = 0) {
     if (this.committeeVotingRequiredForSide(sideName)) return null;
     const side = sideName === 'right' ? this.right : this.left;
@@ -9589,13 +9683,17 @@ class GameRoom {
     if (!Array.isArray(this.minions) || this.minions.length === 0) return null;
     const side = sideName === 'right' ? 'right' : 'left';
     const enemy = side === 'left' ? 'right' : 'left';
+    const sideState = side === 'right' ? this.right : this.left;
     const sx = side === 'left' ? TOWER_X_LEFT + 35 : TOWER_X_RIGHT - 35;
     const sy = ARCHER_ORIGIN_Y - Math.max(0, Math.floor(Number(slot) || 0)) * ARCHER_VERTICAL_GAP;
     const ourTowerX = side === 'left' ? TOWER_X_LEFT : TOWER_X_RIGHT;
     const dir = side === 'left' ? 1 : -1;
     const behindBias = Math.max(0, Number(profile?.behind) || 0);
+    const arrowDamageEstimate = Math.max(1, this.statArrowDamage(sideState));
     let best = null;
     let bestScore = -Infinity;
+    let bestSurvival = null;
+    let bestSurvivalScore = -Infinity;
     for (const m of this.minions) {
       if (!m || m.removed || m.side !== enemy) continue;
       if ((Number(m.hp) || 0) <= 0) continue;
@@ -9614,21 +9712,66 @@ class GameRoom {
       if (m.president || m.monk || m.necrominion) threat += 24;
       const moveDir = m.side === 'left' ? 1 : -1;
       const rawSpeed = Math.max(0, Number(m.speed) || 0);
+      const closeTowerBias = clamp(1 - (distToOurTower / CPU_MINION_TOWER_DANGER_RADIUS), 0, 1);
+      const criticalTowerBias = clamp(1 - (distToOurTower / CPU_MINION_TOWER_CRITICAL_RADIUS), 0, 1);
       const likelyStationary = distToOurTower <= Math.max(26, (Number(m.r) || 16) + 30);
-      const vxEstimate = likelyStationary ? 0 : moveDir * rawSpeed * (m.flying ? 0.58 : 0.68);
-      const score = threat + behindBias * 22 + (420 - distToOurTower * 0.32) - dist * 0.16 + Math.random() * 7;
+      const shotEtaEstimate = this.cpuArrowEtaEstimate(dxForward, closeTowerBias, likelyStationary);
+      const incomingDamageEstimate = closeTowerBias > 0.16
+        ? this.cpuEstimateIncomingDamageBeforeEta(sideName, m, shotEtaEstimate)
+        : 0;
+      const hpNow = Math.max(1, Number(m.hp) || 1);
+      const predictedHpAtImpact = hpNow - incomingDamageEstimate;
+      const likelyDeadBeforeImpact = predictedHpAtImpact <= Math.max(8, hpNow * 0.2);
+      const survivalRatio = predictedHpAtImpact / hpNow;
+      const lowThreatNearTower = threat < CPU_MINION_TOWER_HIGH_THREAT_FLOOR;
+      const towerWastePenalty = lowThreatNearTower
+        ? closeTowerBias * (68 + criticalTowerBias * 84 + (likelyDeadBeforeImpact ? 132 : 0))
+        : closeTowerBias * (10 + (likelyDeadBeforeImpact ? 22 : 0));
+      const likelyCleanupPenalty = lowThreatNearTower
+        ? Math.min(190, Math.max(0, incomingDamageEstimate - arrowDamageEstimate * 0.45) * 0.42)
+        : Math.min(48, Math.max(0, incomingDamageEstimate - arrowDamageEstimate) * 0.12);
+      const survivalBonus = clamp(survivalRatio - 0.34, -1.4, 1.8) * 22;
+      const towerCloseRisk = clamp(
+        closeTowerBias * (lowThreatNearTower ? 1 : 0.62) * (likelyStationary ? 1.12 : 0.84),
+        0,
+        1
+      );
+      const vxEstimate = likelyStationary
+        ? 0
+        : moveDir * rawSpeed * (m.flying ? 0.58 : 0.68) * lerp(1, 0.22, towerCloseRisk);
+      const score = threat
+        + behindBias * 22
+        + (420 - distToOurTower * 0.32)
+        - dist * 0.16
+        + survivalBonus
+        - towerWastePenalty
+        - likelyCleanupPenalty
+        + Math.random() * 7;
+      const candidate = {
+        type: 'minion',
+        id: m.id,
+        x: mx,
+        y: my,
+        vxEstimate,
+        shotEtaEstimate,
+        incomingDamageEstimate,
+        predictedHpAtImpact,
+        likelyDeadBeforeImpact,
+        towerCloseRisk,
+      };
+      const survivalPreferred = !likelyDeadBeforeImpact
+        || !lowThreatNearTower
+        || closeTowerBias < 0.35;
       if (score > bestScore) {
         bestScore = score;
-        best = {
-          type: 'minion',
-          id: m.id,
-          x: mx,
-          y: my,
-          vxEstimate,
-        };
+        best = candidate;
+      }
+      if (survivalPreferred && score > bestSurvivalScore) {
+        bestSurvivalScore = score;
+        bestSurvival = candidate;
       }
     }
-    return best;
+    return bestSurvival || best;
   }
 
   cpuTargetForSlot(sideName = 'left', slot = 0, profile = null) {
@@ -9777,6 +9920,10 @@ class GameRoom {
               1
             )
             : 0;
+          const towerCloseRisk = target?.type === 'minion'
+            ? clamp(Number(target?.towerCloseRisk) || 0, 0, 1)
+            : 0;
+          const closeRisk = Math.max(minionCloseBias, towerCloseRisk);
           const effectiveAccuracy = target?.type === 'minion'
             ? clamp(profile.accuracy + minionCloseBias * CPU_MINION_CLOSE_ACCURACY_BOOST, 0, 0.995)
             : profile.accuracy;
@@ -9796,22 +9943,30 @@ class GameRoom {
             aimY += (Math.random() * 2 - 1) * hitNoise;
             aimX += (Math.random() * 2 - 1) * hitNoise * 0.32;
           }
+          if (target?.type === 'minion' && towerCloseRisk > 0.02) {
+            const outwardBias = lerp(CPU_MINION_CLOSE_OUTWARD_AIM_MIN, CPU_MINION_CLOSE_OUTWARD_AIM_MAX, towerCloseRisk);
+            aimX += sideDir * outwardBias;
+            if (target?.likelyDeadBeforeImpact) {
+              aimX += sideDir * lerp(4, 16, towerCloseRisk);
+            }
+            aimY -= lerp(0, 14, towerCloseRisk);
+          }
 
           let solved = this.solveCpuPullForTarget(sideName, slot, aimX, aimY);
           if (solved && target?.type === 'minion' && Number.isFinite(target?.vxEstimate)) {
             const forwardMinX = sx + sideDir * CPU_MIN_CLOSE_SOLUTION_DX;
             const leadScale = lerp(CPU_MINION_LEAD_TIME_SCALE, CPU_MINION_CLOSE_LEAD_TIME_SCALE, minionCloseBias);
             const leadTime = clamp(Number(solved.ttl) * leadScale, 0, CPU_MINION_LEAD_TIME_MAX);
-            if (leadTime > 0.02) {
+            if (leadTime > 0.02 && towerCloseRisk < 0.72 && !target?.likelyDeadBeforeImpact) {
               const currentDx = Math.max(0, (aimX - sx) * sideDir);
               const predictedRawX = aimX + Number(target.vxEstimate) * leadTime;
               const predictedX = sideName === 'left'
                 ? Math.max(forwardMinX, predictedRawX)
                 : Math.min(forwardMinX, predictedRawX);
               const predictedDx = Math.max(0, (predictedX - sx) * sideDir);
-              // For very close tower fights, inward lead (smaller dx) can force unnatural near-vertical shots.
+              // Inward lead (smaller dx) tends to force near-vertical shots in close tower fights.
               // Keep close-range aim stable by only applying lead when it does not pull the target further inward.
-              const inwardLeadOnCloseTarget = minionCloseBias > 0.58 && predictedDx + 0.001 < currentDx;
+              const inwardLeadOnCloseTarget = closeRisk > 0.46 && predictedDx + 0.001 < currentDx;
               if (!inwardLeadOnCloseTarget) {
                 const leadSolved = this.solveCpuPullForTarget(sideName, slot, predictedX, aimY);
                 if (leadSolved) solved = leadSolved;
@@ -9842,6 +9997,22 @@ class GameRoom {
               state.pullX = fallback.x;
               state.pullY = fallback.y;
             }
+          }
+          if (target?.type === 'minion' && closeRisk > CPU_MINION_CLOSE_TILT_START_BIAS) {
+            const tiltBlend = clamp(
+              (closeRisk - CPU_MINION_CLOSE_TILT_START_BIAS) / Math.max(0.0001, 1 - CPU_MINION_CLOSE_TILT_START_BIAS),
+              0,
+              1
+            );
+            const minTilt = lerp(CPU_MINION_CLOSE_HORIZONTAL_TILT_MIN, CPU_MINION_VERY_CLOSE_HORIZONTAL_TILT_MIN, tiltBlend);
+            const maxVertical = lerp(CPU_MINION_CLOSE_VERTICAL_CAP, CPU_MINION_VERY_CLOSE_VERTICAL_CAP, tiltBlend);
+            const currentH = Math.abs(Number(state.pullX) || 0);
+            const currentV = Math.max(0, Math.abs(Number(state.pullY) || 0));
+            const nextH = Math.max(currentH, minTilt);
+            const nextVCap = Math.min(maxVertical, Math.sqrt(Math.max(0, 1 - nextH * nextH)));
+            const nextV = Math.min(currentV, nextVCap);
+            state.pullX = sideName === 'left' ? -nextH : nextH;
+            state.pullY = -nextV;
           }
           const retargetWindow = profile.retargetMax - profile.retargetMin;
           state.retargetAt = this.t + profile.retargetMin + Math.random() * Math.max(0, retargetWindow);
