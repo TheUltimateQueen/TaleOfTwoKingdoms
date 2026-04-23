@@ -65,13 +65,15 @@ const CPU_MINION_CLOSE_ACCURACY_BOOST = 0.34;
 const CPU_MINION_TOWER_DANGER_RADIUS = 152;
 const CPU_MINION_TOWER_CRITICAL_RADIUS = 84;
 const CPU_MINION_TOWER_HIGH_THREAT_FLOOR = 72;
-const CPU_MINION_CLOSE_OUTWARD_AIM_MIN = 9;
-const CPU_MINION_CLOSE_OUTWARD_AIM_MAX = 54;
-const CPU_MINION_CLOSE_TILT_START_BIAS = 0.4;
-const CPU_MINION_CLOSE_HORIZONTAL_TILT_MIN = 0.14;
-const CPU_MINION_VERY_CLOSE_HORIZONTAL_TILT_MIN = 0.26;
-const CPU_MINION_CLOSE_VERTICAL_CAP = 0.95;
-const CPU_MINION_VERY_CLOSE_VERTICAL_CAP = 0.86;
+const CPU_MINION_CLOSE_OUTWARD_AIM_MIN = 2;
+const CPU_MINION_CLOSE_OUTWARD_AIM_MAX = 18;
+const CPU_MINION_CLOSE_TILT_START_BIAS = 0.62;
+const CPU_MINION_CLOSE_HORIZONTAL_TILT_MIN = 0.03;
+const CPU_MINION_VERY_CLOSE_HORIZONTAL_TILT_MIN = 0.09;
+const CPU_MINION_CLOSE_VERTICAL_CAP = 0.98;
+const CPU_MINION_VERY_CLOSE_VERTICAL_CAP = 0.9;
+const CPU_MINION_CLOSE_SLOPE_CAP = 2.2;
+const CPU_MINION_VERY_CLOSE_SLOPE_CAP = 1.25;
 const UPGRADE_DEBT_PHASE_START_MULT = 0.4;
 const UPGRADE_DEBT_PHASE_FULL_MULT = 1;
 const UPGRADE_DEBT_PHASE_FULL_AT_SECONDS = 300;
@@ -9803,6 +9805,7 @@ class GameRoom {
         predictedHpAtImpact,
         likelyDeadBeforeImpact,
         towerCloseRisk,
+        lowThreatNearTower,
       };
       const survivalPreferred = !likelyDeadBeforeImpact
         || !lowThreatNearTower
@@ -9848,9 +9851,14 @@ class GameRoom {
       1
     );
     const veryCloseBias = clamp(1 - (dx / 26), 0, 1);
+    // Very close targets tend to be below the archer; allow flatter solutions so we don't miss high.
+    const targetBelowBias = clamp((ty - sy + 8) / 150, 0, 1);
+    const closeBelowRelief = closeBias * targetBelowBias;
     const minHorizontal = lerp(0.24, 0.006, closeBias);
-    const closeVerticalFloor = lerp(CPU_CLOSE_TARGET_PULL_Y, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
-    const minVertical = lerp(0.04, 0.48, closeBias);
+    const closeVerticalFloorBase = lerp(CPU_CLOSE_TARGET_PULL_Y, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
+    const closeVerticalFloor = lerp(closeVerticalFloorBase, 0.06, closeBelowRelief);
+    const minVerticalBase = lerp(0.04, 0.48, closeBias);
+    const minVertical = lerp(minVerticalBase, 0.015, closeBelowRelief);
     const ttlTarget = lerp(1.35, CPU_CLOSE_TARGET_TTL_SECONDS, closeBias);
     const ttlPenaltyWeight = lerp(3.2, 1.45, closeBias);
 
@@ -9889,8 +9897,14 @@ class GameRoom {
 
     if (dx <= CPU_CLOSE_TARGET_DX) {
       const fineMinH = clamp(dx / 2000, 0.0005, 0.03);
-      const fineMaxH = clamp(dx / 120 + 0.03, 0.04, 0.18);
-      const fineMinV = lerp(CPU_CLOSE_TARGET_MIN_VERTICAL, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
+      const fineMaxHBase = clamp(dx / 120 + 0.03, 0.04, 0.18);
+      const fineMaxH = lerp(fineMaxHBase, Math.min(0.32, fineMaxHBase + 0.1), closeBelowRelief);
+      const fineMinVBase = lerp(CPU_CLOSE_TARGET_MIN_VERTICAL, CPU_VERY_CLOSE_TARGET_MIN_VERTICAL, veryCloseBias);
+      const fineMinV = lerp(
+        fineMinVBase,
+        0.02,
+        clamp(targetBelowBias * (0.55 + closeBias * 0.45), 0, 1)
+      );
       const fineTtlPenaltyWeight = ttlPenaltyWeight * lerp(1, 0.72, veryCloseBias);
       for (let h = fineMinH; h <= fineMaxH + 0.0001; h += 0.0012) {
         for (let v = fineMinV; v <= 0.995; v += 0.008) {
@@ -9968,6 +9982,10 @@ class GameRoom {
           const towerCloseRisk = target?.type === 'minion'
             ? clamp(Number(target?.towerCloseRisk) || 0, 0, 1)
             : 0;
+          const lowThreatNearTower = target?.type === 'minion'
+            ? Boolean(target?.lowThreatNearTower)
+            : false;
+          const cleanupTarget = lowThreatNearTower && Boolean(target?.likelyDeadBeforeImpact);
           const closeRisk = Math.max(minionCloseBias, towerCloseRisk);
           const effectiveAccuracy = target?.type === 'minion'
             ? clamp(profile.accuracy + minionCloseBias * CPU_MINION_CLOSE_ACCURACY_BOOST, 0, 0.995)
@@ -9989,12 +10007,19 @@ class GameRoom {
             aimX += (Math.random() * 2 - 1) * hitNoise * 0.32;
           }
           if (target?.type === 'minion' && towerCloseRisk > 0.02) {
-            const outwardBias = lerp(CPU_MINION_CLOSE_OUTWARD_AIM_MIN, CPU_MINION_CLOSE_OUTWARD_AIM_MAX, towerCloseRisk);
+            const baseDx = Math.max(CPU_MIN_CLOSE_SOLUTION_DX, (aimX - sx) * sideDir);
+            let outwardBias = cleanupTarget
+              ? lerp(CPU_MINION_CLOSE_OUTWARD_AIM_MIN * 1.8, CPU_MINION_CLOSE_OUTWARD_AIM_MAX, towerCloseRisk)
+              : (lowThreatNearTower
+                  ? lerp(CPU_MINION_CLOSE_OUTWARD_AIM_MIN, CPU_MINION_CLOSE_OUTWARD_AIM_MAX * 0.6, towerCloseRisk)
+                  : lerp(0, CPU_MINION_CLOSE_OUTWARD_AIM_MIN * 0.9, towerCloseRisk));
+            const maxOutward = Math.max(
+              1.5,
+              baseDx * (cleanupTarget ? 0.95 : (lowThreatNearTower ? 0.55 : 0.28))
+            );
+            outwardBias = Math.min(outwardBias, maxOutward);
             aimX += sideDir * outwardBias;
-            if (target?.likelyDeadBeforeImpact) {
-              aimX += sideDir * lerp(4, 16, towerCloseRisk);
-            }
-            aimY -= lerp(0, 14, towerCloseRisk);
+            if (cleanupTarget) aimY -= lerp(0, 8, towerCloseRisk);
           }
 
           let solved = this.solveCpuPullForTarget(sideName, slot, aimX, aimY);
@@ -10002,7 +10027,7 @@ class GameRoom {
             const forwardMinX = sx + sideDir * CPU_MIN_CLOSE_SOLUTION_DX;
             const leadScale = lerp(CPU_MINION_LEAD_TIME_SCALE, CPU_MINION_CLOSE_LEAD_TIME_SCALE, minionCloseBias);
             const leadTime = clamp(Number(solved.ttl) * leadScale, 0, CPU_MINION_LEAD_TIME_MAX);
-            if (leadTime > 0.02 && towerCloseRisk < 0.72 && !target?.likelyDeadBeforeImpact) {
+            if (leadTime > 0.02 && towerCloseRisk < 0.78 && !cleanupTarget) {
               const currentDx = Math.max(0, (aimX - sx) * sideDir);
               const predictedRawX = aimX + Number(target.vxEstimate) * leadTime;
               const predictedX = sideName === 'left'
@@ -10011,7 +10036,7 @@ class GameRoom {
               const predictedDx = Math.max(0, (predictedX - sx) * sideDir);
               // Inward lead (smaller dx) tends to force near-vertical shots in close tower fights.
               // Keep close-range aim stable by only applying lead when it does not pull the target further inward.
-              const inwardLeadOnCloseTarget = closeRisk > 0.46 && predictedDx + 0.001 < currentDx;
+              const inwardLeadOnCloseTarget = closeRisk > 0.54 && predictedDx + 0.001 < currentDx;
               if (!inwardLeadOnCloseTarget) {
                 const leadSolved = this.solveCpuPullForTarget(sideName, slot, predictedX, aimY);
                 if (leadSolved) solved = leadSolved;
@@ -10043,7 +10068,7 @@ class GameRoom {
               state.pullY = fallback.y;
             }
           }
-          if (target?.type === 'minion' && closeRisk > CPU_MINION_CLOSE_TILT_START_BIAS) {
+          if (target?.type === 'minion' && lowThreatNearTower && closeRisk > CPU_MINION_CLOSE_TILT_START_BIAS) {
             const tiltBlend = clamp(
               (closeRisk - CPU_MINION_CLOSE_TILT_START_BIAS) / Math.max(0.0001, 1 - CPU_MINION_CLOSE_TILT_START_BIAS),
               0,
@@ -10051,10 +10076,15 @@ class GameRoom {
             );
             const minTilt = lerp(CPU_MINION_CLOSE_HORIZONTAL_TILT_MIN, CPU_MINION_VERY_CLOSE_HORIZONTAL_TILT_MIN, tiltBlend);
             const maxVertical = lerp(CPU_MINION_CLOSE_VERTICAL_CAP, CPU_MINION_VERY_CLOSE_VERTICAL_CAP, tiltBlend);
+            const maxSlope = lerp(CPU_MINION_CLOSE_SLOPE_CAP, CPU_MINION_VERY_CLOSE_SLOPE_CAP, tiltBlend);
             const currentH = Math.abs(Number(state.pullX) || 0);
             const currentV = Math.max(0, Math.abs(Number(state.pullY) || 0));
             const nextH = Math.max(currentH, minTilt);
-            const nextVCap = Math.min(maxVertical, Math.sqrt(Math.max(0, 1 - nextH * nextH)));
+            const nextVCap = Math.min(
+              maxVertical,
+              nextH * maxSlope,
+              Math.sqrt(Math.max(0, 1 - nextH * nextH))
+            );
             const nextV = Math.min(currentV, nextVCap);
             state.pullX = sideName === 'left' ? -nextH : nextH;
             state.pullY = -nextV;
