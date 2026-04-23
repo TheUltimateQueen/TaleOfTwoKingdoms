@@ -9277,7 +9277,6 @@ export class GameRenderer {
   }
 
   drawBarracksUpgradeOddsDebugPanel(side, rows = [], snapshot = null, panelRect = null) {
-    if (side !== 'left') return;
     const debug = snapshot?.debug || null;
     const debugDrawMode = Boolean(debug?.drawMode || debug?.colliderOverlay);
     if (!debugDrawMode) return;
@@ -9308,8 +9307,22 @@ export class GameRenderer {
     const headerH = 34;
     const rowH = 12;
     const panelH = headerH + oddsRows.length * rowH + 10;
-    const baseX = Math.max(8, Math.round(Number(panelRect?.x) || 8) - panelW - 10);
-    const baseY = Math.max(8, Math.round(Number(panelRect?.y) || 8));
+    const worldW = Math.max(320, Number(snapshot?.world?.w) || 1600);
+    const worldH = Math.max(240, Number(snapshot?.world?.h) || 900);
+    const anchorX = Math.round(Number(panelRect?.x) || 8);
+    const anchorW = Math.max(0, Math.round(Number(panelRect?.w) || 0));
+    const anchorY = Math.round(Number(panelRect?.y) || 8);
+    const yOffset = 42;
+    let baseX = side === 'right'
+      ? anchorX + anchorW + 10
+      : anchorX - panelW - 10;
+    if (side === 'right' && baseX + panelW > worldW - 8) {
+      baseX = anchorX - panelW - 10;
+    } else if (side === 'left' && baseX < 8) {
+      baseX = anchorX + anchorW + 10;
+    }
+    baseX = Math.max(8, Math.min(worldW - panelW - 8, baseX));
+    const baseY = Math.max(8, Math.min(worldH - panelH - 8, anchorY + yOffset));
 
     ctx.save();
     ctx.fillStyle = panelFill;
