@@ -9253,12 +9253,120 @@ export class GameRenderer {
     ctx.moveTo(px + 8, py + panelH - 9);
     ctx.lineTo(px + panelW - 8, py + panelH - 9);
     ctx.stroke();
+    this.drawBarracksUpgradeOddsDebugPanel(side, rows, snapshot, {
+      x: px,
+      y: py,
+      w: panelW,
+      h: panelH,
+    });
     // Removed: Training cadence by spawn cycle label (not useful)
     // ctx.fillStyle = '#aeb9ca';
     // ctx.font = '8px sans-serif';
     // ctx.textAlign = 'left';
     // ctx.fillText('Training cadence by spawn cycle', px + 10, py + panelH - 3);
     return { rows, doorPreviewRow };
+  }
+
+  debugChancePercentText(chance) {
+    if (!Number.isFinite(chance)) return '--';
+    const pct = Math.max(0, Number(chance) || 0) * 100;
+    if (pct <= 0) return '0.00%';
+    if (pct < 0.01) return '<0.01%';
+    if (pct < 1) return `${pct.toFixed(2)}%`;
+    return `${pct.toFixed(1)}%`;
+  }
+
+  drawBarracksUpgradeOddsDebugPanel(side, rows = [], snapshot = null, panelRect = null) {
+    if (side !== 'left') return;
+    const debug = snapshot?.debug || null;
+    const debugDrawMode = Boolean(debug?.drawMode || debug?.colliderOverlay);
+    if (!debugDrawMode) return;
+    const odds = debug?.specialUpgradeCardOdds?.[side];
+    if (!odds || typeof odds !== 'object') return;
+    const bySpecialType = odds.bySpecialType && typeof odds.bySpecialType === 'object'
+      ? odds.bySpecialType
+      : {};
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const oddsRows = sourceRows.filter((row) => {
+      const specialType = ROW_TO_SPECIAL_TYPE[row?.type] || null;
+      return Boolean(specialType && bySpecialType[specialType]);
+    });
+    if (!oddsRows.length) return;
+
+    const t = Math.max(0, Number(snapshot?.t) || Number(odds?.t) || 0);
+    const switchAt = Math.max(0, Number(odds?.switchAtSeconds) || 90);
+    const legacyWeighting = Boolean(odds?.legacyWeighting);
+    const phaseText = legacyWeighting ? `Legacy Weights (<${Math.round(switchAt)}s)` : `Normalized Weights (>=${Math.round(switchAt)}s)`;
+    const phaseColor = legacyWeighting ? '#ffbe86' : '#8ef3bf';
+    const borderColor = legacyWeighting ? '#e8965c' : '#56c996';
+    const panelFill = legacyWeighting ? '#2d1d14dd' : '#13271fdd';
+    const switchFlash = Math.abs(t - switchAt) <= 1.2;
+    const flashColor = switchFlash ? '#fff0a8' : null;
+
+    const { ctx } = this;
+    const panelW = 198;
+    const headerH = 34;
+    const rowH = 12;
+    const panelH = headerH + oddsRows.length * rowH + 10;
+    const baseX = Math.max(8, Math.round(Number(panelRect?.x) || 8) - panelW - 10);
+    const baseY = Math.max(8, Math.round(Number(panelRect?.y) || 8));
+
+    ctx.save();
+    ctx.fillStyle = panelFill;
+    ctx.fillRect(baseX, baseY, panelW, panelH);
+    ctx.strokeStyle = flashColor || borderColor;
+    ctx.lineWidth = switchFlash ? 2.1 : 1.4;
+    ctx.strokeRect(baseX + 0.5, baseY + 0.5, panelW - 1, panelH - 1);
+
+    ctx.fillStyle = '#f2f7ff';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('DEBUG UPGRADE CARD ODDS', baseX + 8, baseY + 6);
+    ctx.fillStyle = phaseColor;
+    ctx.font = 'bold 8px sans-serif';
+    ctx.fillText(phaseText, baseX + 8, baseY + 17);
+    ctx.fillStyle = '#b7c6d9';
+    ctx.font = '7px sans-serif';
+    ctx.fillText(`Time ${t.toFixed(1)}s`, baseX + panelW - 58, baseY + 17);
+
+    const headerY = baseY + headerH - 2;
+    ctx.fillStyle = '#97aac5';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.fillText('UNIT', baseX + 8, headerY);
+    ctx.textAlign = 'right';
+    ctx.fillText('CARD %', baseX + panelW - 8, headerY);
+    ctx.textAlign = 'left';
+
+    for (let i = 0; i < oddsRows.length; i += 1) {
+      const row = oddsRows[i];
+      const y = baseY + headerH + i * rowH;
+      const specialType = ROW_TO_SPECIAL_TYPE[row.type] || null;
+      const entry = specialType ? bySpecialType[specialType] : null;
+      const chance = Number(entry?.overallChance);
+      const eligible = Boolean(entry?.eligible);
+
+      if (i % 2 === 0) {
+        ctx.fillStyle = '#0f1828aa';
+        ctx.fillRect(baseX + 4, y - 1, panelW - 8, rowH);
+      }
+
+      ctx.fillStyle = eligible ? '#dde8f9' : '#8e9bad';
+      ctx.font = '7px sans-serif';
+      const label = this.fitUpgradeCardText(String(row?.label || row?.type || '?'), 108, '7px sans-serif');
+      ctx.textAlign = 'left';
+      ctx.fillText(label, baseX + 8, y + 2);
+
+      if (entry?.summonOnlyIfPicked) {
+        ctx.fillStyle = '#f5cb84';
+        ctx.fillText('*', baseX + 118, y + 2);
+      }
+
+      ctx.fillStyle = eligible ? (legacyWeighting ? '#ffd2ad' : '#bfffd9') : '#7f8da1';
+      ctx.textAlign = 'right';
+      ctx.fillText(this.debugChancePercentText(chance), baseX + panelW - 8, y + 2);
+    }
+    ctx.restore();
   }
 
   drawSpecialRollOutcomeBar(x, y, w, h, displayChance, actualChance, debuffLoss, roll, success) {

@@ -119,8 +119,10 @@ const TOTAL_FEEDING_GRAIN_JUMP_TTL = 1.51;
 const TOTAL_FEEDING_GRAIN_JUMP_ARC_MIN = 62;
 const TOTAL_FEEDING_GRAIN_JUMP_ARC_MAX = 96;
 const RIDER_CHARGE_REARM_MOVE_TICKS = 3;
-const RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED = 0.0005;
-const RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED = 0.005;
+const RARE_SPECIAL_UPGRADE_CARD_CHANCE_START = 0;
+const RARE_SPECIAL_UPGRADE_CARD_CHANCE_MAX = 0.01;
+const RARE_SPECIAL_UPGRADE_CARD_CHANCE_RAMP_SECONDS = 300;
+const SPECIAL_UPGRADE_LEGACY_WEIGHTING_DURATION_SECONDS = 90;
 const FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES = Object.freeze([
   'stoneGolemAncientCoreLevel',
   'heroDestinedChampionLevel',
@@ -1064,7 +1066,11 @@ class GameRoom {
       towerRightX: TOWER_X_RIGHT,
     };
     this.displayPrimaryPlayers = { left: null, right: null };
-    this.displayDebug = { colliderOverlay: false };
+    this.displayDebug = {
+      colliderOverlay: false,
+      drawMode: false,
+      specialUpgradeCardOdds: { left: null, right: null },
+    };
     this.displayCandles = [null, null];
     this.displaySnapshot = {
       id: this.id,
@@ -1172,6 +1178,9 @@ class GameRoom {
     snapshot.primaryPlayers = this.displayPrimaryPlayers;
     snapshot.postGameReport = this.gameOver ? this.buildPostGameReport() : null;
     this.displayDebug.colliderOverlay = Boolean(this.debugColliderOverlay);
+    this.displayDebug.drawMode = Boolean(this.debugConfig?.enabled);
+    this.displayDebug.specialUpgradeCardOdds.left = this.buildSpecialUpgradeCardOddsForSide(this.left);
+    this.displayDebug.specialUpgradeCardOdds.right = this.buildSpecialUpgradeCardOddsForSide(this.right);
     snapshot.debug = this.displayDebug;
     snapshot.hasDisplay = Boolean(this.display);
     return snapshot;
@@ -2093,6 +2102,11 @@ class GameRoom {
       postGameReport: this.gameOver ? this.buildPostGameReport() : null,
       debug: {
         colliderOverlay: Boolean(this.debugColliderOverlay),
+        drawMode: Boolean(this.debugConfig?.enabled),
+        specialUpgradeCardOdds: {
+          left: this.buildSpecialUpgradeCardOddsForSide(this.left),
+          right: this.buildSpecialUpgradeCardOddsForSide(this.right),
+        },
       },
       hasDisplay: Boolean(this.display),
     };
@@ -10749,12 +10763,13 @@ class GameRoom {
       if (!rule?.hasInitialUnlock) return false;
       if (typeof rule?.upgradeType !== 'string' || !rule.upgradeType) return false;
       if (excludedTypes.has(rule.upgradeType)) return false;
-      if (!this.isUpgradeUnlocked(side, rule.upgradeType)) return false;
+      const fixedRare = FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(rule.upgradeType);
+      if (!fixedRare && !this.isUpgradeUnlocked(side, rule.upgradeType)) return false;
       if (this.isUpgradeCapped(side, rule.upgradeType)) return false;
       const level = Number(side?.[rule.upgradeType]) || 0;
       if (level <= 0) return true;
       if (!rule.repeatEligible) return false;
-      if (FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(rule.upgradeType)) return true;
+      if (fixedRare) return true;
       return repeatUnlocked;
     });
   }
@@ -10831,6 +10846,20 @@ class GameRoom {
     );
   }
 
+  normalizedSpecialUpgradeBaseWeight(rule) {
+    if (!rule?.upgradeType) return 1;
+    // Keep rare Hero/Golem card odds controlled by fixed probability logic.
+    if (FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(rule.upgradeType)) {
+      return Math.max(0.05, Number(rule.baseOfferWeight) || 1);
+    }
+    return 1;
+  }
+
+  useLegacySpecialUpgradeWeighting(matchTimeSec = this.t) {
+    const t = Math.max(0, Number(matchTimeSec) || 0);
+    return t < SPECIAL_UPGRADE_LEGACY_WEIGHTING_DURATION_SECONDS;
+  }
+
   specialRepeatScalingForSpawnType(side, spawnType) {
     const rule = SPECIAL_UNIT_UPGRADE_RULES_BY_SPECIAL_TYPE[spawnType] || null;
     if (!rule?.upgradeType) {
@@ -10859,10 +10888,14 @@ class GameRoom {
 
   fixedRareSpecialUpgradeCardChance(side, type) {
     if (!FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(type)) return null;
-    const level = Math.max(0, Number(side?.[type]) || 0);
-    return level > 0
-      ? RARE_SPECIAL_UPGRADE_CARD_CHANCE_UNLOCKED
-      : RARE_SPECIAL_UPGRADE_CARD_CHANCE_LOCKED;
+    const t = Math.max(0, Number(this.t) || 0);
+    const rampSeconds = Math.max(0.0001, Number(RARE_SPECIAL_UPGRADE_CARD_CHANCE_RAMP_SECONDS) || 300);
+    const progress = clamp(t / rampSeconds, 0, 1);
+    return lerp(
+      Number(RARE_SPECIAL_UPGRADE_CARD_CHANCE_START) || 0,
+      Number(RARE_SPECIAL_UPGRADE_CARD_CHANCE_MAX) || 0.01,
+      progress
+    );
   }
 
   applyFixedRareSpecialUpgradeCardChances(side, candidates = []) {
@@ -10871,24 +10904,38 @@ class GameRoom {
     for (const candidate of candidates) {
       if (!candidate || typeof candidate.type !== 'string') continue;
       const p = this.fixedRareSpecialUpgradeCardChance(side, candidate.type);
-      if (!(Number.isFinite(p) && p > 0)) continue;
+      if (!(Number.isFinite(p) && p >= 0)) continue;
       targets.push({ candidate, p });
     }
     if (!targets.length) return;
     const targetP = targets.reduce((sum, entry) => sum + entry.p, 0);
-    if (!(targetP > 0 && targetP < 0.9)) return;
+    if (!(targetP >= 0 && targetP < 0.9)) return;
+    if (targetP <= 0) {
+      for (const entry of targets) entry.candidate.weight = 0;
+      return;
+    }
     let otherWeight = 0;
     for (const candidate of candidates) {
       if (!candidate) continue;
       const p = this.fixedRareSpecialUpgradeCardChance(side, candidate.type);
-      if (Number.isFinite(p) && p > 0) continue;
+      if (Number.isFinite(p) && p >= 0) continue;
       otherWeight += Math.max(0, Number(candidate.weight) || 0);
     }
-    if (!(otherWeight > 0)) return;
+    if (!(otherWeight > 0)) {
+      for (const entry of targets) {
+        entry.candidate.weight = Math.max(0, entry.p);
+      }
+      return;
+    }
     const denom = Math.max(0.0001, 1 - targetP);
     for (const entry of targets) {
-      entry.candidate.weight = Math.max(0.0001, otherWeight * (entry.p / denom));
+      entry.candidate.weight = Math.max(0, otherWeight * (entry.p / denom));
     }
+  }
+
+  preUnlockRareSpecialCardSummonOnly(side, type) {
+    if (!FIXED_RARE_SPECIAL_UPGRADE_CARD_TYPES.includes(type)) return false;
+    return !this.isUpgradeUnlocked(side, type);
   }
 
   buildUpgradeCardCandidates(side, excludedTypes = new Set(), options = null) {
@@ -10927,10 +10974,15 @@ class GameRoom {
     const specialRules = this.specialBucketEligibleRules(side, excludedTypes);
     if (specialRules.length) {
       const bucketWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.bucketWeight) || 0) * specialBucketWeightMultiplier;
+      const useLegacyWeighting = this.useLegacySpecialUpgradeWeighting(this.t);
       const weightedRules = specialRules.map((rule) => {
-        const base = Math.max(0.05, Number(rule.baseOfferWeight) || 1);
+        const base = useLegacyWeighting
+          ? Math.max(0.05, Number(rule.baseOfferWeight) || 1)
+          : this.normalizedSpecialUpgradeBaseWeight(rule);
         const level = Number(side?.[rule.upgradeType]) || 0;
-        const dynamic = level > 0 ? this.repeatSpecialDynamicFactor(side, rule, repeatRules) : 1;
+        const dynamic = (useLegacyWeighting && level > 0)
+          ? this.repeatSpecialDynamicFactor(side, rule, repeatRules)
+          : 1;
         const leaderPenalty = level > 0 ? this.repeatSpecialLeaderPenalty(side, rule, repeatRules) : 1;
         return {
           rule,
@@ -10952,6 +11004,47 @@ class GameRoom {
 
     this.applyFixedRareSpecialUpgradeCardChances(side, candidates);
     return candidates;
+  }
+
+  buildSpecialUpgradeCardOddsForSide(side) {
+    const safeSide = side && typeof side === 'object' ? side : {};
+    const candidates = this.buildUpgradeCardCandidates(safeSide, new Set(), null);
+    const totalWeight = candidates.reduce((sum, candidate) => sum + Math.max(0, Number(candidate?.weight) || 0), 0);
+    const specialCandidates = candidates.filter((candidate) => candidate?.path === 'special');
+    const specialWeightTotal = specialCandidates.reduce((sum, candidate) => sum + Math.max(0, Number(candidate?.weight) || 0), 0);
+    const byUpgradeTypeWeight = {};
+    for (const candidate of candidates) {
+      const type = typeof candidate?.type === 'string' ? candidate.type : null;
+      if (!type) continue;
+      byUpgradeTypeWeight[type] = (Number(byUpgradeTypeWeight[type]) || 0) + Math.max(0, Number(candidate?.weight) || 0);
+    }
+
+    const bySpecialType = {};
+    for (const rule of Object.values(SPECIAL_UNIT_UPGRADE_RULES)) {
+      if (!rule?.specialType || !rule?.upgradeType) continue;
+      const weight = Math.max(0, Number(byUpgradeTypeWeight[rule.upgradeType]) || 0);
+      bySpecialType[rule.specialType] = {
+        specialType: rule.specialType,
+        upgradeType: rule.upgradeType,
+        level: Math.max(0, Number(safeSide?.[rule.upgradeType]) || 0),
+        unlocked: this.isUpgradeUnlocked(safeSide, rule.upgradeType),
+        summonOnlyIfPicked: this.preUnlockRareSpecialCardSummonOnly(safeSide, rule.upgradeType),
+        eligible: weight > 0,
+        weight: roundTo(weight, 6),
+        overallChance: totalWeight > 0 ? roundTo(weight / totalWeight, 6) : 0,
+        specialChanceInPool: specialWeightTotal > 0 ? roundTo(weight / specialWeightTotal, 6) : 0,
+        fixedChanceTarget: roundTo(Number(this.fixedRareSpecialUpgradeCardChance(safeSide, rule.upgradeType)) || 0, 6),
+      };
+    }
+
+    return {
+      t: roundTo(this.t, 3),
+      legacyWeighting: this.useLegacySpecialUpgradeWeighting(this.t),
+      switchAtSeconds: SPECIAL_UPGRADE_LEGACY_WEIGHTING_DURATION_SECONDS,
+      totalWeight: roundTo(totalWeight, 6),
+      specialWeightTotal: roundTo(specialWeightTotal, 6),
+      bySpecialType,
+    };
   }
 
   resourceSpawnIntervalRangeAtTime(time = this.t) {
@@ -11481,8 +11574,9 @@ class GameRoom {
     const spentDebt = Math.max(1, side.upgradeChargeMax);
     const overflow = Math.max(0, side.upgradeCharge - spentDebt);
     const nextDebt = Math.max(1, this.upgradeCost(side, card.type));
+    const summonOnly = this.preUnlockRareSpecialCardSummonOnly(side, card.type);
 
-    this.awardUpgrade(side, card.type, card.value);
+    if (!summonOnly) this.awardUpgrade(side, card.type, card.value);
     side.lastUpgradeSelectionSource = (typeof options?.selectionSource === 'string' && options.selectionSource)
       ? options.selectionSource
       : 'shot';

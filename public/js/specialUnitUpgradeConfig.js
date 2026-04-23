@@ -5,8 +5,8 @@ export const REPEAT_SPECIAL_UPGRADE_CONFIG = Object.freeze({
   dynamicWeightExponent: 0.4,
   dynamicWeightMin: 0.82,
   dynamicWeightMax: 1.18,
-  leaderPenaltyPerLevelAhead: 0.05,
-  leaderPenaltyFloor: 0.85,
+  leaderPenaltyPerLevelAhead: 0.03,
+  leaderPenaltyFloor: 0.9,
 });
 
 const SPECIAL_UNIT_UPGRADE_ENTRIES = [
