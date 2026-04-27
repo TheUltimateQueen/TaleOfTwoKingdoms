@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Empires Must Eat - Simulation Lab</title>
+    <link rel="icon" type="image/svg+xml" href="/icons/tale-icon.svg" />
+    <link rel="shortcut icon" href="/icons/tale-icon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="sim-lab-page">
+    <main id="simLabApp">
+      <section class="card sim-lab-card">
+        <div class="sim-lab-head">
+          <div>
+            <h1>Simulation Lab</h1>
+            <p class="sub">CPU vs CPU only. Uses the exact game simulation logic with no rendering.</p>
+          </div>
+          <a class="sim-lab-back-link" href="/">Back To Game</a>
+        </div>
+
+        <div class="row sim-lab-controls">
+          <label>Mode
+            <select id="simModeInput">
+              <option value="1v1">1v1</option>
+              <option value="2v2">2v2</option>
+            </select>
+          </label>
+          <label>Sims / Upgrade / Side
+            <input id="simPerUpgradeInput" type="number" min="1" max="500" step="1" value="6" />
+          </label>
+          <label>Baseline Sims
+            <input id="simBaselineInput" type="number" min="0" max="3000" step="1" value="60" />
+          </label>
+          <label>Workers (cores)
+            <input id="simWorkersInput" type="number" min="1" max="16" step="1" value="4" />
+          </label>
+          <label>Core Update (ms)
+            <input id="simCoreUpdateMsInput" type="number" min="80" max="5000" step="10" value="240" />
+          </label>
+          <label>Max Match Seconds
+            <input id="simMaxSecondsInput" type="number" min="120" max="7200" step="30" value="900" />
+          </label>
+        </div>
+
+        <div class="row sim-lab-actions">
+          <button id="simRunBtn" type="button">Run Sweep</button>
+          <button id="simStopBtn" type="button" disabled>Stop</button>
+        </div>
+
+        <p id="simStatusText" class="sub">Ready.</p>
+        <progress id="simProgressBar" max="1" value="0"></progress>
+
+        <section id="simSummaryGrid" class="sim-summary-grid" aria-live="polite">
+          <article class="sim-stat-card">
+            <h2>Total Matches</h2>
+            <p id="simSummaryMatches">0</p>
+          </article>
+          <article class="sim-stat-card">
+            <h2>Left Win Rate</h2>
+            <p id="simSummaryLeftRate">0%</p>
+          </article>
+          <article class="sim-stat-card">
+            <h2>Right Win Rate</h2>
+            <p id="simSummaryRightRate">0%</p>
+          </article>
+          <article class="sim-stat-card">
+            <h2>Avg Match Time</h2>
+            <p id="simSummaryAvgDuration">0s</p>
+          </article>
+          <article class="sim-stat-card">
+            <h2>Timed Out</h2>
+            <p id="simSummaryTimeouts">0</p>
+          </article>
+        </section>
+      </section>
+
+      <section class="card sim-lab-card">
+        <h2>Per-Core Live Matches</h2>
+        <p class="sub">Live state from each worker while its current match is running.</p>
+        <section id="simCoreGrid" class="sim-core-grid" aria-live="polite"></section>
+      </section>
+
+      <section class="card sim-lab-card">
+        <h2>Upgrade Rank: Boosted Side Win Rate</h2>
+        <p class="sub">For each upgrade, one side starts at baseline+1 for that upgrade only. Higher win rate means stronger early impact.</p>
+        <div class="sim-table-wrap">
+          <table class="sim-results-table" id="simUpgradeRankTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Upgrade</th>
+                <th>Boosted Win%</th>
+                <th>Matches</th>
+                <th>Left-Boost Win%</th>
+                <th>Right-Boost Win%</th>
+                <th>Avg Match (s)</th>
+              </tr>
+            </thead>
+            <tbody id="simUpgradeRankBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card sim-lab-card">
+        <h2>Observed Meta Correlation (Baseline Sims)</h2>
+        <p class="sub">From baseline CPU-vs-CPU matches only: when one side finishes with a higher level of an upgrade, how often that side wins.</p>
+        <div class="sim-table-wrap">
+          <table class="sim-results-table" id="simMetaRankTable">
+            <thead>
+              <tr>
+                <th>Upgrade</th>
+                <th>Advantage Win%</th>
+                <th>Samples</th>
+                <th>Avg Level Gap</th>
+              </tr>
+            </thead>
+            <tbody id="simMetaRankBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/js/simLabPage.js"></script>
+  </body>
+</html>
