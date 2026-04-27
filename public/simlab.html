@@ -29,6 +29,9 @@
           <label>Sims / Upgrade / Side
             <input id="simPerUpgradeInput" type="number" min="1" max="500" step="1" value="6" />
           </label>
+          <label>Card Chance Mult
+            <input id="simCardBiasMultInput" type="number" min="0" max="50" step="0.1" value="2.0" />
+          </label>
           <label>Baseline Sims
             <input id="simBaselineInput" type="number" min="0" max="3000" step="1" value="60" />
           </label>
@@ -82,18 +85,18 @@
       </section>
 
       <section class="card sim-lab-card">
-        <h2>Upgrade Rank: Boosted Side Win Rate</h2>
-        <p class="sub">For each upgrade, one side starts at baseline+1 for that upgrade only. Higher win rate means stronger early impact.</p>
+        <h2>Upgrade Rank: Biased Card Chance Win Rate</h2>
+        <p class="sub">For each upgrade, one side gets that upgrade card weighted by Card Chance Mult. 2.0 means roughly double weight, 0.5 means half weight.</p>
         <div class="sim-table-wrap">
           <table class="sim-results-table" id="simUpgradeRankTable">
             <thead>
               <tr>
                 <th>#</th>
                 <th>Upgrade</th>
-                <th>Boosted Win%</th>
+                <th>Biased Side Win%</th>
                 <th>Matches</th>
-                <th>Left-Boost Win%</th>
-                <th>Right-Boost Win%</th>
+                <th>Left-Bias Win%</th>
+                <th>Right-Bias Win%</th>
                 <th>Avg Match (s)</th>
               </tr>
             </thead>

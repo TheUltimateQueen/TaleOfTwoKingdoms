@@ -472,6 +472,8 @@ const DEBUG_CANDLE_BONUS_MIN = -0.5;
 const DEBUG_CANDLE_BONUS_MAX = 0.8;
 const DEBUG_SPECIAL_OVERRIDE_MIN = 0;
 const DEBUG_SPECIAL_OVERRIDE_MAX = 0.99;
+const DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN = 0;
+const DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX = 50;
 const DEBUG_FORCE_SPECIAL_TYPES = new Set([
   'dragon',
   'shield',
@@ -689,6 +691,17 @@ function normalizeDebugConfig(raw = null) {
       ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
       : null;
   }
+  const upgradeCardWeightMultipliersSource = (cfg.upgradeCardWeightMultipliers && typeof cfg.upgradeCardWeightMultipliers === 'object')
+    ? cfg.upgradeCardWeightMultipliers
+    : {};
+  const upgradeCardWeightMultipliers = {};
+  for (const type of UPGRADE_TYPES) {
+    const rawValue = upgradeCardWeightMultipliersSource[type];
+    const raw = rawValue == null ? NaN : Number(rawValue);
+    upgradeCardWeightMultipliers[type] = Number.isFinite(raw)
+      ? clamp(raw, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX)
+      : null;
+  }
 
   const upgrades = {};
   const source = (cfg.upgrades && typeof cfg.upgrades === 'object') ? cfg.upgrades : {};
@@ -713,6 +726,7 @@ function normalizeDebugConfig(raw = null) {
     colliderDebug,
     heroAbilityRapidTest,
     specialChanceOverrides,
+    upgradeCardWeightMultipliers,
     upgrades,
   };
 }
@@ -864,6 +878,9 @@ function serializeSideState(side) {
     debugSpecialChanceOverrides: Object.fromEntries(
       SPECIAL_SPAWN_QUEUE_ORDER.map((type) => [type, finiteOrNull(state?.debugSpecialChanceOverrides?.[type], 3)])
     ),
+    debugUpgradeCardWeightMultipliers: Object.fromEntries(
+      UPGRADE_TYPES.map((type) => [type, finiteOrNull(state?.debugUpgradeCardWeightMultipliers?.[type], 3)])
+    ),
     debugCandleChanceBonus: roundTo(state.debugCandleChanceBonus, 2),
     debugHeroAbilityRapidTest: Boolean(state.debugHeroAbilityRapidTest),
     debugForceSpecialType: typeof state.debugForceSpecialType === 'string' ? state.debugForceSpecialType : null,
@@ -989,6 +1006,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     debugSpawnRateMultiplier: 1,
     debugSpecialSpawnRateMultiplier: 1,
     debugSpecialChanceOverrides: {},
+    debugUpgradeCardWeightMultipliers: {},
     debugCandleChanceBonus: 0,
     debugHeroAbilityRapidTest: false,
     debugForceSpecialType: null,
@@ -1690,6 +1708,7 @@ class GameRoom {
         side.debugSpawnRateMultiplier = 1;
         side.debugSpecialSpawnRateMultiplier = 1;
         side.debugSpecialChanceOverrides = {};
+        side.debugUpgradeCardWeightMultipliers = {};
         side.debugCandleChanceBonus = 0;
         side.debugHeroAbilityRapidTest = false;
         side.debugForceSpecialType = null;
@@ -1706,6 +1725,13 @@ class GameRoom {
         side.debugSpecialChanceOverrides[type] = Number.isFinite(raw)
           ? clamp(raw, DEBUG_SPECIAL_OVERRIDE_MIN, DEBUG_SPECIAL_OVERRIDE_MAX)
           : fallback;
+      }
+      side.debugUpgradeCardWeightMultipliers = {};
+      for (const type of UPGRADE_TYPES) {
+        const rawValue = cfg?.upgradeCardWeightMultipliers?.[type];
+        const raw = rawValue == null ? NaN : Number(rawValue);
+        if (!Number.isFinite(raw)) continue;
+        side.debugUpgradeCardWeightMultipliers[type] = clamp(raw, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX);
       }
       side.debugCandleChanceBonus = clamp(Number(cfg.candleChanceBonus) || 0, DEBUG_CANDLE_BONUS_MIN, DEBUG_CANDLE_BONUS_MAX);
       side.debugHeroAbilityRapidTest = Boolean(cfg.heroAbilityRapidTest);
@@ -11184,6 +11210,23 @@ class GameRoom {
     return !this.isUpgradeUnlocked(side, type);
   }
 
+  debugUpgradeCardWeightMultiplierForType(side, type) {
+    if (!side || typeof type !== 'string' || !type) return 1;
+    const raw = Number(side?.debugUpgradeCardWeightMultipliers?.[type]);
+    if (!Number.isFinite(raw)) return 1;
+    return clamp(raw, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX);
+  }
+
+  applyDebugUpgradeCardWeightMultipliers(side, candidates = []) {
+    if (!Array.isArray(candidates) || !candidates.length) return;
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate.type !== 'string') continue;
+      const mul = this.debugUpgradeCardWeightMultiplierForType(side, candidate.type);
+      if (mul === 1) continue;
+      candidate.weight = Math.max(0, Number(candidate.weight) || 0) * mul;
+    }
+  }
+
   buildUpgradeCardCandidates(side, excludedTypes = new Set(), options = null) {
     const candidates = [];
     const regularWeight = Math.max(0, Number(REPEAT_SPECIAL_UPGRADE_CONFIG.regularUpgradeWeight) || 0);
@@ -11249,6 +11292,7 @@ class GameRoom {
     }
 
     this.applyFixedRareSpecialUpgradeCardChances(side, candidates);
+    this.applyDebugUpgradeCardWeightMultipliers(side, candidates);
     return candidates;
   }
 

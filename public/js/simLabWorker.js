@@ -48,17 +48,20 @@ function createCpuRoom(mode = '1v1', debugConfig = null) {
   return room;
 }
 
-function buildBoostConfig(upgradeType, boostedSide, baselineLevelsByType) {
-  const side = normalizeSide(boostedSide);
+function buildCardBiasConfig(upgradeType, biasedSide, baselineLevelsByType, cardBiasMultiplier = 2) {
+  const side = normalizeSide(biasedSide);
   const upgrades = {};
+  const upgradeCardWeightMultipliers = {};
+  const multiplier = clampInt(Math.round((Number(cardBiasMultiplier) || 2) * 100), 0, 5000, 200) / 100;
   for (const type of UPGRADE_TYPES) {
     upgrades[type] = Math.max(0, Math.floor(Number(baselineLevelsByType?.[type]) || 0));
   }
-  upgrades[upgradeType] = Math.max(0, (Number(upgrades[upgradeType]) || 0) + 1);
+  upgradeCardWeightMultipliers[upgradeType] = multiplier;
   return {
     enabled: true,
     applyTo: side,
     upgrades,
+    upgradeCardWeightMultipliers,
   };
 }
 
@@ -111,11 +114,16 @@ function runCpuMatch(options = {}, context = {}) {
 function runJob(job = {}, options = {}, context = {}) {
   const kind = job.kind === 'upgrade' ? 'upgrade' : 'baseline';
   const upgradeType = typeof job.upgradeType === 'string' ? job.upgradeType : null;
-  const boostedSide = normalizeSide(job.boostedSide);
+  const biasedSide = normalizeSide(job.biasedSide);
   let debugConfig = null;
 
   if (kind === 'upgrade' && upgradeType && UPGRADE_TYPES.includes(upgradeType)) {
-    debugConfig = buildBoostConfig(upgradeType, boostedSide, options.baselineLevelsByType || {});
+    debugConfig = buildCardBiasConfig(
+      upgradeType,
+      biasedSide,
+      options.baselineLevelsByType || {},
+      options.cardBiasMultiplier
+    );
   }
 
   const result = runCpuMatch({
@@ -129,8 +137,8 @@ function runJob(job = {}, options = {}, context = {}) {
     ...result,
     kind,
     upgradeType,
-    boostedSide,
-    boostedWon: kind === 'upgrade' && result.winner === boostedSide,
+    biasedSide,
+    biasedWon: kind === 'upgrade' && result.winner === biasedSide,
   };
 }
 
@@ -154,7 +162,7 @@ self.onmessage = (event) => {
           final: Boolean(final),
           jobKind: job.kind === 'upgrade' ? 'upgrade' : 'baseline',
           upgradeType: typeof job.upgradeType === 'string' ? job.upgradeType : null,
-          boostedSide: normalizeSide(job.boostedSide),
+          biasedSide: normalizeSide(job.biasedSide),
           frame,
         });
       },

@@ -31,6 +31,7 @@ const UPGRADE_ORDER = Object.freeze([...UPGRADE_TYPES]);
 const dom = {
   modeInput: document.getElementById('simModeInput'),
   perUpgradeInput: document.getElementById('simPerUpgradeInput'),
+  cardBiasMultInput: document.getElementById('simCardBiasMultInput'),
   baselineInput: document.getElementById('simBaselineInput'),
   workersInput: document.getElementById('simWorkersInput'),
   coreUpdateMsInput: document.getElementById('simCoreUpdateMsInput'),
@@ -111,11 +112,11 @@ function createSummary() {
   for (const type of UPGRADE_ORDER) {
     upgrade[type] = {
       matches: 0,
-      boostedWins: 0,
-      leftBoostMatches: 0,
-      leftBoostWins: 0,
-      rightBoostMatches: 0,
-      rightBoostWins: 0,
+      biasedWins: 0,
+      leftBiasMatches: 0,
+      leftBiasWins: 0,
+      rightBiasMatches: 0,
+      rightBiasWins: 0,
       durationSum: 0,
       timedOut: 0,
     };
@@ -185,7 +186,7 @@ function createJobs(config) {
           id: nextId++,
           kind: 'upgrade',
           upgradeType: type,
-          boostedSide: side,
+          biasedSide: side,
         });
       }
     }
@@ -196,6 +197,10 @@ function createJobs(config) {
 function readConfigFromUi() {
   const mode = normalizeMode(dom.modeInput?.value);
   const perUpgradePerSide = clampInt(dom.perUpgradeInput?.value, 1, 500, 6);
+  const cardBiasMultiplierRaw = Number(dom.cardBiasMultInput?.value);
+  const cardBiasMultiplier = Number.isFinite(cardBiasMultiplierRaw)
+    ? Math.max(0, Math.min(50, cardBiasMultiplierRaw))
+    : 2;
   const baselineSims = clampInt(dom.baselineInput?.value, 0, 3000, 60);
   const workers = clampInt(dom.workersInput?.value, 1, MAX_WORKERS_UI, defaultWorkerCount());
   const emitIntervalMs = clampInt(dom.coreUpdateMsInput?.value, 80, 5000, 240);
@@ -205,6 +210,7 @@ function readConfigFromUi() {
   return {
     mode,
     perUpgradePerSide,
+    cardBiasMultiplier,
     baselineSims,
     workers,
     emitIntervalMs,
@@ -220,6 +226,7 @@ function setControlsRunning(running) {
   const disabled = running;
   if (dom.modeInput) dom.modeInput.disabled = disabled;
   if (dom.perUpgradeInput) dom.perUpgradeInput.disabled = disabled;
+  if (dom.cardBiasMultInput) dom.cardBiasMultInput.disabled = disabled;
   if (dom.baselineInput) dom.baselineInput.disabled = disabled;
   if (dom.workersInput) dom.workersInput.disabled = disabled;
   if (dom.coreUpdateMsInput) dom.coreUpdateMsInput.disabled = disabled;
@@ -229,8 +236,8 @@ function setControlsRunning(running) {
 function workerJobLabel(job = null) {
   if (!job) return 'Idle';
   if (job.kind === 'upgrade') {
-    const side = job.boostedSide === 'right' ? 'right' : 'left';
-    return `Upgrade: ${upgradeLabel(job.upgradeType)} (${side} boosted)`;
+    const side = job.biasedSide === 'right' ? 'right' : 'left';
+    return `Upgrade: ${upgradeLabel(job.upgradeType)} (${side} bias)`;
   }
   return 'Baseline CPU vs CPU';
 }
@@ -434,14 +441,14 @@ function updateSummary(result) {
     stat.matches += 1;
     stat.durationSum += Math.max(0, Number(result?.durationSeconds) || 0);
     if (result?.timedOut) stat.timedOut += 1;
-    if (result?.boostedWon) stat.boostedWins += 1;
-    const side = result?.boostedSide === 'right' ? 'right' : 'left';
+    if (result?.biasedWon) stat.biasedWins += 1;
+    const side = result?.biasedSide === 'right' ? 'right' : 'left';
     if (side === 'left') {
-      stat.leftBoostMatches += 1;
-      if (result?.winner === 'left') stat.leftBoostWins += 1;
+      stat.leftBiasMatches += 1;
+      if (result?.winner === 'left') stat.leftBiasWins += 1;
     } else {
-      stat.rightBoostMatches += 1;
-      if (result?.winner === 'right') stat.rightBoostWins += 1;
+      stat.rightBiasMatches += 1;
+      if (result?.winner === 'right') stat.rightBiasWins += 1;
     }
   }
 }
@@ -470,21 +477,21 @@ function renderUpgradeRankTable() {
   const rows = UPGRADE_ORDER.map((type) => {
     const stat = summary.upgrade[type];
     const matches = Math.max(0, stat.matches);
-    const boostedRate = matches > 0 ? stat.boostedWins / matches : 0;
-    const leftRate = stat.leftBoostMatches > 0 ? stat.leftBoostWins / stat.leftBoostMatches : 0;
-    const rightRate = stat.rightBoostMatches > 0 ? stat.rightBoostWins / stat.rightBoostMatches : 0;
+    const biasedRate = matches > 0 ? stat.biasedWins / matches : 0;
+    const leftRate = stat.leftBiasMatches > 0 ? stat.leftBiasWins / stat.leftBiasMatches : 0;
+    const rightRate = stat.rightBiasMatches > 0 ? stat.rightBiasWins / stat.rightBiasMatches : 0;
     const avgDuration = matches > 0 ? stat.durationSum / matches : 0;
     return {
       type,
       label: upgradeLabel(type),
       matches,
-      boostedRate,
+      biasedRate,
       leftRate,
       rightRate,
       avgDuration,
     };
   }).sort((a, b) => {
-    if (b.boostedRate !== a.boostedRate) return b.boostedRate - a.boostedRate;
+    if (b.biasedRate !== a.biasedRate) return b.biasedRate - a.biasedRate;
     if (b.matches !== a.matches) return b.matches - a.matches;
     return a.label.localeCompare(b.label);
   });
@@ -496,7 +503,7 @@ function renderUpgradeRankTable() {
       `<tr>
         <td>${i + 1}</td>
         <td>${row.label}</td>
-        <td>${formatPercent(row.boostedRate)}</td>
+        <td>${formatPercent(row.biasedRate)}</td>
         <td>${row.matches}</td>
         <td>${formatPercent(row.leftRate)}</td>
         <td>${formatPercent(row.rightRate)}</td>
@@ -624,6 +631,7 @@ function dispatchNextJob(workerId) {
     options: {
       mode: state.config.mode,
       baselineLevelsByType: state.config.baselineLevelsByType,
+      cardBiasMultiplier: state.config.cardBiasMultiplier,
       maxMatchSeconds: state.config.maxMatchSeconds,
       emitIntervalMs: state.config.emitIntervalMs,
     },
@@ -642,7 +650,7 @@ function handleCoreUpdateMessage(payload) {
     core.job = {
       kind: 'upgrade',
       upgradeType: payload.upgradeType,
-      boostedSide: payload.boostedSide,
+      biasedSide: payload.biasedSide,
     };
   } else {
     core.job = {
