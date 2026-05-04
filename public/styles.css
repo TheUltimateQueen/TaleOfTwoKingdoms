@@ -2163,6 +2163,26 @@ body.sim-lab-page {
   gap: 8px;
 }
 
+.sim-table-actions {
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+
+.sim-copy-msg {
+  margin: 0;
+  min-height: 1.25em;
+  opacity: 0.9;
+}
+
+.sim-copy-msg.success {
+  color: #98dfb2;
+}
+
+.sim-copy-msg.error {
+  color: #ffb0a6;
+}
+
 #simProgressBar {
   width: 100%;
   height: 12px;

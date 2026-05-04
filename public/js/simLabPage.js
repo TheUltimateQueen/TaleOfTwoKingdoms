@@ -40,11 +40,19 @@ const dom = {
   stopBtn: document.getElementById('simStopBtn'),
   statusText: document.getElementById('simStatusText'),
   progressBar: document.getElementById('simProgressBar'),
+  copyAllTablesBtn: document.getElementById('simCopyAllTablesBtn'),
+  copyAllTablesMsg: document.getElementById('simCopyAllTablesMsg'),
+  copyUpgradeTableBtn: document.getElementById('simCopyUpgradeTableBtn'),
+  copyUpgradeTableMsg: document.getElementById('simCopyUpgradeTableMsg'),
+  copyMetaTableBtn: document.getElementById('simCopyMetaTableBtn'),
+  copyMetaTableMsg: document.getElementById('simCopyMetaTableMsg'),
   summaryMatches: document.getElementById('simSummaryMatches'),
   summaryLeftRate: document.getElementById('simSummaryLeftRate'),
   summaryRightRate: document.getElementById('simSummaryRightRate'),
   summaryAvgDuration: document.getElementById('simSummaryAvgDuration'),
   summaryTimeouts: document.getElementById('simSummaryTimeouts'),
+  upgradeRankTable: document.getElementById('simUpgradeRankTable'),
+  metaRankTable: document.getElementById('simMetaRankTable'),
   upgradeRankBody: document.getElementById('simUpgradeRankBody'),
   metaRankBody: document.getElementById('simMetaRankBody'),
   coreGrid: document.getElementById('simCoreGrid'),
@@ -68,6 +76,7 @@ const state = {
   statusMessage: 'Ready.',
   statusTimer: null,
 };
+const copyMessageTimers = new WeakMap();
 
 function clampInt(value, min, max, fallback) {
   const n = Number(value);
@@ -160,6 +169,21 @@ function levelArrayFromMap(levelsByType = {}) {
   return UPGRADE_ORDER.map((type) => Math.max(0, Math.floor(Number(levelsByType?.[type]) || 0)));
 }
 
+function deriveUpgradePriceByMode(mode = '1v1', baselineLevelsByType = null) {
+  const normalizedMode = normalizeMode(mode);
+  const levels = baselineLevelsByType || deriveBaselineLevelsByMode(normalizedMode);
+  const room = new SimGameRoom(`PRICE-${normalizedMode}`, '', { mode: normalizedMode });
+  const prices = {};
+  for (const type of UPGRADE_ORDER) {
+    const simulatedSide = {
+      ...room.left,
+      [type]: Math.max(0, Math.floor(Number(levels?.[type]) || 0)),
+    };
+    prices[type] = Math.max(1, Math.round(Number(room.upgradeCost(simulatedSide, type)) || 0));
+  }
+  return prices;
+}
+
 function shuffleInPlace(list) {
   for (let i = list.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -207,6 +231,7 @@ function readConfigFromUi() {
   const maxMatchSeconds = clampInt(dom.maxSecondsInput?.value, 120, 7200, 900);
   const baselineLevelsByType = deriveBaselineLevelsByMode(mode);
   const baselineLevelArray = levelArrayFromMap(baselineLevelsByType);
+  const upgradePriceByType = deriveUpgradePriceByMode(mode, baselineLevelsByType);
   return {
     mode,
     perUpgradePerSide,
@@ -217,6 +242,7 @@ function readConfigFromUi() {
     maxMatchSeconds,
     baselineLevelsByType,
     baselineLevelArray,
+    upgradePriceByType,
   };
 }
 
@@ -469,8 +495,11 @@ function renderSummary() {
 function renderUpgradeRankTable() {
   if (!dom.upgradeRankBody) return;
   const summary = state.summary;
+  const mode = normalizeMode(dom.modeInput?.value);
+  const baselineLevels = deriveBaselineLevelsByMode(mode);
+  const priceMap = state.config?.upgradePriceByType || deriveUpgradePriceByMode(mode, baselineLevels);
   if (!summary) {
-    dom.upgradeRankBody.innerHTML = '<tr><td colspan="7">Run a simulation to populate upgrade rankings.</td></tr>';
+    dom.upgradeRankBody.innerHTML = '<tr><td colspan="8">Run a simulation to populate upgrade rankings.</td></tr>';
     return;
   }
 
@@ -484,6 +513,7 @@ function renderUpgradeRankTable() {
     return {
       type,
       label: upgradeLabel(type),
+      goldPrice: Math.max(1, Math.round(Number(priceMap?.[type]) || 0)),
       matches,
       biasedRate,
       leftRate,
@@ -503,6 +533,7 @@ function renderUpgradeRankTable() {
       `<tr>
         <td>${i + 1}</td>
         <td>${row.label}</td>
+        <td>${row.goldPrice}</td>
         <td>${formatPercent(row.biasedRate)}</td>
         <td>${row.matches}</td>
         <td>${formatPercent(row.leftRate)}</td>
@@ -517,8 +548,11 @@ function renderUpgradeRankTable() {
 function renderMetaRankTable() {
   if (!dom.metaRankBody) return;
   const summary = state.summary;
+  const mode = normalizeMode(dom.modeInput?.value);
+  const baselineLevels = deriveBaselineLevelsByMode(mode);
+  const priceMap = state.config?.upgradePriceByType || deriveUpgradePriceByMode(mode, baselineLevels);
   if (!summary) {
-    dom.metaRankBody.innerHTML = '<tr><td colspan="4">Run baseline sims to populate observed meta correlations.</td></tr>';
+    dom.metaRankBody.innerHTML = '<tr><td colspan="5">Run baseline sims to populate observed meta correlations.</td></tr>';
     return;
   }
 
@@ -530,6 +564,7 @@ function renderMetaRankTable() {
     return {
       type,
       label: upgradeLabel(type),
+      goldPrice: Math.max(1, Math.round(Number(priceMap?.[type]) || 0)),
       samples,
       advantageRate,
       avgGap,
@@ -545,6 +580,7 @@ function renderMetaRankTable() {
     html.push(
       `<tr>
         <td>${row.label}</td>
+        <td>${row.goldPrice}</td>
         <td>${formatPercent(row.advantageRate)}</td>
         <td>${row.samples}</td>
         <td>${row.avgGap.toFixed(2)}</td>
@@ -552,6 +588,98 @@ function renderMetaRankTable() {
     );
   }
   dom.metaRankBody.innerHTML = html.join('');
+}
+
+function sanitizeCellText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function tableElementToTsv(tableEl) {
+  if (!tableEl) return '';
+  const lines = [];
+  const rows = tableEl.querySelectorAll('thead tr, tbody tr');
+  for (const row of rows) {
+    const cells = Array.from(row.querySelectorAll('th, td')).map((cell) => sanitizeCellText(cell.textContent));
+    if (!cells.length) continue;
+    lines.push(cells.join('\t'));
+  }
+  return lines.join('\n');
+}
+
+function summaryToTsv() {
+  const rows = [
+    ['Metric', 'Value'],
+    ['Total Matches', sanitizeCellText(dom.summaryMatches?.textContent)],
+    ['Left Win Rate', sanitizeCellText(dom.summaryLeftRate?.textContent)],
+    ['Right Win Rate', sanitizeCellText(dom.summaryRightRate?.textContent)],
+    ['Avg Match Time', sanitizeCellText(dom.summaryAvgDuration?.textContent)],
+    ['Timed Out', sanitizeCellText(dom.summaryTimeouts?.textContent)],
+  ];
+  return rows.map((row) => row.join('\t')).join('\n');
+}
+
+function setCopyMessage(messageEl, text, isError = false) {
+  if (!messageEl) return;
+  messageEl.textContent = text || '';
+  messageEl.classList.toggle('error', Boolean(isError));
+  messageEl.classList.toggle('success', Boolean(!isError && text));
+  const previousTimer = copyMessageTimers.get(messageEl);
+  if (previousTimer) window.clearTimeout(previousTimer);
+  if (!text) return;
+  const timer = window.setTimeout(() => {
+    messageEl.textContent = '';
+    messageEl.classList.remove('error');
+    messageEl.classList.remove('success');
+    copyMessageTimers.delete(messageEl);
+  }, 2200);
+  copyMessageTimers.set(messageEl, timer);
+}
+
+async function copyTextToClipboard(text) {
+  const payload = String(text ?? '');
+  if (!payload.trim()) throw new Error('No table data to copy yet.');
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(payload);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = payload;
+  area.setAttribute('readonly', 'readonly');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  area.style.left = '-9999px';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(area);
+  if (!copied) throw new Error('Clipboard copy is blocked in this browser.');
+}
+
+async function copyTableForSheets(tableEl, messageEl) {
+  try {
+    const tsv = tableElementToTsv(tableEl);
+    await copyTextToClipboard(tsv);
+    setCopyMessage(messageEl, 'Copied. Paste directly into Sheets.');
+  } catch (error) {
+    setCopyMessage(messageEl, error?.message || 'Copy failed.', true);
+  }
+}
+
+async function copyAllTablesForSheets() {
+  try {
+    const parts = [
+      ['Summary', summaryToTsv()],
+      ['Upgrade Rank', tableElementToTsv(dom.upgradeRankTable)],
+      ['Meta Correlation', tableElementToTsv(dom.metaRankTable)],
+    ].filter((entry) => String(entry?.[1] || '').trim());
+    if (!parts.length) throw new Error('No table data to copy yet.');
+    const tsv = parts.map(([title, body]) => `${title}\n${body}`).join('\n\n');
+    await copyTextToClipboard(tsv);
+    setCopyMessage(dom.copyAllTablesMsg, 'Copied all tables. Paste into Sheets.');
+  } catch (error) {
+    setCopyMessage(dom.copyAllTablesMsg, error?.message || 'Copy failed.', true);
+  }
 }
 
 function renderAll() {
@@ -759,6 +887,15 @@ function init() {
   if (dom.workersInput) dom.workersInput.value = String(defaultWorkerCount());
   if (dom.runBtn) dom.runBtn.addEventListener('click', startRun);
   if (dom.stopBtn) dom.stopBtn.addEventListener('click', () => stopRun('Run stopped.'));
+  if (dom.copyUpgradeTableBtn) dom.copyUpgradeTableBtn.addEventListener('click', () => {
+    copyTableForSheets(dom.upgradeRankTable, dom.copyUpgradeTableMsg);
+  });
+  if (dom.copyMetaTableBtn) dom.copyMetaTableBtn.addEventListener('click', () => {
+    copyTableForSheets(dom.metaRankTable, dom.copyMetaTableMsg);
+  });
+  if (dom.copyAllTablesBtn) dom.copyAllTablesBtn.addEventListener('click', () => {
+    copyAllTablesForSheets();
+  });
   renderUpgradeRankTable();
   renderMetaRankTable();
   renderSummary();
