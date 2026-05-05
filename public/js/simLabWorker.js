@@ -48,21 +48,55 @@ function createCpuRoom(mode = '1v1', debugConfig = null) {
   return room;
 }
 
-function buildCardBiasConfig(upgradeType, biasedSide, baselineLevelsByType, cardBiasMultiplier = 2) {
-  const side = normalizeSide(biasedSide);
+function buildBaselineUpgradeLevels(baselineLevelsByType = {}) {
   const upgrades = {};
-  const upgradeCardWeightMultipliers = {};
-  const multiplier = clampInt(Math.round((Number(cardBiasMultiplier) || 2) * 100), 0, 5000, 200) / 100;
   for (const type of UPGRADE_TYPES) {
     upgrades[type] = Math.max(0, Math.floor(Number(baselineLevelsByType?.[type]) || 0));
   }
-  upgradeCardWeightMultipliers[upgradeType] = multiplier;
-  return {
-    enabled: true,
-    applyTo: side,
-    upgrades,
-    upgradeCardWeightMultipliers,
-  };
+  return upgrades;
+}
+
+function buildUpgradeCostMultipliers(source = {}) {
+  const multipliers = {};
+  for (const type of UPGRADE_TYPES) {
+    const raw = Number(source?.[type]);
+    if (!Number.isFinite(raw) || raw <= 0) continue;
+    multipliers[type] = clampInt(Math.round(raw * 1000), 1, 50000, 1000) / 1000;
+  }
+  return multipliers;
+}
+
+function buildDebugConfigForJob(job = {}, options = {}) {
+  const kind = job.kind === 'upgrade' ? 'upgrade' : 'baseline';
+  const upgradeType = typeof job.upgradeType === 'string' ? job.upgradeType : null;
+  const biasedSide = normalizeSide(job.biasedSide);
+  const upgrades = buildBaselineUpgradeLevels(options.baselineLevelsByType || {});
+  const upgradeCostMultipliers = buildUpgradeCostMultipliers(options.upgradeCostMultipliersByType || {});
+  const hasCostMultipliers = Object.keys(upgradeCostMultipliers).length > 0;
+
+  if (kind === 'upgrade' && upgradeType && UPGRADE_TYPES.includes(upgradeType)) {
+    const multiplier = clampInt(Math.round((Number(options.cardBiasMultiplier) || 2) * 100), 0, 5000, 200) / 100;
+    return {
+      enabled: true,
+      applyTo: biasedSide,
+      upgrades,
+      upgradeCardWeightMultipliers: {
+        [upgradeType]: multiplier,
+      },
+      upgradeCostMultipliers,
+    };
+  }
+
+  if (hasCostMultipliers) {
+    return {
+      enabled: true,
+      applyTo: 'both',
+      upgrades,
+      upgradeCostMultipliers,
+    };
+  }
+
+  return null;
 }
 
 function runCpuMatch(options = {}, context = {}) {
@@ -115,16 +149,7 @@ function runJob(job = {}, options = {}, context = {}) {
   const kind = job.kind === 'upgrade' ? 'upgrade' : 'baseline';
   const upgradeType = typeof job.upgradeType === 'string' ? job.upgradeType : null;
   const biasedSide = normalizeSide(job.biasedSide);
-  let debugConfig = null;
-
-  if (kind === 'upgrade' && upgradeType && UPGRADE_TYPES.includes(upgradeType)) {
-    debugConfig = buildCardBiasConfig(
-      upgradeType,
-      biasedSide,
-      options.baselineLevelsByType || {},
-      options.cardBiasMultiplier
-    );
-  }
+  const debugConfig = buildDebugConfigForJob(job, options);
 
   const result = runCpuMatch({
     mode: options.mode,

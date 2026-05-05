@@ -474,6 +474,8 @@ const DEBUG_SPECIAL_OVERRIDE_MIN = 0;
 const DEBUG_SPECIAL_OVERRIDE_MAX = 0.99;
 const DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN = 0;
 const DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX = 50;
+const DEBUG_UPGRADE_COST_MULT_MIN = 0.2;
+const DEBUG_UPGRADE_COST_MULT_MAX = 5;
 const DEBUG_FORCE_SPECIAL_TYPES = new Set([
   'dragon',
   'shield',
@@ -702,6 +704,17 @@ function normalizeDebugConfig(raw = null) {
       ? clamp(raw, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MIN, DEBUG_UPGRADE_CARD_WEIGHT_MULT_MAX)
       : null;
   }
+  const upgradeCostMultipliersSource = (cfg.upgradeCostMultipliers && typeof cfg.upgradeCostMultipliers === 'object')
+    ? cfg.upgradeCostMultipliers
+    : {};
+  const upgradeCostMultipliers = {};
+  for (const type of UPGRADE_TYPES) {
+    const rawValue = upgradeCostMultipliersSource[type];
+    const raw = rawValue == null ? NaN : Number(rawValue);
+    upgradeCostMultipliers[type] = Number.isFinite(raw)
+      ? clamp(raw, DEBUG_UPGRADE_COST_MULT_MIN, DEBUG_UPGRADE_COST_MULT_MAX)
+      : null;
+  }
 
   const upgrades = {};
   const source = (cfg.upgrades && typeof cfg.upgrades === 'object') ? cfg.upgrades : {};
@@ -727,6 +740,7 @@ function normalizeDebugConfig(raw = null) {
     heroAbilityRapidTest,
     specialChanceOverrides,
     upgradeCardWeightMultipliers,
+    upgradeCostMultipliers,
     upgrades,
   };
 }
@@ -1007,6 +1021,7 @@ function makeSideState(sideName = 'left', archerCount = 1) {
     debugSpecialSpawnRateMultiplier: 1,
     debugSpecialChanceOverrides: {},
     debugUpgradeCardWeightMultipliers: {},
+    debugUpgradeCostMultipliers: {},
     debugCandleChanceBonus: 0,
     debugHeroAbilityRapidTest: false,
     debugForceSpecialType: null,
@@ -1700,10 +1715,17 @@ class GameRoom {
     this.debugPowerDropRateMultiplier = cfg.enabled
       ? clamp(Number(cfg.powerDropRateMultiplier) || 1, DEBUG_RATE_MIN, DEBUG_RATE_MAX)
       : 1;
+    const sharedUpgradeCostMultipliers = {};
+    for (const type of UPGRADE_TYPES) {
+      const raw = Number(cfg?.upgradeCostMultipliers?.[type]);
+      if (!cfg.enabled || !Number.isFinite(raw)) continue;
+      sharedUpgradeCostMultipliers[type] = clamp(raw, DEBUG_UPGRADE_COST_MULT_MIN, DEBUG_UPGRADE_COST_MULT_MAX);
+    }
 
     for (const sideName of allSides) {
       const side = this[sideName];
       if (!side) continue;
+      side.debugUpgradeCostMultipliers = { ...sharedUpgradeCostMultipliers };
       if (!targets.has(sideName)) {
         side.debugSpawnRateMultiplier = 1;
         side.debugSpecialSpawnRateMultiplier = 1;
@@ -10936,8 +10958,14 @@ class GameRoom {
     const level = Math.max(0, Number(side?.[type]) || 0);
     const tier = Math.max(0, level - rule.start);
     const debtMul = this.upgradeDebtMultiplier(this.t);
-    const scaled = Math.round((rule.base + tier * rule.growth) * debtMul);
-    const minDebt = Math.max(1, Math.round(60 * debtMul));
+    const baseScaled = Math.round((rule.base + tier * rule.growth) * debtMul);
+    const baseMinDebt = Math.max(1, Math.round(60 * debtMul));
+    const rawCostMult = Number(side?.debugUpgradeCostMultipliers?.[type]);
+    const costMult = Number.isFinite(rawCostMult)
+      ? clamp(rawCostMult, DEBUG_UPGRADE_COST_MULT_MIN, DEBUG_UPGRADE_COST_MULT_MAX)
+      : 1;
+    const scaled = Math.round(baseScaled * costMult);
+    const minDebt = Math.max(1, Math.round(baseMinDebt * costMult));
     return Math.max(minDebt, scaled);
   }
 
