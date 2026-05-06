@@ -2153,6 +2153,13 @@ body.sim-lab-page {
   min-width: 132px;
 }
 
+.sim-help {
+  font-size: 11px;
+  line-height: 1.28;
+  color: #9cb6d5;
+  max-width: 280px;
+}
+
 .sim-lab-controls label.sim-inline-toggle {
   min-width: 220px;
   flex-direction: row;
@@ -2172,9 +2179,49 @@ body.sim-lab-page {
   min-width: 120px;
 }
 
+.sim-run-sizing {
+  margin-top: 8px;
+  border: 1px solid #36557f;
+  border-radius: 10px;
+  background: #0f1d3296;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 10px;
+}
+
+.sim-run-sizing-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  grid-column: 1 / -1;
+}
+
+.sim-run-sizing-line {
+  margin: 0;
+  font-size: 12px;
+  color: #c7def8;
+}
+
+.sim-run-sizing-seed {
+  grid-column: 1 / -1;
+  color: #9ec7ec;
+}
+
 .sim-lab-actions {
   margin-top: 2px;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+#simRunContinueBtn {
+  border-color: #4a89d0;
+  background: #173a63;
+}
+
+#simRunFreshBtn {
+  border-color: #8a6b3f;
+  background: #3a2a17;
 }
 
 .sim-table-actions {

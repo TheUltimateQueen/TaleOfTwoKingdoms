@@ -20,54 +20,78 @@
         </div>
 
         <div class="row sim-lab-controls">
-          <label>Mode
+          <label>Game Mode
             <select id="simModeInput">
               <option value="1v1">1v1</option>
               <option value="2v2">2v2</option>
             </select>
+            <span class="sim-help">CPU-only match format.</span>
           </label>
-          <label>Sims / Upgrade / Side
+          <label>Matches Per Upgrade Side
             <input id="simPerUpgradeInput" type="number" min="1" max="500" step="1" value="6" />
+            <span class="sim-help">Per upgrade: this many left-bias and this many right-bias matches.</span>
           </label>
-          <label>Card Chance Mult
+          <label>Upgrade Card Weight Mult
             <input id="simCardBiasMultInput" type="number" min="0" max="50" step="0.1" value="2.0" />
+            <span class="sim-help">2.0 means about 2x more likely to offer the target upgrade card.</span>
           </label>
-          <label>Baseline Sims
+          <label>Meta Baseline Matches
             <input id="simBaselineInput" type="number" min="0" max="3000" step="1" value="60" />
+            <span class="sim-help">Extra neutral CPU matches for Observed Meta Correlation only.</span>
           </label>
-          <label>Workers (cores)
+          <label>Parallel Workers (Cores)
             <input id="simWorkersInput" type="number" min="1" max="16" step="1" value="4" />
+            <span class="sim-help">How many matches run at the same time.</span>
           </label>
-          <label>Core Update (ms)
+          <label>Live Core UI Update (ms)
             <input id="simCoreUpdateMsInput" type="number" min="80" max="5000" step="10" value="240" />
+            <span class="sim-help">How often per-core HP/gold/upgrades are refreshed on screen.</span>
           </label>
-          <label>Max Match Seconds
+          <label>Max Seconds Per Match
             <input id="simMaxSecondsInput" type="number" min="120" max="7200" step="30" value="900" />
+            <span class="sim-help">Hard timeout for one match.</span>
           </label>
           <label class="sim-inline-toggle">
             <input id="simPriceBoundsEnabledInput" type="checkbox" />
-            <span>Use Price Bounds (suggestions)</span>
+            <span>Apply Min/Max Price Bounds</span>
           </label>
           <label>Min Price
             <input id="simPriceMinInput" type="number" min="1" max="9999" step="1" value="0" />
+            <span class="sim-help">Lower clamp for suggested/auto-balanced prices.</span>
           </label>
           <label>Max Price
             <input id="simPriceMaxInput" type="number" min="1" max="9999" step="1" value="0" />
+            <span class="sim-help">Upper clamp for suggested/auto-balanced prices.</span>
           </label>
           <label class="sim-inline-toggle">
             <input id="simAutoBalanceEnabledInput" type="checkbox" />
-            <span>Auto Balance Prices</span>
+            <span>Auto Balance Across Cycles</span>
           </label>
-          <label>Auto Cycles
+          <label>Balance Cycles
             <input id="simAutoBalanceCyclesInput" type="number" min="1" max="30" step="1" value="4" />
+            <span class="sim-help">Each cycle runs a full batch, then nudges prices and runs again.</span>
           </label>
           <label>Nudge Strength %
             <input id="simAutoBalanceStepPctInput" type="number" min="0.5" max="100" step="0.5" value="12" />
+            <span class="sim-help">How aggressively price moves toward 50% each cycle.</span>
           </label>
         </div>
 
+        <section class="sim-run-sizing" aria-live="polite">
+          <p class="sim-run-sizing-title">Run Size Preview</p>
+          <p class="sim-run-sizing-line" id="simPreviewFormula">Total = (baseline + upgrade sweep) x cycles</p>
+          <p class="sim-run-sizing-line">Upgrades tracked: <strong id="simPreviewUpgradeTypes">0</strong></p>
+          <p class="sim-run-sizing-line">Baseline per cycle: <strong id="simPreviewBaselineCycle">0</strong></p>
+          <p class="sim-run-sizing-line">Upgrade sweep per cycle: <strong id="simPreviewUpgradeCycle">0</strong></p>
+          <p class="sim-run-sizing-line">Total per cycle: <strong id="simPreviewCycleTotal">0</strong></p>
+          <p class="sim-run-sizing-line">Cycles: <strong id="simPreviewCycles">1</strong></p>
+          <p class="sim-run-sizing-line">Total matches this run: <strong id="simPreviewRunTotal">0</strong></p>
+          <p class="sim-run-sizing-line sim-run-sizing-seed" id="simPriceSeedHint">Continue uses last saved prices for this mode. Fresh resets to default mode prices.</p>
+        </section>
+
         <div class="row sim-lab-actions">
-          <button id="simRunBtn" type="button">Run Sweep</button>
+          <button id="simRunContinueBtn" type="button">Run Continue (Keep Prices)</button>
+          <button id="simRunFreshBtn" type="button">Run Fresh (Reset Prices)</button>
           <button id="simStopBtn" type="button" disabled>Stop</button>
           <button id="simCopyAllTablesBtn" type="button">Copy All Tables For Sheets</button>
         </div>
@@ -75,6 +99,7 @@
 
         <p id="simStatusText" class="sub">Ready.</p>
         <p id="simAutoBalanceText" class="sub">Auto-balance is off.</p>
+        <p id="simCyclePriceChangeText" class="sub">Cycle price change summary will appear here during auto-balance.</p>
         <progress id="simProgressBar" max="1" value="0"></progress>
 
         <section id="simSummaryGrid" class="sim-summary-grid" aria-live="polite">

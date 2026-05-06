@@ -11,6 +11,8 @@ const AUTO_BALANCE_CYCLE_MAX = 30;
 const AUTO_BALANCE_STEP_MIN_PCT = 0.5;
 const AUTO_BALANCE_STEP_MAX_PCT = 100;
 const AUTO_BALANCE_CONFIDENCE_MATCHES = 60;
+const AUTO_BALANCE_MIN_STEP_EDGE = 0.04;
+const AUTO_BALANCE_MIN_STEP_CONFIDENCE = 0.12;
 const PRICE_NUDGE_FACTOR_MIN = 0.75;
 const PRICE_NUDGE_FACTOR_MAX = 1.25;
 const COST_MULTIPLIER_MIN = 0.2;
@@ -52,11 +54,21 @@ const dom = {
   autoBalanceEnabledInput: document.getElementById('simAutoBalanceEnabledInput'),
   autoBalanceCyclesInput: document.getElementById('simAutoBalanceCyclesInput'),
   autoBalanceStepPctInput: document.getElementById('simAutoBalanceStepPctInput'),
-  runBtn: document.getElementById('simRunBtn'),
+  runContinueBtn: document.getElementById('simRunContinueBtn'),
+  runFreshBtn: document.getElementById('simRunFreshBtn'),
   stopBtn: document.getElementById('simStopBtn'),
   statusText: document.getElementById('simStatusText'),
   autoBalanceText: document.getElementById('simAutoBalanceText'),
+  cyclePriceChangeText: document.getElementById('simCyclePriceChangeText'),
   progressBar: document.getElementById('simProgressBar'),
+  previewFormula: document.getElementById('simPreviewFormula'),
+  previewUpgradeTypes: document.getElementById('simPreviewUpgradeTypes'),
+  previewBaselineCycle: document.getElementById('simPreviewBaselineCycle'),
+  previewUpgradeCycle: document.getElementById('simPreviewUpgradeCycle'),
+  previewCycleTotal: document.getElementById('simPreviewCycleTotal'),
+  previewCycles: document.getElementById('simPreviewCycles'),
+  previewRunTotal: document.getElementById('simPreviewRunTotal'),
+  priceSeedHint: document.getElementById('simPriceSeedHint'),
   copyAllTablesBtn: document.getElementById('simCopyAllTablesBtn'),
   copyAllTablesMsg: document.getElementById('simCopyAllTablesMsg'),
   copyUpgradeTableBtn: document.getElementById('simCopyUpgradeTableBtn'),
@@ -104,6 +116,9 @@ const state = {
   coreEls: new Map(),
   baselineCacheByMode: new Map(),
   modeDefaultsByMode: new Map(),
+  priceByMode: new Map(),
+  runSeedMode: 'continue',
+  lastCyclePriceDelta: null,
   statusMessage: 'Ready.',
   statusTimer: null,
 };
@@ -134,6 +149,11 @@ function formatSeconds(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '0.0s';
   return `${n.toFixed(1)}s`;
+}
+
+function formatWhole(value) {
+  const n = Math.max(0, Math.floor(Number(value) || 0));
+  return n.toLocaleString();
 }
 
 function formatEta(seconds) {
@@ -326,6 +346,19 @@ function createCostMultiplierMap(priceByType = {}, basePriceByType = {}) {
   return multipliers;
 }
 
+function withMinStepFallback(currentPrice, suggestedPrice, edge, confidence, config = null) {
+  const current = Math.max(1, Math.round(Number(currentPrice) || 0));
+  let suggested = Math.max(1, Math.round(Number(suggestedPrice) || 0));
+  if (suggested !== current) return suggested;
+  if (Math.abs(edge) < AUTO_BALANCE_MIN_STEP_EDGE) return suggested;
+  if (confidence < AUTO_BALANCE_MIN_STEP_CONFIDENCE) return suggested;
+  suggested = current + (edge > 0 ? 1 : -1);
+  if (config?.priceBoundsEnabled) {
+    suggested = clampInt(suggested, config.priceMin, config.priceMax, suggested);
+  }
+  return Math.max(1, suggested);
+}
+
 function suggestPriceMapFromUpgradeStats(summary, currentPriceByType = {}, config = null) {
   const next = clonePriceMap(currentPriceByType);
   if (!summary || !summary.upgrade) return next;
@@ -348,10 +381,12 @@ function suggestPriceMapFromUpgradeStats(summary, currentPriceByType = {}, confi
       PRICE_NUDGE_FACTOR_MAX,
       1
     );
-    let suggested = Math.round((Number(next[type]) || 1) * nudgeFactor);
+    const current = Math.max(1, Math.round(Number(next[type]) || 1));
+    let suggested = Math.round(current * nudgeFactor);
     if (config?.priceBoundsEnabled) {
       suggested = clampInt(suggested, config.priceMin, config.priceMax, suggested);
     }
+    suggested = withMinStepFallback(current, suggested, edge, confidence, config);
     next[type] = Math.max(1, suggested);
   }
   return next;
@@ -379,10 +414,12 @@ function suggestPriceMapFromMetaStats(summary, currentPriceByType = {}, config =
       PRICE_NUDGE_FACTOR_MAX,
       1
     );
-    let suggested = Math.round((Number(next[type]) || 1) * nudgeFactor);
+    const current = Math.max(1, Math.round(Number(next[type]) || 1));
+    let suggested = Math.round(current * nudgeFactor);
     if (config?.priceBoundsEnabled) {
       suggested = clampInt(suggested, config.priceMin, config.priceMax, suggested);
     }
+    suggested = withMinStepFallback(current, suggested, edge, confidence, config);
     next[type] = Math.max(1, suggested);
   }
   return next;
@@ -397,6 +434,16 @@ function clampPriceMapToBounds(priceByType = {}, config = null) {
     clamped[type] = clampInt(clamped[type], min, max, clamped[type]);
   }
   return clamped;
+}
+
+function resolvedPriceMapForMode(mode = '1v1', fallbackMap = {}) {
+  const normalizedMode = normalizeMode(mode);
+  if (state.running && state.config?.mode === normalizedMode && state.currentUpgradePriceByType) {
+    return clonePriceMap(state.currentUpgradePriceByType);
+  }
+  const saved = state.priceByMode.get(normalizedMode);
+  if (saved) return clonePriceMap(saved);
+  return clonePriceMap(fallbackMap);
 }
 
 function readConfigFromUi() {
@@ -458,8 +505,43 @@ function readConfigFromUi() {
   };
 }
 
+function renderRunSizingPreview() {
+  const mode = normalizeMode(dom.modeInput?.value);
+  const perUpgradePerSide = clampInt(dom.perUpgradeInput?.value, 1, 500, 6);
+  const baselineSims = clampInt(dom.baselineInput?.value, 0, 3000, 60);
+  const autoBalanceEnabled = Boolean(dom.autoBalanceEnabledInput?.checked);
+  const cycles = autoBalanceEnabled
+    ? clampInt(dom.autoBalanceCyclesInput?.value, 1, AUTO_BALANCE_CYCLE_MAX, DEFAULT_AUTO_BALANCE_CYCLES)
+    : 1;
+  const upgradeTypeCount = UPGRADE_ORDER.length;
+  const upgradeSweepPerCycle = upgradeTypeCount * 2 * perUpgradePerSide;
+  const totalPerCycle = baselineSims + upgradeSweepPerCycle;
+  const totalMatches = totalPerCycle * cycles;
+  if (dom.previewFormula) {
+    dom.previewFormula.textContent = `Total = (${formatWhole(baselineSims)} baseline + (${formatWhole(upgradeTypeCount)} upgrades x 2 sides x ${formatWhole(perUpgradePerSide)})) x ${formatWhole(cycles)} = ${formatWhole(totalMatches)}`;
+  }
+  if (dom.previewUpgradeTypes) dom.previewUpgradeTypes.textContent = formatWhole(upgradeTypeCount);
+  if (dom.previewBaselineCycle) dom.previewBaselineCycle.textContent = formatWhole(baselineSims);
+  if (dom.previewUpgradeCycle) dom.previewUpgradeCycle.textContent = formatWhole(upgradeSweepPerCycle);
+  if (dom.previewCycleTotal) dom.previewCycleTotal.textContent = formatWhole(totalPerCycle);
+  if (dom.previewCycles) dom.previewCycles.textContent = formatWhole(cycles);
+  if (dom.previewRunTotal) dom.previewRunTotal.textContent = formatWhole(totalMatches);
+  const hasSaved = state.priceByMode.has(mode);
+  const modeLabel = mode === '2v2' ? '2v2' : '1v1';
+  if (dom.priceSeedHint) {
+    if (state.runSeedMode === 'fresh') {
+      dom.priceSeedHint.textContent = `Fresh run selected: starts ${modeLabel} from default prices.`;
+    } else if (hasSaved) {
+      dom.priceSeedHint.textContent = `Continue selected: starts ${modeLabel} from last saved balanced prices.`;
+    } else {
+      dom.priceSeedHint.textContent = `Continue selected: no saved ${modeLabel} prices yet, so this run starts from defaults.`;
+    }
+  }
+}
+
 function setControlsRunning(running) {
-  if (dom.runBtn) dom.runBtn.disabled = running;
+  if (dom.runContinueBtn) dom.runContinueBtn.disabled = running;
+  if (dom.runFreshBtn) dom.runFreshBtn.disabled = running;
   if (dom.stopBtn) dom.stopBtn.disabled = !running;
   const disabled = running;
   if (dom.modeInput) dom.modeInput.disabled = disabled;
@@ -483,6 +565,11 @@ function syncOptionalControlState() {
   const autoOn = Boolean(dom.autoBalanceEnabledInput?.checked);
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.disabled = !autoOn;
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.disabled = !autoOn;
+}
+
+function setRunSeedMode(mode = 'continue') {
+  state.runSeedMode = mode === 'fresh' ? 'fresh' : 'continue';
+  renderRunSizingPreview();
 }
 
 function workerJobLabel(job = null) {
@@ -720,7 +807,7 @@ function renderSummary() {
   const avgDuration = matches > 0 ? (summary.durationSum / matches) : 0;
   const mode = normalizeMode(dom.modeInput?.value);
   const modeDefaults = deriveModePriceDefaults(mode);
-  const activePriceMap = clonePriceMap(state.currentUpgradePriceByType || modeDefaults.upgradePriceByType);
+  const activePriceMap = resolvedPriceMapForMode(mode, modeDefaults.upgradePriceByType);
   const range = priceRangeFromMap(activePriceMap);
   if (dom.summaryMatches) dom.summaryMatches.textContent = String(matches);
   if (dom.summaryLeftRate) dom.summaryLeftRate.textContent = formatPercent(leftRate);
@@ -748,12 +835,22 @@ function renderAutoBalanceText() {
     : 'Auto-balance is off.';
 }
 
+function renderCyclePriceChangeText() {
+  if (!dom.cyclePriceChangeText) return;
+  const delta = state.lastCyclePriceDelta || null;
+  if (!delta) {
+    dom.cyclePriceChangeText.textContent = 'Cycle price change summary will appear here during auto-balance.';
+    return;
+  }
+  dom.cyclePriceChangeText.textContent = `Last cycle price changes: ${delta.changed} upgrades changed, total delta ${delta.totalDelta >= 0 ? '+' : ''}${delta.totalDelta}, max single change ${delta.maxAbsDelta}.`;
+}
+
 function renderUpgradeRankTable() {
   if (!dom.upgradeRankBody) return;
   const summary = state.summary;
   const mode = normalizeMode(dom.modeInput?.value);
   const modeDefaults = deriveModePriceDefaults(mode);
-  const priceMap = clonePriceMap(state.currentUpgradePriceByType || modeDefaults.upgradePriceByType);
+  const priceMap = resolvedPriceMapForMode(mode, modeDefaults.upgradePriceByType);
   const suggestedMap = suggestPriceMapFromUpgradeStats(summary, priceMap, state.config || null);
   if (!summary) {
     dom.upgradeRankBody.innerHTML = '<tr><td colspan="9">Run a simulation to populate upgrade rankings.</td></tr>';
@@ -809,7 +906,7 @@ function renderMetaRankTable() {
   const summary = state.summary;
   const mode = normalizeMode(dom.modeInput?.value);
   const modeDefaults = deriveModePriceDefaults(mode);
-  const priceMap = clonePriceMap(state.currentUpgradePriceByType || modeDefaults.upgradePriceByType);
+  const priceMap = resolvedPriceMapForMode(mode, modeDefaults.upgradePriceByType);
   const suggestedMap = suggestPriceMapFromMetaStats(summary, priceMap, state.config || null);
   if (!summary) {
     dom.metaRankBody.innerHTML = '<tr><td colspan="6">Run baseline sims to populate observed meta correlations.</td></tr>';
@@ -947,9 +1044,11 @@ async function copyAllTablesForSheets() {
 }
 
 function renderAll() {
+  renderRunSizingPreview();
   setProgress();
   renderSummary();
   renderAutoBalanceText();
+  renderCyclePriceChangeText();
   renderUpgradeRankTable();
   renderMetaRankTable();
   refreshAllCoreCards();
@@ -964,6 +1063,9 @@ function teardownWorkers() {
 
 function finalizeRun(statusMessage = '') {
   if (!state.running) return;
+  if (state.config?.mode && state.currentUpgradePriceByType) {
+    state.priceByMode.set(state.config.mode, clonePriceMap(state.currentUpgradePriceByType));
+  }
   state.running = false;
   state.finishedAtMs = performance.now();
   stopStatusTicker();
@@ -1017,11 +1119,25 @@ function maybeFinishCycle() {
     const before = clonePriceMap(state.currentUpgradePriceByType || state.config.upgradePriceByType);
     const after = suggestPriceMapFromUpgradeStats(state.summary, before, state.config);
     state.currentUpgradePriceByType = clampPriceMapToBounds(after, state.config);
+    state.priceByMode.set(state.config.mode, clonePriceMap(state.currentUpgradePriceByType));
     state.suggestedPriceByType = clonePriceMap(state.currentUpgradePriceByType);
     let changed = 0;
+    let totalDelta = 0;
+    let maxAbsDelta = 0;
     for (const type of UPGRADE_ORDER) {
-      if (Number(before[type]) !== Number(state.currentUpgradePriceByType[type])) changed += 1;
+      const prev = Math.max(1, Math.round(Number(before[type]) || 0));
+      const next = Math.max(1, Math.round(Number(state.currentUpgradePriceByType[type]) || 0));
+      const delta = next - prev;
+      if (delta !== 0) changed += 1;
+      totalDelta += delta;
+      const absDelta = Math.abs(delta);
+      if (absDelta > maxAbsDelta) maxAbsDelta = absDelta;
     }
+    state.lastCyclePriceDelta = {
+      changed,
+      totalDelta,
+      maxAbsDelta,
+    };
     const cycleNote = `Cycle ${state.cycleIndex} complete in ${formatEta(cycleElapsedSec)}. Adjusted ${changed} prices.`;
     state.cycleLogs.push(cycleNote);
     const nextCycle = state.cycleIndex + 1;
@@ -1163,15 +1279,20 @@ function spawnWorker(workerId) {
   return worker;
 }
 
-function startRun() {
+function startRun(seedMode = 'continue') {
   if (state.running) return;
+  state.runSeedMode = seedMode === 'fresh' ? 'fresh' : 'continue';
   state.config = readConfigFromUi();
   state.baseUpgradePriceByType = clonePriceMap(state.config.upgradePriceByType);
-  state.currentUpgradePriceByType = clampPriceMapToBounds(
-    clonePriceMap(state.baseUpgradePriceByType),
-    state.config
-  );
+  const savedForMode = state.priceByMode.get(state.config.mode);
+  const shouldUseSaved = state.runSeedMode === 'continue' && Boolean(savedForMode);
+  const startSeed = shouldUseSaved
+    ? clonePriceMap(savedForMode)
+    : clonePriceMap(state.baseUpgradePriceByType);
+  state.currentUpgradePriceByType = clampPriceMapToBounds(startSeed, state.config);
+  state.priceByMode.set(state.config.mode, clonePriceMap(state.currentUpgradePriceByType));
   state.suggestedPriceByType = clonePriceMap(state.currentUpgradePriceByType);
+  state.lastCyclePriceDelta = null;
   state.cycleLogs = [];
   state.cycleTotal = Math.max(1, Number(state.config.autoBalanceCycles) || 1);
   state.jobsPerCycle = state.config.baselineSims + (UPGRADE_ORDER.length * 2 * state.config.perUpgradePerSide);
@@ -1181,9 +1302,10 @@ function startRun() {
   state.startedAtMs = performance.now();
   state.finishedAtMs = 0;
   state.running = true;
+  const resumeTag = shouldUseSaved ? ' (continuing from saved prices)' : ' (fresh default prices)';
   state.statusMessage = state.config.autoBalanceEnabled
-    ? `Starting cycle 1/${state.cycleTotal}...`
-    : 'Starting simulation workers...';
+    ? `Starting cycle 1/${state.cycleTotal}${resumeTag}...`
+    : `Starting simulation workers${resumeTag}...`;
 
   setControlsRunning(true);
   startStatusTicker();
@@ -1194,6 +1316,17 @@ function init() {
   if (dom.workersInput) dom.workersInput.value = String(defaultWorkerCount());
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.value = String(DEFAULT_AUTO_BALANCE_CYCLES);
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.value = String(DEFAULT_AUTO_BALANCE_STEP_PCT);
+  const previewInputs = [
+    dom.perUpgradeInput,
+    dom.baselineInput,
+    dom.autoBalanceEnabledInput,
+    dom.autoBalanceCyclesInput,
+  ];
+  for (const input of previewInputs) {
+    if (!input) continue;
+    input.addEventListener('input', renderRunSizingPreview);
+    input.addEventListener('change', renderRunSizingPreview);
+  }
   applyModePriceDefaults(normalizeMode(dom.modeInput?.value));
   if (dom.modeInput) dom.modeInput.addEventListener('change', () => {
     applyModePriceDefaults(normalizeMode(dom.modeInput?.value));
@@ -1212,7 +1345,14 @@ function init() {
   });
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.addEventListener('change', renderAll);
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.addEventListener('change', renderAll);
-  if (dom.runBtn) dom.runBtn.addEventListener('click', startRun);
+  if (dom.runContinueBtn) dom.runContinueBtn.addEventListener('click', () => {
+    setRunSeedMode('continue');
+    startRun('continue');
+  });
+  if (dom.runFreshBtn) dom.runFreshBtn.addEventListener('click', () => {
+    setRunSeedMode('fresh');
+    startRun('fresh');
+  });
   if (dom.stopBtn) dom.stopBtn.addEventListener('click', () => stopRun('Run stopped.'));
   if (dom.copyUpgradeTableBtn) dom.copyUpgradeTableBtn.addEventListener('click', () => {
     copyTableForSheets(dom.upgradeRankTable, dom.copyUpgradeTableMsg);
@@ -1223,6 +1363,7 @@ function init() {
   if (dom.copyAllTablesBtn) dom.copyAllTablesBtn.addEventListener('click', () => {
     copyAllTablesForSheets();
   });
+  setRunSeedMode('continue');
   syncOptionalControlState();
   renderAll();
 }
