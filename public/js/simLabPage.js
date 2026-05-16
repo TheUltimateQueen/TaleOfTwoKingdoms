@@ -7,6 +7,7 @@ const DEFAULT_WORKER_CAP = 8;
 const RUNNING_STATUS_REFRESH_MS = 250;
 const DEFAULT_AUTO_BALANCE_CYCLES = 4;
 const DEFAULT_AUTO_BALANCE_STEP_PCT = 12;
+const DEFAULT_INITIAL_JUMP_PRICE = 75;
 const AUTO_BALANCE_CYCLE_MAX = 30;
 const AUTO_BALANCE_STEP_MIN_PCT = 0.5;
 const AUTO_BALANCE_STEP_MAX_PCT = 100;
@@ -52,6 +53,8 @@ const dom = {
   priceMinInput: document.getElementById('simPriceMinInput'),
   priceMaxInput: document.getElementById('simPriceMaxInput'),
   autoBalanceEnabledInput: document.getElementById('simAutoBalanceEnabledInput'),
+  initialJumpEnabledInput: document.getElementById('simInitialJumpEnabledInput'),
+  initialJumpPriceInput: document.getElementById('simInitialJumpPriceInput'),
   autoBalanceCyclesInput: document.getElementById('simAutoBalanceCyclesInput'),
   autoBalanceStepPctInput: document.getElementById('simAutoBalanceStepPctInput'),
   runContinueBtn: document.getElementById('simRunContinueBtn'),
@@ -284,6 +287,15 @@ function clonePriceMap(source = {}) {
   return copy;
 }
 
+function createUniformPriceMap(price) {
+  const value = clampInt(price, 1, 9999, DEFAULT_INITIAL_JUMP_PRICE);
+  const map = {};
+  for (const type of UPGRADE_ORDER) {
+    map[type] = value;
+  }
+  return map;
+}
+
 function priceRangeFromMap(priceMap = {}) {
   let min = Infinity;
   let max = -Infinity;
@@ -468,6 +480,9 @@ function readConfigFromUi() {
     AUTO_BALANCE_STEP_MAX_PCT,
     DEFAULT_AUTO_BALANCE_STEP_PCT
   );
+  const initialJumpEnabled = Boolean(dom.initialJumpEnabledInput?.checked);
+  const initialJumpPrice = clampInt(dom.initialJumpPriceInput?.value, 1, 9999, DEFAULT_INITIAL_JUMP_PRICE);
+  if (dom.initialJumpPriceInput) dom.initialJumpPriceInput.value = String(initialJumpPrice);
   const priceBoundsEnabled = Boolean(dom.priceBoundsEnabledInput?.checked);
   const fallbackMin = Math.max(1, modeDefaults.minPrice);
   const fallbackMax = Math.max(fallbackMin, modeDefaults.maxPrice);
@@ -496,6 +511,8 @@ function readConfigFromUi() {
     autoBalanceCycles,
     autoBalanceStepPct,
     autoBalanceStep: autoBalanceStepPct / 100,
+    initialJumpEnabled,
+    initialJumpPrice,
     priceBoundsEnabled,
     priceMin,
     priceMax,
@@ -528,8 +545,12 @@ function renderRunSizingPreview() {
   if (dom.previewRunTotal) dom.previewRunTotal.textContent = formatWhole(totalMatches);
   const hasSaved = state.priceByMode.has(mode);
   const modeLabel = mode === '2v2' ? '2v2' : '1v1';
+  const initialJumpEnabled = Boolean(dom.initialJumpEnabledInput?.checked);
+  const initialJumpPrice = clampInt(dom.initialJumpPriceInput?.value, 1, 9999, DEFAULT_INITIAL_JUMP_PRICE);
   if (dom.priceSeedHint) {
-    if (state.runSeedMode === 'fresh') {
+    if (initialJumpEnabled) {
+      dom.priceSeedHint.textContent = `Initial jump selected: starts every ${modeLabel} upgrade at ${initialJumpPrice}, then balances from there.`;
+    } else if (state.runSeedMode === 'fresh') {
       dom.priceSeedHint.textContent = `Fresh run selected: starts ${modeLabel} from default prices.`;
     } else if (hasSaved) {
       dom.priceSeedHint.textContent = `Continue selected: starts ${modeLabel} from last saved balanced prices.`;
@@ -557,14 +578,18 @@ function setControlsRunning(running) {
   if (dom.priceMaxInput) dom.priceMaxInput.disabled = disabled;
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.disabled = disabled;
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.disabled = disabled;
+  if (dom.initialJumpEnabledInput) dom.initialJumpEnabledInput.disabled = disabled;
+  if (dom.initialJumpPriceInput) dom.initialJumpPriceInput.disabled = disabled;
   syncOptionalControlState();
 }
 
 function syncOptionalControlState() {
   if (state.running) return;
   const autoOn = Boolean(dom.autoBalanceEnabledInput?.checked);
+  const initialJumpOn = Boolean(dom.initialJumpEnabledInput?.checked);
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.disabled = !autoOn;
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.disabled = !autoOn;
+  if (dom.initialJumpPriceInput) dom.initialJumpPriceInput.disabled = !initialJumpOn;
 }
 
 function setRunSeedMode(mode = 'continue') {
@@ -1286,9 +1311,11 @@ function startRun(seedMode = 'continue') {
   state.baseUpgradePriceByType = clonePriceMap(state.config.upgradePriceByType);
   const savedForMode = state.priceByMode.get(state.config.mode);
   const shouldUseSaved = state.runSeedMode === 'continue' && Boolean(savedForMode);
-  const startSeed = shouldUseSaved
-    ? clonePriceMap(savedForMode)
-    : clonePriceMap(state.baseUpgradePriceByType);
+  const startSeed = state.config.initialJumpEnabled
+    ? createUniformPriceMap(state.config.initialJumpPrice)
+    : shouldUseSaved
+      ? clonePriceMap(savedForMode)
+      : clonePriceMap(state.baseUpgradePriceByType);
   state.currentUpgradePriceByType = clampPriceMapToBounds(startSeed, state.config);
   state.priceByMode.set(state.config.mode, clonePriceMap(state.currentUpgradePriceByType));
   state.suggestedPriceByType = clonePriceMap(state.currentUpgradePriceByType);
@@ -1302,7 +1329,11 @@ function startRun(seedMode = 'continue') {
   state.startedAtMs = performance.now();
   state.finishedAtMs = 0;
   state.running = true;
-  const resumeTag = shouldUseSaved ? ' (continuing from saved prices)' : ' (fresh default prices)';
+  const resumeTag = state.config.initialJumpEnabled
+    ? ` (initial jump price ${state.config.initialJumpPrice})`
+    : shouldUseSaved
+      ? ' (continuing from saved prices)'
+      : ' (fresh default prices)';
   state.statusMessage = state.config.autoBalanceEnabled
     ? `Starting cycle 1/${state.cycleTotal}${resumeTag}...`
     : `Starting simulation workers${resumeTag}...`;
@@ -1316,11 +1347,14 @@ function init() {
   if (dom.workersInput) dom.workersInput.value = String(defaultWorkerCount());
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.value = String(DEFAULT_AUTO_BALANCE_CYCLES);
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.value = String(DEFAULT_AUTO_BALANCE_STEP_PCT);
+  if (dom.initialJumpPriceInput) dom.initialJumpPriceInput.value = String(DEFAULT_INITIAL_JUMP_PRICE);
   const previewInputs = [
     dom.perUpgradeInput,
     dom.baselineInput,
     dom.autoBalanceEnabledInput,
     dom.autoBalanceCyclesInput,
+    dom.initialJumpEnabledInput,
+    dom.initialJumpPriceInput,
   ];
   for (const input of previewInputs) {
     if (!input) continue;
@@ -1343,6 +1377,11 @@ function init() {
     syncOptionalControlState();
     renderAll();
   });
+  if (dom.initialJumpEnabledInput) dom.initialJumpEnabledInput.addEventListener('change', () => {
+    syncOptionalControlState();
+    renderAll();
+  });
+  if (dom.initialJumpPriceInput) dom.initialJumpPriceInput.addEventListener('change', renderAll);
   if (dom.autoBalanceCyclesInput) dom.autoBalanceCyclesInput.addEventListener('change', renderAll);
   if (dom.autoBalanceStepPctInput) dom.autoBalanceStepPctInput.addEventListener('change', renderAll);
   if (dom.runContinueBtn) dom.runContinueBtn.addEventListener('click', () => {

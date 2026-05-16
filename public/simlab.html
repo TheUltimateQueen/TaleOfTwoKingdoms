@@ -67,6 +67,14 @@
             <input id="simAutoBalanceEnabledInput" type="checkbox" />
             <span>Auto Balance Across Cycles</span>
           </label>
+          <label class="sim-inline-toggle">
+            <input id="simInitialJumpEnabledInput" type="checkbox" />
+            <span>Initial Big Jump Price</span>
+          </label>
+          <label>Initial Jump Price
+            <input id="simInitialJumpPriceInput" type="number" min="1" max="9999" step="1" value="75" />
+            <span class="sim-help">Optional start price for every upgrade before cycle nudges begin.</span>
+          </label>
           <label>Balance Cycles
             <input id="simAutoBalanceCyclesInput" type="number" min="1" max="30" step="1" value="4" />
             <span class="sim-help">Each cycle runs a full batch, then nudges prices and runs again.</span>

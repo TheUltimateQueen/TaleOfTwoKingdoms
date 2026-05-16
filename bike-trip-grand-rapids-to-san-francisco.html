@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grand Rapids to San Francisco Bike Trip</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6b76;
+      --line: #d7dee6;
+      --camp: #1f7a4d;
+      --hotel: #2d63b8;
+      --rest: #b45a13;
+      --route: #d6422b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #f8f9fb;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(360px, 430px) 1fr;
+      min-height: 100vh;
+    }
+    aside {
+      border-right: 1px solid var(--line);
+      background: #fff;
+      overflow: auto;
+      max-height: 100vh;
+    }
+    header {
+      padding: 22px 22px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcfe;
+    }
+    .stat b {
+      display: block;
+      font-size: 17px;
+    }
+    .stat span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 1px rgba(0,0,0,.25);
+    }
+    .camp { background: var(--camp); }
+    .hotel { background: var(--hotel); }
+    .rest { background: var(--rest); }
+    .stop-list {
+      padding: 10px 14px 20px;
+      display: grid;
+      gap: 8px;
+    }
+    .stop {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .stop strong {
+      display: block;
+      font-size: 14px;
+    }
+    .stop p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    #map { min-height: 100vh; }
+    .leaflet-popup-content {
+      margin: 10px 12px;
+      line-height: 1.35;
+    }
+    .popup-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .popup-note {
+      color: #4f5a64;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { max-height: none; }
+      #map { min-height: 72vh; }
+    }
+  </style>
+</head>
+<body>
+  <main class="layout">
+    <aside>
+      <header>
+        <h1>Grand Rapids to San Francisco by Bike</h1>
+        <p class="sub">A practical westbound touring outline: Michigan to Chicago, prairie towns to Pueblo, then Adventure Cycling's Western Express corridor to the Bay.</p>
+      </header>
+      <section class="stats">
+        <div class="stat"><b>~2,600 mi</b><span>route estimate</span></div>
+        <div class="stat"><b>45-55 days</b><span>with rest days</span></div>
+        <div class="stat"><b>May-Jun or Sep</b><span>best window</span></div>
+      </section>
+      <section class="legend">
+        <span><i class="dot camp"></i> camp option</span>
+        <span><i class="dot hotel"></i> hotel town</span>
+        <span><i class="dot rest"></i> rest/resupply</span>
+      </section>
+      <section class="stop-list" id="stopList"></section>
+    </aside>
+    <div id="map" aria-label="Bike route map from Grand Rapids to San Francisco"></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const stops = [
+      { name: "Grand Rapids, MI", lat: 42.9634, lon: -85.6681, type: "rest", note: "Start. Final shakedown: tires, lights, racks, spare spokes, chain, rain gear." },
+      { name: "South Haven, MI", lat: 42.4031, lon: -86.2736, type: "camp", note: "Good first Lake Michigan stop. Camp: Van Buren State Park area. Shorter first stage if loaded." },
+      { name: "Michigan City / Indiana Dunes, IN", lat: 41.7075, lon: -86.8950, type: "camp", note: "Camp: Indiana Dunes National Park or state park area. Reserve early in summer." },
+      { name: "Chicago, IL", lat: 41.8781, lon: -87.6298, type: "hotel", note: "Hotel/rest day. Use lakefront paths, bike shops, groceries, train bailout options." },
+      { name: "Starved Rock / Ottawa, IL", lat: 41.3456, lon: -88.8426, type: "camp", note: "Camp: Starved Rock State Park or nearby Illini/Matthiessen alternatives if full." },
+      { name: "Davenport, IA", lat: 41.5236, lon: -90.5776, type: "hotel", note: "Mississippi River crossing. Hotel night and full resupply." },
+      { name: "Iowa City, IA", lat: 41.6611, lon: -91.5302, type: "hotel", note: "Good college-town rest stop, bike shops, laundromat, food." },
+      { name: "Des Moines, IA", lat: 41.5868, lon: -93.6250, type: "rest", note: "Rest day candidate. Trails, hotels, bike shops, medical and gear access." },
+      { name: "Lake Anita State Park, IA", lat: 41.4450, lon: -94.7694, type: "camp", note: "Camp option in southwest Iowa before Omaha. Official Iowa DNR state park." },
+      { name: "Omaha, NE", lat: 41.2565, lon: -95.9345, type: "hotel", note: "Hotel/rest day. Big-city resupply before long Nebraska plains." },
+      { name: "Pawnee SRA / Lincoln, NE", lat: 40.8750, lon: -96.8610, type: "camp", note: "Camp: Pawnee State Recreation Area west of Lincoln; also easy Lincoln hotel fallback." },
+      { name: "Kearney, NE", lat: 40.6993, lon: -99.0817, type: "hotel", note: "Reliable central Nebraska hotel/resupply town. Consider a rest day if wind has been rough." },
+      { name: "Ogallala, NE", lat: 41.1281, lon: -101.7196, type: "hotel", note: "Good western Nebraska stop; Lake McConaughy area has camping if you detour north." },
+      { name: "Sterling, CO", lat: 40.6255, lon: -103.2077, type: "hotel", note: "First Colorado stop. Refill, check weather, expect more climbing soon." },
+      { name: "Fort Morgan, CO", lat: 40.2503, lon: -103.7999, type: "hotel", note: "Useful spacing before the Front Range. Motel night makes sense." },
+      { name: "Pueblo, CO", lat: 38.2544, lon: -104.6091, type: "rest", note: "Key route join: connect to Adventure Cycling Western Express toward San Francisco." },
+      { name: "Canon City, CO", lat: 38.4494, lon: -105.2253, type: "camp", note: "Royal Gorge area. City lists East Ridge Campground; hotels also available." },
+      { name: "Salida, CO", lat: 38.5347, lon: -105.9989, type: "hotel", note: "Mountain town, strong rest day candidate before Monarch Pass/Gunnison." },
+      { name: "Gunnison, CO", lat: 38.5458, lon: -106.9253, type: "camp", note: "Camp: Gunnison KOA or local options. Resupply before western Colorado." },
+      { name: "Montrose, CO", lat: 38.4783, lon: -107.8762, type: "hotel", note: "Hotel/resupply. Good place to reset brakes and tires after mountain descents." },
+      { name: "Dolores, CO", lat: 37.4739, lon: -108.5045, type: "camp", note: "Camp near McPhee Reservoir / Dolores River area; small-town services." },
+      { name: "Monticello, UT", lat: 37.8714, lon: -109.3429, type: "hotel", note: "High desert town. Motel night recommended; water management becomes serious." },
+      { name: "Hanksville, UT", lat: 38.3730, lon: -110.7140, type: "hotel", note: "Tiny but crucial resupply. Do not leave without full water capacity." },
+      { name: "Torrey, UT", lat: 38.2989, lon: -111.4190, type: "camp", note: "Capitol Reef gateway. Camp/hotel options; beautiful rest day candidate." },
+      { name: "Milford, UT", lat: 38.3969, lon: -113.0108, type: "hotel", note: "Practical motel/resupply stop before the Utah/Nevada emptiness." },
+      { name: "Baker / Great Basin NP, NV", lat: 39.0128, lon: -114.1244, type: "camp", note: "Camp: Great Basin National Park campgrounds. Dark skies, cold nights possible." },
+      { name: "Ely, NV", lat: 39.2474, lon: -114.8886, type: "hotel", note: "Major Nevada reset. Hotel, food, laundromat, bike maintenance improvisation." },
+      { name: "Eureka, NV", lat: 39.5127, lon: -115.9606, type: "hotel", note: "Small but important stop on US 50. Confirm lodging before arrival." },
+      { name: "Austin, NV", lat: 39.4922, lon: -117.0673, type: "hotel", note: "Tiny mountain town. Lodging is limited; call ahead." },
+      { name: "Fallon / Lahontan, NV", lat: 39.4749, lon: -118.7774, type: "camp", note: "Camp: Lahontan State Recreation Area; hotels in Fallon if wind/heat is bad." },
+      { name: "Carson City, NV", lat: 39.1638, lon: -119.7674, type: "hotel", note: "Big resupply before Sierra crossing. Check pass weather carefully." },
+      { name: "South Lake Tahoe, CA", lat: 38.9399, lon: -119.9772, type: "rest", note: "Hard but iconic Sierra segment. Rest day and scenery payoff." },
+      { name: "Davis, CA", lat: 38.5449, lon: -121.7405, type: "hotel", note: "Excellent bike town. Easy, flat approach to the Bay Area from here." },
+      { name: "Vallejo, CA", lat: 38.1041, lon: -122.2566, type: "hotel", note: "Finish option: take the Vallejo ferry into San Francisco, as ACA suggests from the Bay side." },
+      { name: "San Francisco, CA", lat: 37.7749, lon: -122.4194, type: "rest", note: "Finish. Ferry Building / Golden Gate celebration, then eat aggressively." }
+    ];
+
+    const colorByType = {
+      camp: "#1f7a4d",
+      hotel: "#2d63b8",
+      rest: "#b45a13"
+    };
+
+    const map = L.map("map", { scrollWheelZoom: true }).setView([39.9, -101.8], 5);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    const latLngs = stops.map(stop => [stop.lat, stop.lon]);
+    L.polyline(latLngs, {
+      color: "#d6422b",
+      weight: 4,
+      opacity: 0.85,
+      dashArray: "8 8"
+    }).addTo(map);
+
+    const stopList = document.getElementById("stopList");
+    stops.forEach((stop, index) => {
+      const marker = L.circleMarker([stop.lat, stop.lon], {
+        radius: index === 0 || index === stops.length - 1 ? 8 : 6,
+        color: "#fff",
+        weight: 2,
+        fillColor: colorByType[stop.type],
+        fillOpacity: 0.95
+      }).addTo(map);
+      marker.bindPopup(`<div class="popup-title">${index + 1}. ${stop.name}</div><div class="popup-note">${stop.note}</div>`);
+
+      const item = document.createElement("article");
+      item.className = "stop";
+      item.innerHTML = `<strong>${index + 1}. ${stop.name}</strong><p>${stop.note}</p>`;
+      item.addEventListener("click", () => {
+        map.setView([stop.lat, stop.lon], 8);
+        marker.openPopup();
+      });
+      stopList.appendChild(item);
+    });
+
+    map.fitBounds(latLngs, { padding: [32, 32] });
+  </script>
+</body>
+</html>
